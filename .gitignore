@@ -1,3 +1,14 @@
+
+# Visual Studio Directories
+.vs
+Debug
+Release
+
+# Project files
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
 # Prerequisites
 *.d
 
