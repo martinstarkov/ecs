@@ -4,8 +4,7 @@
 Debug
 Release
 
-# Project files
-*.vcxproj
+# User-Specific Project files
 *.vcxproj.filters
 *.vcxproj.user
 
