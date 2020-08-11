@@ -5,7 +5,7 @@
 #include <memory>
 #include <cassert>
 #include <any>
-
+#include <type_traits>
 
 #include <string>
 
@@ -46,7 +46,7 @@ namespace ecs {
 	using ComponentMask = std::vector<bool>;
 	constexpr size_t STARTING_ENTITY_COUNT = 100;
 
-	// Component Wrapper
+	// Make sure to wrap std::any_cast in std::any::has_value()
 	template <typename T>
 	class ComponentContainer {
 	public:
@@ -130,8 +130,7 @@ namespace ecs {
 		}
 		template <typename T, typename... TArgs>
 		T& AddComponent(EntityId id, ComponentContainer<T> component) {
-			auto& element = components_[ComponentContainer<T>::GetId()][id];
-			element = component;
+			components_[ComponentContainer<T>::GetId()][id] = component;
 			return GetComponent<T>(id);
 		}
 		template<typename T>
@@ -148,6 +147,26 @@ namespace ecs {
 		}
 		size_t GetComponentCount() {
 			return components_.size();
+		}
+		// TEMPORARY
+		template <typename T>
+		void printComponent(std::vector<std::any>& component) {
+			LOG_(typeid(T).name() << " (capacity=" << component.size() << "): ");
+			EntityId counter = 0;
+			for (auto& c : component) {
+				LOG_(counter << ":");
+				if (c.has_value()) {
+					if (std::any_cast<ComponentContainer<T>&>(c).IsValidComponent()) {
+						LOG_(std::any_cast<ComponentContainer<T>&>(c).GetComponent() << ", ");
+					}
+				}
+				++counter;
+			}
+			LOG("");
+		}
+		template <typename ...Ts>
+		void printComponents() {
+			(printComponent<Ts>(components_[ComponentContainer<Ts>::GetId()]), ...);
 		}
 	private:
 		std::vector<std::vector<std::any>> components_;
@@ -265,6 +284,9 @@ namespace ecs {
 		void RemoveComponent(EntityId id) {
 			assert(ComponentExists<T>());
 			component_storage_.RemoveComponent<T>(id);
+		}
+		ComponentStorage& GetComponentStorage() {
+			return component_storage_;
 		}
 	private:
 		std::size_t max_entity_count_ = 0;
