@@ -40,9 +40,8 @@ static void resize(std::vector<T>& vector, const size_t amount, const S& value, 
 
 namespace ecs {
 
-	using EntityId = int64_t;
-	using ComponentId = int64_t;
-	using SystemId = int16_t;
+	using EntityId = int32_t;
+	using ComponentId = int32_t;
 	using ComponentMask = std::vector<bool>;
 	constexpr size_t STARTING_ENTITY_COUNT = 100;
 
@@ -83,33 +82,6 @@ namespace ecs {
 	private:
 		bool valid = true;
 		T component_;
-	};
-
-	// System Wrapper
-	template <typename T>
-	class SystemContainer {
-	public:
-		SystemContainer(T&& system) : system_(system) {}
-		SystemContainer(SystemContainer&& other) = default;
-		SystemContainer& operator=(SystemContainer&& other) = default;
-		SystemContainer(const SystemContainer&) = delete;
-		SystemContainer& operator=(const SystemContainer&) = delete;
-		static void SetId(SystemId id) {
-			GetId(id);
-		}
-		// Start with invalid id
-		static SystemId GetId(SystemId id = -1) {
-			static SystemId id_ = id;
-			if (id != -1) {
-				id_ = id;
-			}
-			return id_;
-		}
-		T& GetSystem() {
-			return system_;
-		}
-	private:
-		T system_;
 	};
 
 	class ComponentStorage {
@@ -172,20 +144,6 @@ namespace ecs {
 		std::vector<std::vector<std::any>> components_;
 	};
 
-	class SystemStorage {
-	public:
-		/*template <typename T, typename ...TArgs>
-		void AddSystem(TArgs&&... args) {
-			systems_[SystemContainer<T>::GetId()] = SystemContainer<T>(T{ args... });
-		}
-		template<typename T>
-		T& GetSystem() {
-			return static_cast<T&>(systems_[SystemContainer<T>::GetId()]);
-		}*/
-	private:
-		std::vector<std::any> systems_;
-	};
-
 	struct EntityData {
 		bool alive;
 		friend std::ostream& operator<<(std::ostream& os, const EntityData& obj) {
@@ -204,11 +162,6 @@ namespace ecs {
 		Manager& operator=(Manager&& other) = default;
 		Manager(const Manager&) = delete;
 		Manager& operator=(const Manager&) = delete;
-		//template <typename T, typename ...TArgs>
-		//void AddSystem(TArgs&&... args) {
-		//	// system.SetManager(this);
-		//	system_storage_.AddSystem<T>(std::forward<TArgs>(args)...);
-		//}
 		void GrowByEntity(size_t new_entity_count) {
 			assert(new_entity_count > entities_.size());
 			resize(entities_, new_entity_count, "entity size after entity grow");
@@ -294,7 +247,6 @@ namespace ecs {
 		std::size_t component_count_ = 0;
 		std::size_t system_count_ = 0;
 		std::vector<EntityData> entities_;
-		SystemStorage system_storage_;
 		ComponentStorage component_storage_;
 	};
 
