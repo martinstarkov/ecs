@@ -139,21 +139,21 @@ template <typename T, typename Tuple>
 using tuple_contains_type = typename has_type<T, Tuple>::type;
 
 template <typename T, typename ...Ts>
-std::vector<T>& get(std::tuple<Ts...>& tuple) {
+std::vector<T>& AccessTuple(std::tuple<Ts...>& tuple) {
 	// no testing as std::get prevents compilation unless type T exists in tuple
 	return std::get<std::vector<T>&>(tuple);
 }
 
 // Thanks to Andy G https://gieseanw.wordpress.com/2017/05/03/a-true-heterogeneous-container-in-c/ for heterogeneous container concept
+
 struct ComponentStorage {
 public:
 	ComponentStorage() = default;
 	ComponentStorage(const ComponentStorage& _other) {
 		*this = _other;
 	}
-
 	ComponentStorage& operator=(const ComponentStorage& _other) {
-		clear();
+		Clear();
 		clear_functions = _other.clear_functions;
 		copy_functions = _other.copy_functions;
 		size_functions = _other.size_functions;
@@ -162,65 +162,70 @@ public:
 		}
 		return *this;
 	}
-
-	template<class T>
-	void push_back(const T& _t) {
-		// don't have it yet, so create functions for printing, copying, moving, and destroying
+	template <class T>
+	void AddUtilityFunctions() {
+		assert(components<T>.find(this) == std::end(components<T>), "Cannot add utility functions to already existing component ", typeid(T).name());
+		clear_functions.emplace_back([](ComponentStorage& c) { components<T>.erase(&c); });
+		// if someone copies me, they need to call each copy_function and pass themself
+		copy_functions.emplace_back([](const ComponentStorage& from, ComponentStorage& to) { components<T>[&to] = components<T>[&from]; });
+		size_functions.emplace_back([](const ComponentStorage& c) { return components<T>[&c].size(); });
+	}
+	template <class T>
+	void Reserve(std::vector<T>& vector, size_t additional_amount) {
+		vector.reserve(vector.capacity() + additional_amount);
+	}
+	template <class T>
+	void Reserve(size_t additional_amount) {
+		Reserve(components<T>[this], additional_amount);
+	}
+	// Make sure there exists a matching constructor to the passed arguments
+	template <class T, class ...TArgs>
+	void EmplaceBack(TArgs&&... args) {
 		if (components<T>.find(this) == std::end(components<T>)) {
-			clear_functions.emplace_back([](ComponentStorage& _c) {components<T>.erase(&_c); });
-
-			// if someone copies me, they need to call each copy_function and pass themself
-			copy_functions.emplace_back([](const ComponentStorage& _from, ComponentStorage& _to) {
-				components<T>[&_to] = components<T>[&_from];
-			});
-			size_functions.emplace_back([](const ComponentStorage& _c) {return components<T>[&_c].size(); });
+			AddUtilityFunctions<T>();
 		}
 		auto& v = components<T>[this];
-		v.push_back(_t);
+		// double size every time capacity is reached
+		if (v.size() >= v.capacity()) {
+			Reserve<T>(v, v.capacity());
+		}
+		v.emplace_back(static_cast<TArgs>(std::forward<TArgs>(args))...);
 	}
-
-	void clear() {
+	void Clear() {
 		for (auto&& clear_func : clear_functions) {
 			clear_func(*this);
 		}
 	}
-
-	template<class T>
-	size_t number_of() const {
+	template <class T>
+	size_t Count() const {
 		auto iter = components<T>.find(this);
 		if (iter != components<T>.cend())
 			return components<T>[this].size();
 		return 0;
 	}
-
-	template<class T>
-	std::vector<T>& getVector() const {
+	template <class T>
+	std::vector<T>& GetComponentVector() const {
 		assert(components<T>.find(this) != components<T>.cend(), "Could not find std::vector<", typeid(T).name(), "> in components");
 		return components<T>[this];
 	}
-
-	template<class T>
-	T& getVectorElement(size_t index) const {
-		std::vector<T>& v = getVector<T>();
+	template <class T>
+	T& GetComponent(size_t index) const {
+		std::vector<T>& v = GetComponentVector<T>();
 		assert(index < v.size(), "std::vector<", typeid(T).name(), ">[", std::to_string(index), "] is out of range");
 		return v[index];
 	}
-
-	template<class ...Ts>
-	std::tuple<std::vector<Ts>&...> getComponentVectors() const {
-		return std::forward_as_tuple(getVector<Ts>()...);
+	template <class ...Ts>
+	std::tuple<std::vector<Ts>&...> GetComponentVectors() const {
+		return std::forward_as_tuple(GetComponentVector<Ts>()...);
 	}
-
-	template<class ...Ts>
-	std::tuple<Ts&...> getComponents(size_t index) const {
-		return std::forward_as_tuple(getVectorElement<Ts>(index)...);
+	template <class ...Ts>
+	std::tuple<Ts&...> GetComponents(size_t index) const {
+		return std::forward_as_tuple(GetComponent<Ts>(index)...);
 	}
-
-	size_t Size() const {
+	size_t UniqueSize() const {
 		// TODO: Change to a counter?
 		return copy_functions.size();
 	}
-
 	size_t TotalSize() const {
 		size_t sum = 0;
 		for (auto&& size_func : size_functions) {
@@ -229,20 +234,16 @@ public:
 		// gotta be careful about this overflowing
 		return sum;
 	}
-
 	~ComponentStorage() {
-		clear();
+		Clear();
 	}
-
 private:
 	template<class T>
 	static std::unordered_map<const ComponentStorage*, std::vector<T>> components;
-
 	std::vector<std::function<void(ComponentStorage&)>> clear_functions;
 	std::vector<std::function<void(const ComponentStorage&, ComponentStorage&)>> copy_functions;
 	std::vector<std::function<size_t(const ComponentStorage&)>> size_functions;
 };
-
 template<class T>
 std::unordered_map<const ComponentStorage*, std::vector<T>> ComponentStorage::components;
 /*
