@@ -38,7 +38,7 @@ struct Velocity {
 
 int main() {
 	ecs::Manager manager;
-	ecs::EntityId entities = 1000000;
+	ecs::EntityId entities = 3000;
 	std::cin.get();
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	manager.ReserveComponent<Position>(entities);
@@ -55,9 +55,9 @@ int main() {
 	auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
 	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
 		auto& pos = manager.GetComponent<Position>(p, i);
-		auto& vel = manager.GetComponent<Velocity>(v, i);
 		pos.x += 20;
 		pos.y += 20;
+		auto& vel = manager.GetComponent<Velocity>(v, i);
 		vel.x += 20;
 		vel.y += 20;
 	}
