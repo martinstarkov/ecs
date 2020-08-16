@@ -28,9 +28,9 @@
 
 #ifdef DEBUG
 	#define EXPANDED( condition ) condition
-	#define EXPAND(condition, ...) { internal::AssertCheck(condition, #condition, __FILE__, __LINE__, { __VA_ARGS__ }); }
+	#define EXPAND_ASSERTION(condition, ...) { internal::AssertCheck(condition, #condition, __FILE__, __LINE__, { __VA_ARGS__ }); }
 // Note: add parentheses when condition contains non argument commas, e.g. when using metaprogramming structs
-	#define assert(...) EXPANDED( EXPAND(__VA_ARGS__) )
+	#define assert(...) EXPAND_ASSERTION(__VA_ARGS__)
 	#define LOG(x) { std::cout << x << std::endl; }
 	#define LOG_(x) { std::cout << x; }
 #else
@@ -94,7 +94,7 @@ void ConsoleAssertion(std::ostream& os, std::string title, std::pair<std::string
 	os << bottom_divider << std::endl;
 }
 
-inline void AssertCheck(bool assertion, const char* condition, const char* file, int line, std::initializer_list<std::variant<const char*, std::string>> msg) {
+void AssertCheck(bool assertion, const char* condition, const char* file, int line, std::initializer_list<std::variant<const char*, std::string>>& msg) {
 	if (!assertion) {
 		ConsoleAssertion(std::cerr, " Assertion Failed ", { "Condition: ", condition }, { "File: ", file }, { "Line: ", std::to_string(line) }, { "Message: ", concatenate(msg) });
 		abort();
@@ -122,32 +122,39 @@ std::vector<T>& AccessTuple(std::tuple<Ts...>& tuple) {
 
 struct ComponentStorage {
 public:
-	ComponentStorage() {
-		component_counts_[this] = 0;
+	ComponentStorage(size_t index) : I(index) {
+		component_counts_.emplace_back(0);
 	}
 	ComponentStorage(const ComponentStorage& _other) {
 		*this = _other;
 	}
 	ComponentStorage& operator=(const ComponentStorage& _other) {
-		Clear();
+		/*Clear();
 		clear_functions = _other.clear_functions;
 		copy_functions = _other.copy_functions;
 		size_functions = _other.size_functions;
 		for (auto&& copy_function : copy_functions) {
 			copy_function(_other, *this);
-		}
+		}*/
 		return *this;
 	}
 	template <class T>
 	void AddUtilityFunctions() {
-		assert(components_<T>.find(this) == std::end(components_<T>), "Cannot add utility functions to already existing component ", typeid(T).name());
-		clear_functions.emplace_back([](ComponentStorage& c) { components_<T>.erase(&c); });
+		// change this assertion to fit vector instead of map
+		//assert(components_<T>.find(this) == std::end(components_<T>), "Cannot add utility functions to already existing component ", typeid(T).name());
+		/*clear_functions.emplace_back([](ComponentStorage& c) {
+			// change this assertion to fit vector instead of map
+			//components_<T>.erase(&c); 
+		});
 		// if someone copies me, they need to call each copy_function and pass themself
-		copy_functions.emplace_back([](const ComponentStorage& from, ComponentStorage& to) { components_<T>[&to] = components_<T>[&from]; });
-		size_functions.emplace_back([](const ComponentStorage& c) { return components_<T>[&c].size(); });
-		ComponentId& count = component_counts_[this];
-		ids_<T>[this] = count;
-		++count;
+		copy_functions.emplace_back([](const ComponentStorage& from, ComponentStorage& to) {
+			// change this assertion to fit vector instead of map 
+			//components_<T>[&to] = components_<T>[&from];
+		});
+		size_functions.emplace_back([](const ComponentStorage& c) {
+			// change this assertion to fit vector instead of map
+			//return components_<T>[&c].size();
+		});*/
 	}
 	template <class T>
 	void Reserve(std::vector<T>& vector, ComponentIndex additional_amount) {
@@ -156,15 +163,26 @@ public:
 	}
 	template <class T>
 	void Reserve(ComponentIndex additional_amount) {
-		Reserve(components_<T>[this], additional_amount);
+		if (I == components_<T>.size()) {
+			components_<T>.resize(components_<T>.size() + 1);
+			ComponentId& count = component_counts_[I];
+			ids_<T>.resize(ids_<T>.size() + 1, -1);
+			ids_<T>[I] = count;
+			++count;
+		}
+		Reserve(components_<T>[I], additional_amount);
 	}
 	// Make sure there exists a matching constructor to the passed arguments
 	template <class T, class ...TArgs>
 	std::pair<std::pair<ComponentId, ComponentIndex>, T&> EmplaceBack(TArgs&&... args) {
-		if (components_<T>.find(this) == std::end(components_<T>)) {
-			AddUtilityFunctions<T>();
+		if (I == components_<T>.size()) {
+			components_<T>.resize(components_<T>.size() + 1);
+			ComponentId& count = component_counts_[I];
+			ids_<T>.resize(ids_<T>.size() + 1, -1);
+			ids_<T>[I] = count;
+			++count;
 		}
-		auto& v = components_<T>[this];
+		auto& v = components_<T>[I];
 		// double size every time capacity is reached
 		if (v.size() >= v.capacity()) {
 			Reserve<T>(v, v.capacity());
@@ -174,32 +192,32 @@ public:
 		//assert(component_index < v.size(), "Component index ", std::to_string(component_index), " out of range of std::vector<", typeid(T).name(), ">");
 		return { { GetComponentId<T>(), component_index }, v[component_index] };
 	}
-	void Clear() {
+	/*void Clear() {
 		for (auto&& clear_func : clear_functions) {
 			clear_func(*this);
 		}
-	}
+	}*/
 	template <class T>
 	ComponentIndex Count() const {
-		auto it = components_<T>.find(this);
-		if (it != components_<T>.cend()) {
-			return components_<T>[this].size();
+		if (I <= components_<T>.size()) {
+			return components_<T>[I].size();
 		}
 		return 0;
 	}
 	template <class T>
 	std::vector<T>& GetComponentVector() const {
-		assert(components_<T>.find(this) != components_<T>.cend(), "Could not find std::vector<", typeid(T).name(), "> in components");
-		return components_<T>[this];
+		// change this assertion to fit vector instead of map
+		//assert(components_<T>.find(this) != components_<T>.cend(), "Could not find std::vector<", typeid(T).name(), "> in components");
+		return components_<T>[I];
 	}
 	template <class T>
 	ComponentId GetComponentId() const {
-		return ids_<T>[this];
+		return ids_<T>[I];
 	}
 	template <class T>
 	T& GetComponent(ComponentIndex index) const {
 		std::vector<T>& v = GetComponentVector<T>();
-		assert(index < v.size(), "std::vector<", typeid(T).name(), ">[", std::to_string(index), "] is out of range");
+		//assert(index < v.size(), "std::vector<", typeid(T).name(), ">[", std::to_string(index), "] is out of range");
 		return v[index];
 	}
 	template <class T>
@@ -220,58 +238,50 @@ public:
 		return std::forward_as_tuple(GetComponent<Ts>(index)...);
 	}
 	ComponentIndex UniqueSize() {
-		return component_counts_[this];
+		return component_counts_[I];
 	}
-	ComponentIndex TotalSize() const {
+	/*ComponentIndex TotalSize() const {
 		ComponentIndex sum = 0;
 		for (auto&& size_func : size_functions) {
 			sum += size_func(*this);
 		}
 		// gotta be careful about this overflowing
 		return sum;
-	}
+	}*/
 	~ComponentStorage() {
-		Clear();
+		//Clear();
 	}
 private:
+	size_t I;
 	template <class T>
-	static std::unordered_map<const ComponentStorage*, std::vector<T>> components_;
+	static std::vector<std::vector<T>> components_;
 	template <class T>
-	static std::unordered_map<const ComponentStorage*, ComponentId> ids_;
-	static std::unordered_map<const ComponentStorage*, ComponentId> component_counts_;
-	std::vector<std::function<void(ComponentStorage&)>> clear_functions;
-	std::vector<std::function<void(const ComponentStorage&, ComponentStorage&)>> copy_functions;
-	std::vector<std::function<ComponentIndex(const ComponentStorage&)>> size_functions;
+	static std::vector<ComponentId> ids_;
+	static std::vector<ComponentId> component_counts_;
+	//std::vector<std::function<void(ComponentStorage&)>> clear_functions;
+	//std::vector<std::function<void(const ComponentStorage&, ComponentStorage&)>> copy_functions;
+	//std::vector<std::function<ComponentIndex(const ComponentStorage&)>> size_functions;
 };
+// Static ComponentStorage variables
 template <class T>
-std::unordered_map<const ComponentStorage*, std::vector<T>> ComponentStorage::components_;
+std::vector<std::vector<T>> ComponentStorage::components_;
 template <class T>
-std::unordered_map<const ComponentStorage*, ComponentId> ComponentStorage::ids_;
-std::unordered_map<const ComponentStorage*, ComponentId> ComponentStorage::component_counts_;
+std::vector<ComponentId> ComponentStorage::ids_;
+std::vector<ComponentId> ComponentStorage::component_counts_;
 
 class EntityData {
 public:
 	// -1 indicates component does not exist
 	ComponentIndex GetComponentIndex(ComponentId id) const {
-		auto it = std::find_if(components_.begin(), components_.end(), [id](const std::pair<ComponentId, ComponentIndex>& pair) { return pair.first == id; });
-		if (it != std::end(components_)) {
-			return it->second;
+		for (auto it = components.begin(); it != components.end(); ++it) {
+			if (it->first == id) {
+				return it->second;
+			}
 		}
 		return -1;
 	}
-	void AddComponent(ComponentId id, ComponentIndex index) {
-		components_.emplace_back(id, index);
-	}
-	// particles might require not destroying permanently, hence option to revive
-	void SetAlive(bool state) {
-		alive_ = state;
-	}
-	bool IsAlive() const {
-		return alive_;
-	}
-private:
-	std::vector<std::pair<ComponentId, ComponentIndex>> components_;
-	bool alive_ = false;
+	std::vector<std::pair<ComponentId, ComponentIndex>> components;
+	bool alive = false;
 };
 
 class Manager {
@@ -281,14 +291,19 @@ public:
 		if (entity_count_ >= static_cast<EntityId>(entities_.capacity())) {
 			ResizeEntities(static_cast<EntityId>(entities_.capacity() + 2));
 		}
-		assert(entity_count_ < static_cast<EntityId>(entities_.size()), "Entities vector was not RESIZED to a big enough size (perhaps you reserved by accident?)");
+		//assert(entity_count_ < static_cast<EntityId>(entities_.size()), "Entities vector was not RESIZED to a big enough size (perhaps you reserved by accident?)");
 		EntityId free_index(entity_count_++);
-		assert(!IsAlive(free_index));
+		//assert(!IsAlive(free_index));
 		EntityData new_entity;
-		new_entity.SetAlive(true);
-		assert(free_index < static_cast<EntityId>(entities_.size()), "Index ", std::to_string(free_index), " out of range ", std::to_string(static_cast<EntityId>(entities_.size())));
+		new_entity.alive = true;
+		//assert(free_index < static_cast<EntityId>(entities_.size()), "Index ", std::to_string(free_index), " out of range ", std::to_string(static_cast<EntityId>(entities_.size())));
 		entities_[free_index] = std::move(new_entity);
 		return free_index;
+	}
+	void PrintEntityComponents(EntityId index) {
+		for (auto& pair : entities_[index].components) {
+			LOG(index << ":" << pair.first << "," << pair.second);
+		}
 	}
 	template <class T, typename ...TArgs>
 	T& AddComponent(EntityId index, TArgs&&... args) {
@@ -296,16 +311,16 @@ public:
 		// pair{ component index, reference to component }
 		auto pair = component_storage_.EmplaceBack<T>(std::forward<TArgs>(args)...);
 		//assert(index < static_cast<EntityId>(entities_.size()), "Index ", std::to_string(index), " out of range ", std::to_string(static_cast<EntityId>(entities_.size())));
-		entities_[index].AddComponent(pair.first.first, pair.first.second);
+		entities_[index].components.emplace_back(pair.first.first, pair.first.second);
 		return pair.second;
 	}
 	template <class T>
 	T& GetComponent(EntityId index) const {
-		assert(HasEntity(index), "Could not find entity with id: ", std::to_string(index));
+		//assert(HasEntity(index), "Could not find entity with id: ", std::to_string(index));
 		ComponentId id = component_storage_.GetComponentId<T>();
-		assert(index < static_cast<EntityId>(entities_.size()), "Index ", std::to_string(index), " out of range ", std::to_string(static_cast<EntityId>(entities_.size())));
+		//assert(index < static_cast<EntityId>(entities_.size()), "Index ", std::to_string(index), " out of range ", std::to_string(static_cast<EntityId>(entities_.size())));
 		ComponentIndex component_index = entities_[index].GetComponentIndex(id);
-		assert(component_index != -1, "Entity ", std::to_string(index), " does not have ", typeid(T).name());
+		//assert(component_index != -1, "Entity ", std::to_string(index), " does not have ", typeid(T).name());
 		return component_storage_.GetComponent<T>(component_index);
 	}
 	template <class T>
@@ -316,6 +331,13 @@ public:
 		ComponentIndex component_index = entities_[index].GetComponentIndex(id);
 		//assert(component_index != -1, "Entity ", std::to_string(index), " does not have ", typeid(T).name());
 		return vector[component_index];
+	}
+	template <class T>
+	bool HasComponent(EntityId index) {
+		//assert(HasEntity(index));
+		ComponentId id = component_storage_.GetComponentId<T>();
+		ComponentIndex component_index = entities_[index].GetComponentIndex(id);
+		return component_index != -1;
 	}
 	template <class ...Ts>
 	std::tuple<std::vector<Ts>&...> GetComponentVectors() const {
@@ -332,9 +354,9 @@ public:
 		return index < entity_count_;
 	}
 	inline bool IsAlive(EntityId index) const {
-		assert(HasEntity(index), "Entity ", std::to_string(index), " is out of range ", std::to_string(entity_count_));
-		assert(index < static_cast<EntityId>(entities_.size()), "Index ", std::to_string(index), " out of range ", std::to_string(static_cast<EntityId>(entities_.size())));
-		return entities_[index].IsAlive();
+		//assert(HasEntity(index), "Entity ", std::to_string(index), " is out of range ", std::to_string(entity_count_));
+		//assert(index < static_cast<EntityId>(entities_.size()), "Index ", std::to_string(index), " out of range ", std::to_string(static_cast<EntityId>(entities_.size())));
+		return entities_[index].alive;
 	}
 	template <typename T, typename S>
 	inline void PrintTuple(S& tuple, EntityId index) const {
@@ -355,7 +377,7 @@ public:
 	}
 private:
 	EntityId entity_count_ = 0;
-	ComponentStorage component_storage_;
+	ComponentStorage component_storage_{ 0 };
 	std::vector<EntityData> entities_;
 };
 /*
