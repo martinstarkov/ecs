@@ -4,7 +4,7 @@ struct Position {
 	Position() {
 		//LOG("Created");
 	}
-	Position(double x, double y) : x(x), y(y) {
+	Position(int x, int y) : x(x), y(y) {
 		//LOG("Created with specific arguments");
 	}
 	Position(const Position& other) {
@@ -20,7 +20,7 @@ struct Position {
 	~Position() {
 		//LOG("Destroyed");
 	}
-	double x = 0.0, y = 0.0;
+	int x = 0, y = 0;
 	friend std::ostream& operator<<(std::ostream& os, const Position& obj) {
 		os << "(" << obj.x << "," << obj.y << ")";
 		return os;
@@ -37,44 +37,34 @@ struct Velocity {
 };
 
 int main() {
-    ecs::ComponentStorage c;
-
-	size_t size = 1000000; // 1 mil
-
-	c.Reserve<Position>(size);
-	c.Reserve<Velocity>(size);
-
+	ecs::Manager manager;
+	ecs::EntityId entities = 1000000;
 	std::cin.get();
-
-	LOG("ASSIGNING POSITIONS TO (1, 1) AND VELOCITIES TO (2, 2) (size: " << size << ")...");
-	for (size_t i = 0; i < size; ++i) {
-		c.EmplaceBack<Position>(1, 1);
-		c.EmplaceBack<Velocity>(2, 2);
+	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
+	manager.ReserveComponent<Position>(entities);
+	manager.ReserveComponent<Velocity>(entities);
+	manager.ResizeEntities(entities);
+	for (ecs::EntityId i = 0; i < entities; ++i) {
+		ecs::EntityId entity_id = manager.CreateEntity();
+		manager.AddComponent<Position>(entity_id, 3, 3);
+		manager.AddComponent<Velocity>(entity_id, 5, 5);
 	}
-	LOG("POSITION AND VELOCITY ASSIGNMENT COMPLETE!");
-
+	LOG("ASSIGNEMT COMPLETED!");
 	std::cin.get();
-
-	LOG("ADDING 20 TO EACH POSITION AND VELOCITY (" << size << ")...");
-	auto [p, v] = c.GetComponentVectors<Position, Velocity>();
-	for (size_t i = 0; i < size; ++i) {
-		auto& pos = p[i];
+	LOG("LOOPING OVER POSITIONS AND VELOCITIES AND INCREMENTING BY 20 (" << entities << ")");
+	auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
+	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
+		auto& pos = manager.GetComponent<Position>(p, i);
+		auto& vel = manager.GetComponent<Velocity>(v, i);
 		pos.x += 20;
 		pos.y += 20;
-		auto& vel = v[i];
 		vel.x += 20;
 		vel.y += 20;
 	}
-	LOG("ADDITION COMPLETE!");
-
+	LOG("COMPLETED LOOPING!");
 	std::cin.get();
-
-    LOG_("POSITIONS AND VELOCITIES: ");
-	auto [pos, vel] = c.GetComponentVectors<Position, Velocity>();
-	for (size_t i = 0; i < size; ++i) {
-        LOG_(pos[i] << ", " << vel[i]);
-    }
-    LOG("");
+    LOG("POSITIONS AND VELOCITIES: ");
+	manager.PrintComponents<Position, Velocity>();
 	/*std::cout << "Total size of c: " << c.TotalSize() << std::endl;
 	std::cout << "different data types in c: " << c.UniqueSize() << std::endl;
 	std::cout << "Number of positions in c: " << c.Count<Position>() << std::endl;*/
