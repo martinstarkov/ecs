@@ -1,5 +1,9 @@
 #include "ECS.h"
 
+#include <time.h>
+#include <chrono>
+#include <thread>
+
 struct Position {
 	Position() {
 		//LOG("Created");
@@ -36,9 +40,23 @@ struct Velocity {
 	}
 };
 
+void update(ecs::Manager& manager) {
+	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
+	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
+		auto& pos = manager.GetComponent<Position>(i);
+		pos.x += 20;
+		pos.y += 20;
+		auto& vel = manager.GetComponent<Velocity>(i);
+		vel.x += 20;
+		vel.y += 20;
+	}
+}
+
+int fpsLimit() { return 120; }
+
 int main() {
 	ecs::Manager manager;
-	ecs::EntityId entities = 3000;
+	ecs::EntityId entities = 4000;
 	std::cin.get();
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	manager.ReserveComponent<Position>(entities);
@@ -51,17 +69,37 @@ int main() {
 	}
 	LOG("ASSIGNEMT COMPLETED!");
 	std::cin.get();
-	LOG("LOOPING OVER POSITIONS AND VELOCITIES AND INCREMENTING BY 20 (" << entities << ")");
-	auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
-	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
-		auto& pos = manager.GetComponent<Position>(p, i);
-		pos.x += 20;
-		pos.y += 20;
-		auto& vel = manager.GetComponent<Velocity>(v, i);
-		vel.x += 20;
-		vel.y += 20;
+	
+
+
+	using namespace std::chrono;
+	using dsec = duration<double>;
+	auto invFpsLimit = duration_cast<system_clock::duration>(dsec{ 1. / fpsLimit() });
+	auto m_BeginFrame = system_clock::now();
+	auto m_EndFrame = m_BeginFrame + invFpsLimit;
+	unsigned frame_count_per_second = 0;
+	auto prev_time_in_seconds = time_point_cast<seconds>(m_BeginFrame);
+	while (true) {
+		// Do drawing work ...
+		update(manager);
+		// This part is just measuring if we're keeping the frame rate.
+		// It is not necessary to keep the frame rate.
+		auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
+		++frame_count_per_second;
+		if (time_in_seconds > prev_time_in_seconds) {
+			std::cerr << frame_count_per_second << " frames per second\n";
+			frame_count_per_second = 0;
+			prev_time_in_seconds = time_in_seconds;
+		}
+
+		// This part keeps the frame rate.
+		std::this_thread::sleep_until(m_EndFrame);
+		m_BeginFrame = m_EndFrame;
+		m_EndFrame = m_BeginFrame + invFpsLimit;
 	}
-	LOG("COMPLETED LOOPING!");
+
+
+
 	std::cin.get();
     LOG("POSITIONS AND VELOCITIES: ");
 	manager.PrintComponents<Position, Velocity>();
