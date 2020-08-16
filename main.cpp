@@ -1,7 +1,30 @@
 #include "ECS.h"
 
+#include <time.h>
+#include <chrono>
+#include <thread>
+
 struct Position {
-	double x = 0.0, y = 0.0;
+	Position() {
+		//LOG("Created");
+	}
+	Position(int x, int y) : x(x), y(y) {
+		//LOG("Created with specific arguments");
+	}
+	Position(const Position& other) {
+		LOG("Copied");
+		*this = other;
+	}
+	Position(Position&& other) {
+		LOG("Moved");
+		*this = other;
+	}
+	Position& operator=(const Position& other) = default;
+	Position& operator=(Position&& other) = default;
+	~Position() {
+		//LOG("Destroyed");
+	}
+	int x = 0, y = 0;
 	friend std::ostream& operator<<(std::ostream& os, const Position& obj) {
 		os << "(" << obj.x << "," << obj.y << ")";
 		return os;
@@ -9,6 +32,7 @@ struct Position {
 };
 
 struct Velocity {
+	Velocity(double x, double y) : x(x), y(y) {}
 	double x = 0.0, y = 0.0;
 	friend std::ostream& operator<<(std::ostream& os, const Velocity& obj) {
 		os << "(" << obj.x << "," << obj.y << ")";
@@ -16,35 +40,76 @@ struct Velocity {
 	}
 };
 
+void update(ecs::Manager& manager) {
+	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
+	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
+		auto& pos = manager.GetComponent<Position>(i);
+		pos.x += 20;
+		pos.y += 20;
+		auto& vel = manager.GetComponent<Velocity>(i);
+		vel.x += 20;
+		vel.y += 20;
+	}
+}
+
+int fpsLimit() { return 120; }
+
 int main() {
-    ecs::ComponentStorage c;
-    c.push_back('a');
-    c.push_back(1);
-    c.push_back(2.0);
-    c.push_back(3);
-    c.push_back(Position{ 3, 3 });
-    c.push_back(Position{ 4, 4 });
-    c.push_back(Velocity{ 5, 5 });
-	c.push_back(Velocity{ 6, 6 });
-    std::cout << "Total size of c: " << c.TotalSize() << std::endl;
-    std::cout << "different data types in c: " << c.Size() << std::endl;
-    std::cout << "Number of integers in c: " << c.number_of<int>() << std::endl;
-    std::cout << "Number of strings in c: " << c.number_of<std::string>() << std::endl;
-    auto vectors = c.getComponentVectors<int, Position>();
-	auto& ints = ecs::get<int>(vectors);
-    auto& strings = ecs::get<Position>(vectors);
-    LOG_("Ints: ");
-    for (auto& c : ints) {
-        LOG_(c << ", ");
-    }
-    LOG("");
-    LOG_("Strings: ");
-    for (auto& c : strings) {
-        LOG_(c << ", ");
-    }
-    LOG("");
-    auto [pos, vel] = c.getComponents<Position, Velocity>(1);
-    LOG("Entity 0 has components : " << pos << "," << vel);
+	ecs::Manager manager;
+	ecs::EntityId entities = 4000;
+	std::cin.get();
+	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
+	manager.ReserveComponent<Position>(entities);
+	manager.ReserveComponent<Velocity>(entities);
+	manager.ResizeEntities(entities);
+	for (ecs::EntityId i = 0; i < entities; ++i) {
+		ecs::EntityId entity_id = manager.CreateEntity();
+		manager.AddComponent<Position>(entity_id, 3, 3);
+		manager.AddComponent<Velocity>(entity_id, 5, 5);
+	}
+	LOG("ASSIGNEMT COMPLETED!");
+	std::cin.get();
+	
+
+
+	using namespace std::chrono;
+	using dsec = duration<double>;
+	auto invFpsLimit = duration_cast<system_clock::duration>(dsec{ 1. / fpsLimit() });
+	auto m_BeginFrame = system_clock::now();
+	auto m_EndFrame = m_BeginFrame + invFpsLimit;
+	unsigned frame_count_per_second = 0;
+	auto prev_time_in_seconds = time_point_cast<seconds>(m_BeginFrame);
+	while (true) {
+		// Do drawing work ...
+		update(manager);
+		// This part is just measuring if we're keeping the frame rate.
+		// It is not necessary to keep the frame rate.
+		auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
+		++frame_count_per_second;
+		if (time_in_seconds > prev_time_in_seconds) {
+			std::cerr << frame_count_per_second << " frames per second\n";
+			frame_count_per_second = 0;
+			prev_time_in_seconds = time_in_seconds;
+		}
+
+		// This part keeps the frame rate.
+		std::this_thread::sleep_until(m_EndFrame);
+		m_BeginFrame = m_EndFrame;
+		m_EndFrame = m_BeginFrame + invFpsLimit;
+	}
+
+
+
+	std::cin.get();
+    LOG("POSITIONS AND VELOCITIES: ");
+	manager.PrintComponents<Position, Velocity>();
+	/*std::cout << "Total size of c: " << c.TotalSize() << std::endl;
+	std::cout << "different data types in c: " << c.UniqueSize() << std::endl;
+	std::cout << "Number of positions in c: " << c.Count<Position>() << std::endl;*/
+
+
+    //auto [pos, vel] = c.GetComponents<Position, Velocity>(0);
+    //LOG("Entity 0 has components : " << pos << "," << vel);
 	//ecs::Manager manager;
 	//size_t size = 100;
 	//for (size_t i = 0; i < size; ++i) {
@@ -70,7 +135,7 @@ int main() {
 	//	//LOG(i << ": pos: " << entity.HasComponent<Position>() << ", vel: " << entity.HasComponent<Velocity>());
 	//}
 	//manager.GetComponentStorage().printComponents<Position, Velocity>();
-	/*LOG("Complete: " << sizeof(manager));
-	std::cin.get();*/
+	/*LOG("Complete: " << sizeof(manager));*/
+	std::cin.get();
 	return 0;
 }
