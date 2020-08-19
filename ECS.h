@@ -394,12 +394,16 @@ private:
 
 class BaseComponent {
 public:
+	virtual ~BaseComponent() {}
 };
 
 template <class T>
 class Component : public BaseComponent {
 public:
 	Component(T data) : data(data) {}
+	~Component() {
+		data.~T();
+	}
 	T& get() { return data; }
 private:
 	T data;
@@ -447,6 +451,111 @@ public:
 private:
 	EntityId entity_count_ = 0;
 	std::vector<EntityData3> entities_;
+};
+
+template<typename T>
+void deleter(void* ptr) {
+	static_cast<T*>(ptr)->~T();
+}
+
+typedef void (*deleter_func)(void*);
+
+struct EntityData4 {
+	std::vector<std::pair<std::pair<ComponentId, deleter_func>, std::pair<void*, std::size_t>>> components;
+	bool alive;
+};
+
+// TODO: Freelist of some sort for free memory, figure out how EntityData4 should be changed when component is removed (do you shift everything???)
+// TODO: Add RemoveComponent method
+
+class Manager4 {
+public:
+	~Manager4() {
+		for (auto& e : entities_) {
+			for (auto& c : e.components) {
+				auto& func = c.first.second;
+				void* ptr = c.second.first;
+				func(ptr);
+			}
+		}
+		LOG("called destructors on all components");
+		free(mega_array_);
+		mega_array_ = nullptr;
+		LOG("freed all memory");
+	}
+	void ReAllocate() {
+		void* p = realloc(mega_array_, capacity_ * 2);
+		assert(p, "could not reallocate ", std::to_string(capacity_ * 2));
+		mega_array_ = p;
+		for (auto& e : entities_) {
+			for (auto& c : e.components) {
+				c.second.first = (void*)((char*)mega_array_ + c.second.second);
+			}
+		}
+		capacity_ = capacity_ * 2;
+	}
+	void ResizeEntities(std::size_t new_entities) {
+		//capacity_ = allComps * bytes;
+		if (new_entities * 4 >= capacity_) {
+			if (mega_array_ == nullptr) {
+				std::size_t maxSize = 1;
+				mega_array_ = malloc(new_entities * maxSize);
+				capacity_ = new_entities * maxSize;
+			} else {
+				ReAllocate();
+			}
+		}
+		entities_.resize(entities_.capacity() + new_entities);
+	}
+	EntityId CreateEntity() {
+		if (entity_count_ >= static_cast<EntityId>(entities_.capacity())) {
+			assert("out of entity space");
+		}
+		EntityId free_index(entity_count_++);
+		EntityData4 new_entity;
+		new_entity.alive = true;
+		entities_[free_index] = std::move(new_entity);
+		return free_index;
+	}
+	template <class T, typename ...TArgs>
+	void AddComponent(EntityId index, TArgs&&... args) {
+		std::size_t size = sizeof(T);
+		if (size_ + size >= capacity_) {
+			LOG("Reallocating at : " << size_);
+			ReAllocate();
+		}
+		char* loc = (char*)mega_array_ + size_;
+		new(loc) T{ std::forward<TArgs>(args)... };
+		deleter_func myDeleter = &deleter<T>;
+		entities_[index].components.emplace_back(std::pair<ComponentId, deleter_func>{ typeid(T).hash_code(), myDeleter }, std::pair<void*, std::size_t>{ (void*)loc, size_ });
+		size_ += size;
+	}
+	template <class T>
+	T& GetComponent(EntityId index) {
+		auto& cs = entities_[index].components;
+		ComponentId id = typeid(T).hash_code();
+		for (auto& pair : cs) {
+			if (pair.first.first == id) {
+				return *static_cast<T*>(pair.second.first);
+			}
+		}
+		return *static_cast<T*>(cs[0].second.first);
+	}
+	EntityId EntityCount() const {
+		return entity_count_;
+	}
+	std::size_t Size() const {
+		return size_;
+	}
+	std::size_t Capacity() const {
+		return capacity_;
+	}
+private:
+	EntityId entity_count_ = 0;
+	std::size_t capacity_ = 0;
+	std::size_t size_ = 0;
+	void* mega_array_ = nullptr;
+	std::vector<EntityData4> entities_;
 };
 
 /*
