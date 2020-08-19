@@ -347,6 +347,108 @@ private:
 };
 std::size_t Manager::manager_id = 0;
 
+
+
+struct EntityData2 {
+	std::vector<std::pair<ComponentId, std::any>> components;
+	bool alive;
+};
+
+class Manager2 {
+public:
+	void ResizeEntities(std::size_t additional_amount) {
+		entities_.resize(entities_.capacity() + additional_amount);
+	}
+	EntityId CreateEntity() {
+		if (entity_count_ >= static_cast<EntityId>(entities_.capacity())) {
+			ResizeEntities(static_cast<EntityId>(entities_.capacity() + 2));
+		}
+		EntityId free_index(entity_count_++);
+		EntityData2 new_entity;
+		new_entity.alive = true;
+		entities_[free_index] = std::move(new_entity);
+		return free_index;
+	}
+	template <class T, typename ...TArgs>
+	void AddComponent(EntityId index, TArgs&&... args) {
+		entities_[index].components.emplace_back(typeid(T).hash_code(), T{ std::forward<TArgs>(args)... });
+	}
+	template <class T>
+	T& GetComponent(EntityId index) {
+		std::vector<std::pair<ComponentId, std::any>>& cs = entities_[index].components;
+		ComponentId id = typeid(T).hash_code();
+		for (std::pair<ComponentId, std::any>& pair : cs) {
+			if (pair.first == id) {
+				return std::any_cast<T&>(pair.second);
+			}
+		}
+		return std::any_cast<T&>(cs[0].second);
+	}
+	EntityId EntityCount() const {
+		return entity_count_;
+	}
+private:
+	EntityId entity_count_ = 0;
+	std::vector<EntityData2> entities_;
+};
+
+class BaseComponent {
+public:
+};
+
+template <class T>
+class Component : public BaseComponent {
+public:
+	Component(T data) : data(data) {}
+	T& get() { return data; }
+private:
+	T data;
+};
+
+struct EntityData3 {
+	std::vector<std::pair<ComponentId, BaseComponent*>> components;
+	bool alive;
+};
+
+class Manager3 {
+public:
+	void ResizeEntities(std::size_t additional_amount) {
+		entities_.resize(entities_.capacity() + additional_amount);
+	}
+	EntityId CreateEntity() {
+		if (entity_count_ >= static_cast<EntityId>(entities_.capacity())) {
+			ResizeEntities(static_cast<EntityId>(entities_.capacity() + 2));
+		}
+		EntityId free_index(entity_count_++);
+		EntityData3 new_entity;
+		new_entity.alive = true;
+		entities_[free_index] = std::move(new_entity);
+		return free_index;
+	}
+	template <class T, typename ...TArgs>
+	void AddComponent(EntityId index, TArgs&&... args) {
+		entities_[index].components.emplace_back(typeid(T).hash_code(), new Component<T>(T{ std::forward<TArgs>(args)... }));
+		//entities_[index].components.emplace_back(typeid(T).hash_code(), );
+	}
+	template <class T>
+	T& GetComponent(EntityId index) {
+		std::vector<std::pair<ComponentId, BaseComponent*>>& cs = entities_[index].components;
+		ComponentId id = typeid(T).hash_code();
+		for (std::pair<ComponentId, BaseComponent*>& pair : cs) {
+			if (pair.first == id) {
+				return static_cast<Component<T>*>(pair.second)->get();
+			}
+		}
+		return static_cast<Component<T>*>(cs[0].second)->get();
+	}
+	EntityId EntityCount() const {
+		return entity_count_;
+	}
+private:
+	EntityId entity_count_ = 0;
+	std::vector<EntityData3> entities_;
+};
+
 /*
 
 using EntityId = int32_t;
