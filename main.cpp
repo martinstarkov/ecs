@@ -41,6 +41,7 @@ struct Velocity {
 };
 
 void assign(ecs::Manager& manager, ecs::EntityId entities, int x = 0, int y = 0) {
+	manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<Velocity>(entities);
 	manager.ResizeEntities(entities);
@@ -48,6 +49,18 @@ void assign(ecs::Manager& manager, ecs::EntityId entities, int x = 0, int y = 0)
 		ecs::EntityId entity_id = manager.CreateEntity();
 		manager.AddComponent<Position>(entity_id, x, y);
 		manager.AddComponent<Velocity>(entity_id, x, y);
+	}
+}
+
+void assign2(ecs::Manager& manager, ecs::EntityId entities, int x = 0, int y = 0) {
+	manager.ReserveComponent<Velocity>(entities);
+	manager.ReserveComponent<Position>(entities);
+	manager.ReserveComponent<bool>(1);
+	manager.ResizeEntities(entities);
+	for (ecs::EntityId i = 0; i < entities; ++i) {
+		ecs::EntityId entity_id = manager.CreateEntity();
+		manager.AddComponent<Velocity>(entity_id, x, y);
+		manager.AddComponent<Position>(entity_id, x, y);
 	}
 }
 
@@ -71,7 +84,7 @@ int main() {
 	ecs::EntityId entities = 4000;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	assign(manager, entities, 0, 0);
-	assign(manager2, entities, 100, 100);
+	assign2(manager2, entities, 100, 100);
 	LOG("ASSIGNEMT COMPLETED!");
 	using namespace std::chrono;
 	using dsec = duration<double>;
@@ -92,6 +105,8 @@ int main() {
 			//LOG("manager1 pos: " << manager.GetComponent<Position>(0));
 			//LOG("manager2 pos: " << manager2.GetComponent<Position>(0));
 			std::cerr << frame_count_per_second << " frames per second\n";
+			LOG("pos1: " << manager.GetComponentStorage().GetComponentId<Position>() << ", vel1: " << manager.GetComponentStorage().GetComponentId<Velocity>() << ", bool1: " << manager.GetComponentStorage().GetComponentId<bool>());
+			LOG("pos2: " << manager2.GetComponentStorage().GetComponentId<Position>() << ", vel2: " << manager2.GetComponentStorage().GetComponentId<Velocity>() << ", bool2: " << manager2.GetComponentStorage().GetComponentId<bool>());
 			frame_count_per_second = 0;
 			prev_time_in_seconds = time_in_seconds;
 		}
