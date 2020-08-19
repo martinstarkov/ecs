@@ -34,7 +34,7 @@ struct Velocity {
 	}
 };
 
-void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+void assign(ecs::Manager4& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<Velocity>(entities);*/
@@ -43,13 +43,17 @@ void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double
 		ecs::EntityId entity_id = manager.CreateEntity();
 		manager.AddComponent<Position>(entity_id, x, y);
 		manager.AddComponent<Velocity>(entity_id, x, y);
+		// 32 ^
 		manager.AddComponent<int>(entity_id, 1);
 		manager.AddComponent<double>(entity_id, 2.0);
 		manager.AddComponent<float>(entity_id, 3.0f);
+		// 16 ^
+
+		// 48
 	}
 }
 
-void assign2(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+void assign2(ecs::Manager4& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<Velocity>(entities);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<bool>(1);*/
@@ -64,7 +68,7 @@ void assign2(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, doubl
 	}
 }
 
-void update(ecs::Manager3& manager, int increment = 1) {
+void update(ecs::Manager4& manager, int increment = 1) {
 	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
 	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
 		auto& pos = manager.GetComponent<Position>(i);
@@ -88,12 +92,12 @@ void update(ecs::Manager3& manager, int increment = 1) {
 int fpsLimit() { return 240; }
 
 int main() {
-	ecs::Manager3 manager;
-	ecs::Manager3 manager2;
-	ecs::EntityId entities = 40000;
+	ecs::Manager4 manager;
+	//ecs::Manager4 manager2;
+	ecs::EntityId entities = 80000;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	assign(manager, entities, 0, 0);
-	assign2(manager2, entities, 100, 100);
+	//assign2(manager2, entities, 100, 100);
 	LOG("ASSIGNEMT COMPLETED!");
 	using namespace std::chrono;
 	using dsec = duration<double>;
@@ -102,10 +106,11 @@ int main() {
 	auto m_EndFrame = m_BeginFrame + invFpsLimit;
 	unsigned frame_count_per_second = 0;
 	auto prev_time_in_seconds = time_point_cast<seconds>(m_BeginFrame);
-	while (true) {
+	size_t counter = 0;
+	while (counter < 5) {
 		// Do drawing work ...
 		update(manager);
-		update(manager2);
+		//update(manager2);
 		// This part is just measuring if we're keeping the frame rate.
 		// It is not necessary to keep the frame rate.
 		auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
@@ -118,6 +123,7 @@ int main() {
 			//LOG("pos2: " << manager2.GetComponentStorage().GetComponentId<Position>() << ", vel2: " << manager2.GetComponentStorage().GetComponentId<Velocity>() << ", bool2: " << manager2.GetComponentStorage().GetComponentId<bool>());
 			frame_count_per_second = 0;
 			prev_time_in_seconds = time_in_seconds;
+			++counter;
 		}
 
 		// This part keeps the frame rate.
@@ -125,5 +131,8 @@ int main() {
 		m_BeginFrame = m_EndFrame;
 		m_EndFrame = m_BeginFrame + invFpsLimit;
 	}
+	//LOG("Manager size/capacity: " << manager.Size() << "/" << manager.Capacity());
+	//manager.~Manager4();
+	std::cin.get();
 	return 0;
 }
