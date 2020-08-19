@@ -100,9 +100,6 @@ void Assert(bool assertion, const char* condition, const char* file, int line, s
 }
 } // namespace internal
 
-//*/ 
-// END OF TEMPORARY
-
 // Entity Component System
 namespace ecs {
 
@@ -117,6 +114,11 @@ std::vector<T>& AccessTuple(std::tuple<Ts...>& tuple) {
 }
 
 // Thanks to Andy G https://gieseanw.wordpress.com/2017/05/03/a-true-heterogeneous-container-in-c/ for heterogeneous container concept
+
+template <class T>
+struct ComponentIdWrapper {
+	ComponentId id = -1;
+};
 
 struct ComponentStorage {
 public:
@@ -133,8 +135,8 @@ public:
 		if (storage_index_ == storage_<T>.size()) {
 			storage_<T>.resize(storage_<T>.size() + 1);
 			ComponentId& count = component_counts_[storage_index_];
-			ids_<T>.resize(ids_<T>.size() + 1, -1);
-			ids_<T>[storage_index_] = count;
+			ids_<T>.resize(ids_<T>.size() + 1);
+			ids_<T>[storage_index_].id = count;
 			// note: do not erase entry here as that would require shifting all storage indexes above the current one by -1
 			clear_functions_.emplace_back([](const std::size_t storage_index) { storage_<T>[storage_index].clear(); });
 			++count;
@@ -173,7 +175,7 @@ public:
 	template <class T>
 	ComponentId GetComponentId() const {
 		assert(storage_index_ < ids_<T>.size());
-		return ids_<T>[storage_index_];
+		return ids_<T>[storage_index_].id;
 	}
 	template <class T>
 	T& GetComponent(std::size_t index) const {
@@ -183,7 +185,7 @@ public:
 	}
 	template <class T>
 	T& GetComponent(std::vector<T>& component_vector, std::size_t index) const {
-		assert(index < v.size());
+		assert(index < component_vector.size());
 		return component_vector[index];
 	}
 	template <class ...Ts>
@@ -215,7 +217,7 @@ private:
 	template <class T>
 	static std::vector<std::vector<T>> storage_;
 	template <class T>
-	static std::vector<ComponentId> ids_;
+	static std::vector<ComponentIdWrapper<T>> ids_;
 	static std::vector<ComponentId> component_counts_;
 	std::vector<std::function<void(const std::size_t)>> clear_functions_;
 };
@@ -223,7 +225,7 @@ private:
 template <class T>
 std::vector<std::vector<T>> ComponentStorage::storage_;
 template <class T>
-std::vector<ComponentId> ComponentStorage::ids_;
+std::vector<ComponentIdWrapper<T>> ComponentStorage::ids_;
 std::vector<ComponentId> ComponentStorage::component_counts_;
 
 class EntityData {
@@ -333,6 +335,9 @@ public:
 	}
 	EntityId EntityCount() const {
 		return entity_count_;
+	}
+	const ComponentStorage& GetComponentStorage() const {
+		return component_storage_;
 	}
 private:
 	EntityId entity_count_ = 0;
