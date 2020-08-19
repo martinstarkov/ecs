@@ -8,23 +8,17 @@ struct Position {
 	Position() {
 		//LOG("Created");
 	}
-	Position(int x, int y) : x(x), y(y) {
+	Position(double x, double y) : x(x), y(y) {
 		//LOG("Created with specific arguments");
 	}
-	Position(const Position& other) {
-		LOG("Copied");
-		*this = other;
-	}
-	Position(Position&& other) {
-		LOG("Moved");
-		*this = other;
-	}
+	Position(const Position& other) = default;
+	Position(Position&& other) = default;
 	Position& operator=(const Position& other) = default;
 	Position& operator=(Position&& other) = default;
 	~Position() {
 		//LOG("Destroyed");
 	}
-	int x = 0, y = 0;
+	double x = 0, y = 0;
 	friend std::ostream& operator<<(std::ostream& os, const Position& obj) {
 		os << "(" << obj.x << "," << obj.y << ")";
 		return os;
@@ -40,31 +34,37 @@ struct Velocity {
 	}
 };
 
-void assign(ecs::Manager& manager, ecs::EntityId entities, int x = 0, int y = 0) {
-	manager.ReserveComponent<bool>(1);
+void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+	/*manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
-	manager.ReserveComponent<Velocity>(entities);
+	manager.ReserveComponent<Velocity>(entities);*/
 	manager.ResizeEntities(entities);
 	for (ecs::EntityId i = 0; i < entities; ++i) {
 		ecs::EntityId entity_id = manager.CreateEntity();
 		manager.AddComponent<Position>(entity_id, x, y);
 		manager.AddComponent<Velocity>(entity_id, x, y);
+		manager.AddComponent<int>(entity_id, 1);
+		manager.AddComponent<double>(entity_id, 2.0);
+		manager.AddComponent<float>(entity_id, 3.0f);
 	}
 }
 
-void assign2(ecs::Manager& manager, ecs::EntityId entities, int x = 0, int y = 0) {
-	manager.ReserveComponent<Velocity>(entities);
+void assign2(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+	/*manager.ReserveComponent<Velocity>(entities);
 	manager.ReserveComponent<Position>(entities);
-	manager.ReserveComponent<bool>(1);
+	manager.ReserveComponent<bool>(1);*/
 	manager.ResizeEntities(entities);
 	for (ecs::EntityId i = 0; i < entities; ++i) {
 		ecs::EntityId entity_id = manager.CreateEntity();
 		manager.AddComponent<Velocity>(entity_id, x, y);
 		manager.AddComponent<Position>(entity_id, x, y);
+		manager.AddComponent<int>(entity_id, 1);
+		manager.AddComponent<double>(entity_id, 2.0);
+		manager.AddComponent<float>(entity_id, 3.0f);
 	}
 }
 
-void update(ecs::Manager& manager, int increment = 1) {
+void update(ecs::Manager3& manager, int increment = 1) {
 	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
 	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
 		auto& pos = manager.GetComponent<Position>(i);
@@ -73,15 +73,24 @@ void update(ecs::Manager& manager, int increment = 1) {
 		auto& vel = manager.GetComponent<Velocity>(i);
 		vel.x += increment;
 		vel.y += increment;
+		auto& integer = manager.GetComponent<int>(i);
+		integer += increment;
+		auto& doubler = manager.GetComponent<double>(i);
+		doubler += increment;
+		auto& floater = manager.GetComponent<float>(i);
+		floater += increment;
+		/*if (i == 0) {
+			LOG("pos: " << pos << ", vel:" << vel << ", int: " << integer << ", double: " << doubler << ", float: " << floater);
+		}*/
 	}
 }
 
-int fpsLimit() { return 120; }
+int fpsLimit() { return 240; }
 
 int main() {
-	ecs::Manager manager;
-	ecs::Manager manager2;
-	ecs::EntityId entities = 4000;
+	ecs::Manager3 manager;
+	ecs::Manager3 manager2;
+	ecs::EntityId entities = 40000;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	assign(manager, entities, 0, 0);
 	assign2(manager2, entities, 100, 100);
@@ -105,8 +114,8 @@ int main() {
 			//LOG("manager1 pos: " << manager.GetComponent<Position>(0));
 			//LOG("manager2 pos: " << manager2.GetComponent<Position>(0));
 			std::cerr << frame_count_per_second << " frames per second\n";
-			LOG("pos1: " << manager.GetComponentStorage().GetComponentId<Position>() << ", vel1: " << manager.GetComponentStorage().GetComponentId<Velocity>() << ", bool1: " << manager.GetComponentStorage().GetComponentId<bool>());
-			LOG("pos2: " << manager2.GetComponentStorage().GetComponentId<Position>() << ", vel2: " << manager2.GetComponentStorage().GetComponentId<Velocity>() << ", bool2: " << manager2.GetComponentStorage().GetComponentId<bool>());
+			//LOG("pos1: " << manager.GetComponentStorage().GetComponentId<Position>() << ", vel1: " << manager.GetComponentStorage().GetComponentId<Velocity>() << ", bool1: " << manager.GetComponentStorage().GetComponentId<bool>());
+			//LOG("pos2: " << manager2.GetComponentStorage().GetComponentId<Position>() << ", vel2: " << manager2.GetComponentStorage().GetComponentId<Velocity>() << ", bool2: " << manager2.GetComponentStorage().GetComponentId<bool>());
 			frame_count_per_second = 0;
 			prev_time_in_seconds = time_in_seconds;
 		}
