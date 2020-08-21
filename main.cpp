@@ -35,6 +35,42 @@ struct Velocity {
 	}
 };
 
+struct Velocity2 {
+	Velocity2(double x, double y) : x(x), y(y) {}
+	double x = 0.0, y = 0.0;
+	friend std::ostream& operator<<(std::ostream& os, const Velocity2& obj) {
+		os << "(" << obj.x << "," << obj.y << ")";
+		return os;
+	}
+};
+
+struct Position2 {
+	Position2(double x, double y) : x(x), y(y) {}
+	double x = 0.0, y = 0.0;
+	friend std::ostream& operator<<(std::ostream& os, const Position2& obj) {
+		os << "(" << obj.x << "," << obj.y << ")";
+		return os;
+	}
+};
+
+struct Velocity3 {
+	Velocity3(double x, double y) : x(x), y(y) {}
+	double x = 0.0, y = 0.0;
+	friend std::ostream& operator<<(std::ostream& os, const Velocity3& obj) {
+		os << "(" << obj.x << "," << obj.y << ")";
+		return os;
+	}
+};
+
+struct Position3 {
+	Position3(double x, double y) : x(x), y(y) {}
+	double x = 0.0, y = 0.0;
+	friend std::ostream& operator<<(std::ostream& os, const Position3& obj) {
+		os << "(" << obj.x << "," << obj.y << ")";
+		return os;
+	}
+};
+
 void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
@@ -44,6 +80,10 @@ void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double
 		ecs::EntityId entity_id = manager.CreateEntity();
 		manager.AddComponent<Position>(entity_id, x, y);
 		manager.AddComponent<Velocity>(entity_id, x, y);
+		manager.AddComponent<Velocity2>(entity_id, x, y);
+		manager.AddComponent<Position2>(entity_id, x, y);
+		manager.AddComponent<Velocity3>(entity_id, x, y);
+		manager.AddComponent<Position3>(entity_id, x, y);
 		// 32 ^
 		manager.AddComponent<int>(entity_id, 1);
 		manager.AddComponent<double>(entity_id, 2.0);
@@ -82,6 +122,18 @@ void update(ecs::Manager3& manager, int increment = 1) {
 		auto& vel = manager.GetComponent<Velocity>(i);
 		vel.x += increment;
 		vel.y += increment;
+		auto& vel2 = manager.GetComponent<Velocity2>(i);
+		vel2.x += increment;
+		vel2.y += increment;
+		auto& pos2 = manager.GetComponent<Position2>(i);
+		pos2.x += increment;
+		pos2.y += increment;
+		auto& vel3 = manager.GetComponent<Velocity3>(i);
+		vel3.x += increment;
+		vel3.y += increment;
+		auto& pos3 = manager.GetComponent<Position3>(i);
+		pos3.x += increment;
+		pos3.y += increment;
 		/*if (i == 0) {
 			LOG("pos: " << pos << ", vel:" << vel << ", int: " << integer << ", double: " << doubler << ", float: " << floater);
 		}*/
@@ -106,7 +158,7 @@ int main() {
 	ecs::Manager3 manager;
 	//ecs::Manager3 manager2;
 	ecs::EntityId entities = 100000;
-	std::size_t loops = 500;
+	std::size_t loops = 1000;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	assign(manager, entities, 0, 0);
 	//assign2(manager2, entities, 100, 100);
@@ -162,6 +214,41 @@ int main() {
 		<< duration.count() / 1000000.000 << std::endl;
 	//LOG("Manager size/capacity: " << manager.Size() << "/" << manager.Capacity());
 	//manager.~Manager3();
+
+	// Model 3 - 2 get, 3 has
+
+	// 100k, 1k loops, 21mb, vector lookup, 15.5
+	// 100k, 1k loops, 21mb, vector lookup, 14.8
+	// 100k, 1k loops, 21mb, vector lookup, 14.7
+	// 100k, 1k loops, 21mb, vector lookup, 14.7
+
+	// 100k, 1k loops, 4mb, map lookup, 15.8
+	// 100k, 1k loops, 4mb, map lookup, 15.6
+	// 100k, 1k loops, 4mb, map lookup, 15.6
+	// 100k, 1k loops, 4mb, map lookup, 15.3
+
+	// 100k, 1k loops, 43.2mb, unordered_map lookup, 28.3
+	// 100k, 1k loops, 43.2mb, unordered_map lookup, 28.7
+	// 100k, 1k loops, 43.2mb, unordered_map lookup, 28.1
+	// 100k, 1k loops, 43.2mb, unordered_map lookup, 28.6
+
+	// 10k, 10k loops, 3mb, vector lookup, 7.8
+	// 10k, 10k loops, 3mb, vector lookup, 7.5
+	// 10k, 10k loops, 3mb, vector lookup, 8.4
+	// 10k, 10k loops, 3mb, vector lookup, 7.7
+
+	// 10k, 10k loops, 4mb, map lookup, 10.9
+	// 10k, 10k loops, 4mb, map lookup, 12.4
+	// 10k, 10k loops, 4mb, map lookup, 10.1
+	// 10k, 10k loops, 4mb, map lookup, 13.6
+
+	// Model 3 - 6 get, 3 has
+
+	// 100k, 1k loops, mb, vector lookup, 28.2
+	// 100k, 1k loops, mb, vector lookup, 
+	// 100k, 1k loops, mb, vector lookup, 
+	// 100k, 1k loops, mb, vector lookup, 
+
 	// 1k, 50k loops: 4 = X, 3 = 3.7, 3.9, 9.9
 	// 1k, 50k loops: 4 = 3.5, 3 = 3.5
 	// 100k, 5k loops: 4 = 61.2, 3 = 51.5
