@@ -632,7 +632,6 @@ private:
 
 
 
-
 class BaseComponent {};
 
 template <class T>
@@ -647,8 +646,14 @@ private:
 	T data;
 };
 
+//#define MAP_LOOKUP
+
 struct EntityData3 {
+	#ifdef MAP_LOOKUP
 	std::map<ComponentId, BaseComponent*> components;
+	#else
+	std::vector<std::pair<ComponentId, BaseComponent*>> components;
+	#endif
 	bool alive;
 };
 
@@ -669,13 +674,17 @@ public:
 	}
 	template <class T, typename ...TArgs>
 	void AddComponent(EntityId index, TArgs&&... args) {
+		#ifdef MAP_LOOKUP
 		entities_[index].components.emplace(typeid(T).hash_code(), new Component<T>(T{ std::forward<TArgs>(args)... }));
-		//entities_[index].components.emplace_back(typeid(T).hash_code(), );
+		#else
+		entities_[index].components.emplace_back(typeid(T).hash_code(), new Component<T>(T{ std::forward<TArgs>(args)... }));
+		#endif
 	}
 	template <class T>
 	void RemoveComponent(EntityId index) {
 		auto& components = entities_[index].components;
 		ComponentId id = typeid(T).hash_code();
+		#ifdef MAP_LOOKUP
 		auto it = components.find(id);
 		if (it != std::end(components)) {
 			BaseComponent* ptr = it->second;
@@ -684,7 +693,8 @@ public:
 			ptr = nullptr;
 			components.erase(id);
 		}
-		/*for (auto it = std::begin(components); it != std::end(components); ++it) {
+		#else
+		for (auto it = std::begin(components); it != std::end(components); ++it) {
 			if (it->first == id) {
 				BaseComponent* ptr = it->second;
 				static_cast<Component<T>*>(ptr)->get().~T();
@@ -693,36 +703,43 @@ public:
 				it = components.erase(it);
 				break;
 			}
-		}*/
+		}
+		#endif
 	}
 	template <class T>
 	bool HasComponent(EntityId index) {
 		auto& components = entities_[index].components;
 		ComponentId id = typeid(T).hash_code();
+		#ifdef MAP_LOOKUP
 		auto it = components.find(id);
 		if (it != std::end(components)) {
 			return true;
 		}
-		/*for (auto& pair : components) {
+		#else
+		for (auto& pair : components) {
 			if (pair.first == id) {
 				return true;
 			}
-		}*/
+		}
+		#endif
 		return false;
 	}
 	template <class T>
 	T& GetComponent(EntityId index) {
 		auto& components = entities_[index].components;
 		ComponentId id = typeid(T).hash_code();
+		#ifdef MAP_LOOKUP
 		auto it = components.find(id);
 		assert(it != std::end(components));
 		return static_cast<Component<T>*>(it->second)->get();
-		/*for (auto& pair : components) {
+		#else
+		for (auto& pair : components) {
 			if (pair.first == id) {
 				return static_cast<Component<T>*>(pair.second)->get();
 			}
 		}
-		return static_cast<Component<T>*>(components[0].second)->get();*/
+		return static_cast<Component<T>*>(components[0].second)->get();
+		#endif
 	}
 	EntityId EntityCount() const {
 		return entity_count_;
