@@ -71,7 +71,7 @@ struct Position3 {
 	}
 };
 
-void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+void assign(ecs::Manager5& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<Velocity>(entities);*/
@@ -93,7 +93,7 @@ void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double
 	}
 }
 
-void update(ecs::Manager3& manager, int increment = 1) {
+void update(ecs::Manager5& manager, int increment = 1) {
 	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
 	for (std::size_t i = 0; i < manager.EntityCount(); ++i) {
 		ecs::EntityId entity_id = i;
@@ -115,20 +115,18 @@ void update(ecs::Manager3& manager, int increment = 1) {
 int fpsLimit() { return 240; }
 
 int main() {
-	ecs::Manager3 manager;
-	//ecs::Manager3 manager2;
-	ecs::EntityId entities = 10000;
-	std::size_t loops = 1000;
+	ecs::Manager5 manager;
+	//ecs::Manager5 manager2;
+	ecs::EntityId entities = 1000000;
+	std::size_t loops = 100;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	assign(manager, entities, 0, 0);
 	LOG("ASSIGNEMT COMPLETED!");
 	LOG("TIMING LOOPS!");
-	LOG(sizeof(ecs::ComponentData));
-	LOG(sizeof(std::pair<ecs::ComponentId, ecs::BaseComponent*>));
 	auto start = std::chrono::high_resolution_clock::now();
 	for (std::size_t i = 0; i < loops; ++i) {
 		update(manager, 0);
-		LOG(i);
+		//LOG(i);
 	}
 	LOG("LOOPS COMPLETED!");
 	//using namespace std::chrono;
@@ -174,10 +172,25 @@ int main() {
 		<< std::fixed << std::setprecision(3)
 		<< duration.count() / 1000000.000 << std::endl;
 	//LOG("Manager size/capacity: " << manager.Size() << "/" << manager.Capacity());
-	//manager.~Manager3();
+	//manager.~Manager5();
 
 	// 1 mil, 10 loops, 96s, Manager 4 custom allocator adding and removing components
 	// 1 mil, 10 loops, 77s, Manager 3 vector pairs adding and removing components
+
+	// 1 mil, 100 loops, 8.6s, Manager 5
+	// 1 mil, 100 loops, 8.2s, Manager 3
+
+	// 1 mil, 110 loops, 11.9s, Manager 5
+	// 1 mil, 100 loops, 12s, Manager 3
+
+	// 1 mil, 1k loops, 72s, Manager 5 custom allocator
+	// 1 mil, 1k loops, 102s, Manager 4 custom allocator
+	// 1 mil, 1k loops, 82s, Manager 3 vector pairs
+
+	// 1 mil, 100 loops, 7.1s, Manager 5 custom allocator
+	// 1 mil, 100 loops, 10.3s, Manager 4 custom allocator
+	// 1 mil, 100 loops, 8.1s, Manager 3 vector pairs
+
 
 	// 1 mil, 1k loops, 87, 92, 92s, Manager 4 custom allocator
 	// 1 mil, 1k loops, 75, 76s, Manager 3 vector pairs
