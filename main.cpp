@@ -71,7 +71,7 @@ struct Position3 {
 	}
 };
 
-void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+void assign(ecs::Manager4& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<Velocity>(entities);*/
@@ -80,8 +80,10 @@ void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double
 		ecs::EntityId entity_id = manager.CreateEntity();
 		manager.AddComponent<Position>(entity_id, x, y);
 		manager.AddComponent<Velocity>(entity_id, x, y);
+		// 32 ^
 		manager.AddComponent<Velocity2>(entity_id, x, y);
 		manager.AddComponent<Position2>(entity_id, x, y);
+		// 32 ^
 		manager.AddComponent<Velocity3>(entity_id, x, y);
 		manager.AddComponent<Position3>(entity_id, x, y);
 		// 32 ^
@@ -97,11 +99,11 @@ void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double
 	}
 }
 
-void assign2(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+void assign2(ecs::Manager4& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<Velocity>(entities);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<bool>(1);*/
-	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
+	for (std::size_t i = 0; i < manager.EntityCount(); ++i) {
 		manager.AddComponent<Velocity>(i, x, y);
 		manager.AddComponent<Position>(i, x, y);
 		manager.AddComponent<int>(i, 1);
@@ -113,9 +115,9 @@ void assign2(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, doubl
 	}
 }
 
-void update(ecs::Manager3& manager, int increment = 1) {
+void update(ecs::Manager4& manager, int increment = 1) {
 	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
-	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
+	for (std::size_t i = 0; i < manager.EntityCount(); ++i) {
 		auto& pos = manager.GetComponent<Position>(i);
 		pos.x += increment;
 		pos.y += increment;
@@ -155,18 +157,70 @@ void update(ecs::Manager3& manager, int increment = 1) {
 int fpsLimit() { return 240; }
 
 int main() {
-	ecs::Manager3 manager;
-	//ecs::Manager3 manager2;
-	ecs::EntityId entities = 100000;
+	ecs::Manager4 manager;
+	//ecs::Manager4 manager2;
+	ecs::EntityId entities = 1000000;
 	std::size_t loops = 1000;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
-	assign(manager, entities, 0, 0);
+	//assign(manager, entities, 0, 0);
+	ecs::EntityId entity_id = manager.CreateEntity();
+	manager.AddComponent<Position>(entity_id, 0, 0);
+	manager.AddComponent<Velocity>(entity_id, 0, 0);
+	// 32 ^
+	manager.AddComponent<Velocity2>(entity_id, 0, 0);
+	manager.AddComponent<Position2>(entity_id, 0, 0);
+	// 32 ^
+	manager.AddComponent<Velocity3>(entity_id, 0, 0);
+	manager.AddComponent<Position3>(entity_id, 0, 0);
+	// 32 ^
+	manager.AddComponent<int>(entity_id, 1);
+	manager.AddComponent<double>(entity_id, 2.0);
+	manager.AddComponent<float>(entity_id, 3.0f);
+	// 16 ^
+
+	// 48
+	manager.RemoveComponent<Position>(entity_id);
+	manager.RemoveComponent<Velocity>(entity_id);
+	manager.RemoveComponent<Velocity2>(entity_id);
+	manager.RemoveComponent<Position2>(entity_id);
+	manager.RemoveComponent<Velocity3>(entity_id);
+	manager.RemoveComponent<Position3>(entity_id);
+	manager.RemoveComponent<int>(entity_id);
+	manager.RemoveComponent<double>(entity_id);
+	manager.RemoveComponent<float>(entity_id);
+	LOG("4 byte: " << manager.free_component_map_[4].size());
+	LOG("8 byte: " << manager.free_component_map_[8].size());
+	LOG("16 byte: " << manager.free_component_map_[16].size());
+	manager.AddComponent<int>(entity_id, 1);
+	manager.AddComponent<double>(entity_id, 2.0);
+	manager.AddComponent<Velocity3>(entity_id, 0, 0);
+	LOG("4 byte: " << manager.free_component_map_[4].size());
+	LOG("8 byte: " << manager.free_component_map_[8].size());
+	LOG("16 byte: " << manager.free_component_map_[16].size());
+	manager.AddComponent<int>(entity_id, 1);
+	manager.AddComponent<double>(entity_id, 2.0);
+	manager.AddComponent<Velocity3>(entity_id, 0, 0);
+	LOG("4 byte: " << manager.free_component_map_[4].size());
+	LOG("8 byte: " << manager.free_component_map_[8].size());
+	LOG("16 byte: " << manager.free_component_map_[16].size());
+	manager.RemoveComponent<int>(entity_id);
+	manager.RemoveComponent<double>(entity_id);
+	manager.RemoveComponent<Velocity3>(entity_id);
+	LOG("4 byte: " << manager.free_component_map_[4].size());
+	LOG("8 byte: " << manager.free_component_map_[8].size());
+	LOG("16 byte: " << manager.free_component_map_[16].size());
+	manager.RemoveComponent<int>(entity_id);
+	manager.RemoveComponent<double>(entity_id);
+	manager.RemoveComponent<Velocity3>(entity_id);
+	LOG("4 byte: " << manager.free_component_map_[4].size());
+	LOG("8 byte: " << manager.free_component_map_[8].size());
+	LOG("16 byte: " << manager.free_component_map_[16].size());
 	//assign2(manager2, entities, 100, 100);
 	LOG("ASSIGNEMT COMPLETED!");
 	LOG("TIMING LOOPS!");
 	auto start = std::chrono::high_resolution_clock::now();
 	for (std::size_t i = 0; i < loops; ++i) {
-		update(manager, 0);
+		//update(manager, 0);
 		//LOG(i);
 	}
 	LOG("LOOPS COMPLETED!");
@@ -213,47 +267,34 @@ int main() {
 		<< std::fixed << std::setprecision(3)
 		<< duration.count() / 1000000.000 << std::endl;
 	//LOG("Manager size/capacity: " << manager.Size() << "/" << manager.Capacity());
-	//manager.~Manager3();
+	//manager.~Manager4();
 
-	// Model 3 - 2 get, 3 has
+	// 1k, 1 mil loops, 43s, Manager 4 custom allocator 
+	// 1k, 1 mil loops, 45s, Manager 3 vector pairs
 
-	// 100k, 1k loops, 21mb, vector lookup, 15.5
-	// 100k, 1k loops, 21mb, vector lookup, 14.8
-	// 100k, 1k loops, 21mb, vector lookup, 14.7
-	// 100k, 1k loops, 21mb, vector lookup, 14.7
+	// 1 mil, 1k loops, 501mb, 88s, Manager 4 custom allocator
+	// 1 mil, 1k loops, 382mb, 105s, Manager 3 vector pairs
+	// 1 mil, 1k loops, 662mb, 176s, Manager 3 regular map
 
-	// 100k, 1k loops, 4mb, map lookup, 15.8
-	// 100k, 1k loops, 4mb, map lookup, 15.6
-	// 100k, 1k loops, 4mb, map lookup, 15.6
-	// 100k, 1k loops, 4mb, map lookup, 15.3
+	// 1 mil, 1k loops, 88s, Manager 4 custom allocator
+	// 1 mil, 1k loops, 104s, Manager 3 vector pairs
 
-	// 100k, 1k loops, 43.2mb, unordered_map lookup, 28.3
-	// 100k, 1k loops, 43.2mb, unordered_map lookup, 28.7
-	// 100k, 1k loops, 43.2mb, unordered_map lookup, 28.1
-	// 100k, 1k loops, 43.2mb, unordered_map lookup, 28.6
+	// 100k, 10k loops, 89s, Manager 4 custom allocator 
+	// 100k, 10k loops, 105s, Manager 3 vector pairs
+	// 100k, 10k loops, 176s, Manager 3 regular map
 
-	// 10k, 10k loops, 3mb, vector lookup, 7.8
-	// 10k, 10k loops, 3mb, vector lookup, 7.5
-	// 10k, 10k loops, 3mb, vector lookup, 8.4
-	// 10k, 10k loops, 3mb, vector lookup, 7.7
+	// 10k, 100k loops, 81s, Manager 4 custom allocator 
+	// 10k, 100k loops, 82s, Manager 3 vector pairs
+	// 10k, 100k loops, 169s, Manager 3 regular map
 
-	// 10k, 10k loops, 4mb, map lookup, 10.9
-	// 10k, 10k loops, 4mb, map lookup, 12.4
-	// 10k, 10k loops, 4mb, map lookup, 10.1
-	// 10k, 10k loops, 4mb, map lookup, 13.6
+	// 10k, 10k loops, 8.7s, Manager 4 custom allocator 
+	// 10k, 10k loops, 8.9s, Manager 3 vector pairs
+	// 10k, 10k loops, 17s, Manager 3 regular map
 
-	// Model 3 - 6 get, 3 has
+	// 100k, 1k loops, 8.7s, Manager 4 custom allocator 
+	// 100k, 1k loops, 9.0s, Manager 3 vector pairs
 
-	// 100k, 1k loops, mb, vector lookup, 28.2
-	// 100k, 1k loops, mb, vector lookup, 
-	// 100k, 1k loops, mb, vector lookup, 
-	// 100k, 1k loops, mb, vector lookup, 
 
-	// 1k, 50k loops: 4 = X, 3 = 3.7, 3.9, 9.9
-	// 1k, 50k loops: 4 = 3.5, 3 = 3.5
-	// 100k, 5k loops: 4 = 61.2, 3 = 51.5
-	// 1 mil, 500 loops: 4 = 59, 3 = 51.2
-	// 10 mil, 100 loops: 4 = 116.7, 3 = 102.2
 	std::cin.get();
 	return 0;
 }
