@@ -71,157 +71,64 @@ struct Position3 {
 	}
 };
 
-void assign(ecs::Manager4& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+void assign(ecs::Manager3& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<Velocity>(entities);*/
 	manager.ResizeEntities(entities);
 	for (ecs::EntityId i = 0; i < entities; ++i) {
 		ecs::EntityId entity_id = manager.CreateEntity();
-		manager.AddComponent<Position>(entity_id, x, y);
-		manager.AddComponent<Velocity>(entity_id, x, y);
+		manager.AddComponent<Position>(entity_id, 0, 0);
+		manager.AddComponent<Velocity>(entity_id, 0, 0);
 		// 32 ^
-		manager.AddComponent<Velocity2>(entity_id, x, y);
-		manager.AddComponent<Position2>(entity_id, x, y);
+		manager.AddComponent<Velocity2>(entity_id, 0, 0);
+		manager.AddComponent<Position2>(entity_id, 0, 0);
 		// 32 ^
-		manager.AddComponent<Velocity3>(entity_id, x, y);
-		manager.AddComponent<Position3>(entity_id, x, y);
+		manager.AddComponent<Velocity3>(entity_id, 0, 0);
+		manager.AddComponent<Position3>(entity_id, 0, 0);
 		// 32 ^
 		manager.AddComponent<int>(entity_id, 1);
 		manager.AddComponent<double>(entity_id, 2.0);
 		manager.AddComponent<float>(entity_id, 3.0f);
-		// 16 ^
-
-		// 48
-		manager.RemoveComponent<int>(entity_id);
-		manager.RemoveComponent<double>(entity_id);
-		manager.RemoveComponent<float>(entity_id);
 	}
 }
 
-void assign2(ecs::Manager4& manager, ecs::EntityId entities, double x = 0, double y = 0) {
-	/*manager.ReserveComponent<Velocity>(entities);
-	manager.ReserveComponent<Position>(entities);
-	manager.ReserveComponent<bool>(1);*/
-	for (std::size_t i = 0; i < manager.EntityCount(); ++i) {
-		manager.AddComponent<Velocity>(i, x, y);
-		manager.AddComponent<Position>(i, x, y);
-		manager.AddComponent<int>(i, 1);
-		manager.AddComponent<double>(i, 2.0);
-		manager.AddComponent<float>(i, 3.0f);
-		manager.RemoveComponent<int>(i);
-		manager.RemoveComponent<double>(i);
-		manager.RemoveComponent<float>(i);
-	}
-}
-
-void update(ecs::Manager4& manager, int increment = 1) {
+void update(ecs::Manager3& manager, int increment = 1) {
 	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
 	for (std::size_t i = 0; i < manager.EntityCount(); ++i) {
-		auto& pos = manager.GetComponent<Position>(i);
-		pos.x += increment;
-		pos.y += increment;
-		auto& vel = manager.GetComponent<Velocity>(i);
-		vel.x += increment;
-		vel.y += increment;
-		auto& vel2 = manager.GetComponent<Velocity2>(i);
-		vel2.x += increment;
-		vel2.y += increment;
-		auto& pos2 = manager.GetComponent<Position2>(i);
-		pos2.x += increment;
-		pos2.y += increment;
-		auto& vel3 = manager.GetComponent<Velocity3>(i);
-		vel3.x += increment;
-		vel3.y += increment;
-		auto& pos3 = manager.GetComponent<Position3>(i);
-		pos3.x += increment;
-		pos3.y += increment;
-		/*if (i == 0) {
-			LOG("pos: " << pos << ", vel:" << vel << ", int: " << integer << ", double: " << doubler << ", float: " << floater);
-		}*/
-		if (manager.HasComponent<int>(i)) {
-			auto& integer = manager.GetComponent<int>(i);
-			integer += increment;
-		}
-		if (manager.HasComponent<double>(i)) {
-			auto& doubler = manager.GetComponent<double>(i);
-			doubler += increment;
-		}
-		if (manager.HasComponent<float>(i)) {
-			auto& floater = manager.GetComponent<float>(i);
-			floater += increment;
-		}
+		ecs::EntityId entity_id = i;
+		manager.GetComponent<Position>(entity_id);
+		manager.GetComponent<Velocity>(entity_id);
+		// 32 ^
+		manager.GetComponent<Velocity2>(entity_id);
+		manager.GetComponent<Position2>(entity_id);
+		// 32 ^
+		manager.GetComponent<Velocity3>(entity_id);
+		manager.GetComponent<Position3>(entity_id);
+		// 32 ^
+		manager.GetComponent<int>(entity_id);
+		manager.GetComponent<double>(entity_id);
+		manager.GetComponent<float>(entity_id);
 	}
 }
 
 int fpsLimit() { return 240; }
 
 int main() {
-	ecs::Manager4 manager;
-	//ecs::Manager4 manager2;
-	ecs::EntityId entities = 1000000;
+	ecs::Manager3 manager;
+	//ecs::Manager3 manager2;
+	ecs::EntityId entities = 10000;
 	std::size_t loops = 1000;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
-	//assign(manager, entities, 0, 0);
-	ecs::EntityId entity_id = manager.CreateEntity();
-	manager.AddComponent<Position>(entity_id, 0, 0);
-	manager.AddComponent<Velocity>(entity_id, 0, 0);
-	// 32 ^
-	manager.AddComponent<Velocity2>(entity_id, 0, 0);
-	manager.AddComponent<Position2>(entity_id, 0, 0);
-	// 32 ^
-	manager.AddComponent<Velocity3>(entity_id, 0, 0);
-	manager.AddComponent<Position3>(entity_id, 0, 0);
-	// 32 ^
-	manager.AddComponent<int>(entity_id, 1);
-	manager.AddComponent<double>(entity_id, 2.0);
-	manager.AddComponent<float>(entity_id, 3.0f);
-	// 16 ^
-
-	// 48
-	manager.RemoveComponent<Position>(entity_id);
-	manager.RemoveComponent<Velocity>(entity_id);
-	manager.RemoveComponent<Velocity2>(entity_id);
-	manager.RemoveComponent<Position2>(entity_id);
-	manager.RemoveComponent<Velocity3>(entity_id);
-	manager.RemoveComponent<Position3>(entity_id);
-	manager.RemoveComponent<int>(entity_id);
-	manager.RemoveComponent<double>(entity_id);
-	manager.RemoveComponent<float>(entity_id);
-	LOG("4 byte: " << manager.free_component_map_[4].size());
-	LOG("8 byte: " << manager.free_component_map_[8].size());
-	LOG("16 byte: " << manager.free_component_map_[16].size());
-	manager.AddComponent<int>(entity_id, 1);
-	manager.AddComponent<double>(entity_id, 2.0);
-	manager.AddComponent<Velocity3>(entity_id, 0, 0);
-	LOG("4 byte: " << manager.free_component_map_[4].size());
-	LOG("8 byte: " << manager.free_component_map_[8].size());
-	LOG("16 byte: " << manager.free_component_map_[16].size());
-	manager.AddComponent<int>(entity_id, 1);
-	manager.AddComponent<double>(entity_id, 2.0);
-	manager.AddComponent<Velocity3>(entity_id, 0, 0);
-	LOG("4 byte: " << manager.free_component_map_[4].size());
-	LOG("8 byte: " << manager.free_component_map_[8].size());
-	LOG("16 byte: " << manager.free_component_map_[16].size());
-	manager.RemoveComponent<int>(entity_id);
-	manager.RemoveComponent<double>(entity_id);
-	manager.RemoveComponent<Velocity3>(entity_id);
-	LOG("4 byte: " << manager.free_component_map_[4].size());
-	LOG("8 byte: " << manager.free_component_map_[8].size());
-	LOG("16 byte: " << manager.free_component_map_[16].size());
-	manager.RemoveComponent<int>(entity_id);
-	manager.RemoveComponent<double>(entity_id);
-	manager.RemoveComponent<Velocity3>(entity_id);
-	LOG("4 byte: " << manager.free_component_map_[4].size());
-	LOG("8 byte: " << manager.free_component_map_[8].size());
-	LOG("16 byte: " << manager.free_component_map_[16].size());
-	//assign2(manager2, entities, 100, 100);
+	assign(manager, entities, 0, 0);
 	LOG("ASSIGNEMT COMPLETED!");
 	LOG("TIMING LOOPS!");
+	LOG(sizeof(ecs::ComponentData));
+	LOG(sizeof(std::pair<ecs::ComponentId, ecs::BaseComponent*>));
 	auto start = std::chrono::high_resolution_clock::now();
 	for (std::size_t i = 0; i < loops; ++i) {
-		//update(manager, 0);
-		//LOG(i);
+		update(manager, 0);
+		LOG(i);
 	}
 	LOG("LOOPS COMPLETED!");
 	//using namespace std::chrono;
@@ -267,7 +174,13 @@ int main() {
 		<< std::fixed << std::setprecision(3)
 		<< duration.count() / 1000000.000 << std::endl;
 	//LOG("Manager size/capacity: " << manager.Size() << "/" << manager.Capacity());
-	//manager.~Manager4();
+	//manager.~Manager3();
+
+	// 1 mil, 10 loops, 96s, Manager 4 custom allocator adding and removing components
+	// 1 mil, 10 loops, 77s, Manager 3 vector pairs adding and removing components
+
+	// 1 mil, 1k loops, 87, 92, 92s, Manager 4 custom allocator
+	// 1 mil, 1k loops, 75, 76s, Manager 3 vector pairs
 
 	// 1k, 1 mil loops, 43s, Manager 4 custom allocator 
 	// 1k, 1 mil loops, 45s, Manager 3 vector pairs
