@@ -484,14 +484,14 @@ public:
 			ResizeEntities(entities_.capacity() + 2);
 		}
 		EntityId free_id(FindFreeEntityId());
-		++entity_count_;
+		assert(!HasEntity(free_id));
 		EntityData4 new_entity;
 		new_entity.alive = true;
 		entities_[free_id] = std::move(new_entity);
 		return free_id;
 	}
 	void DestroyEntity(EntityId index) {
-		// assert(HasEntity(index));
+		assert(HasEntity(index));
 		free_entity_list_.push_back(index);
 		EntityData4& data = entities_[index];
 		for (auto& c : data.components) {
@@ -510,10 +510,16 @@ public:
 		data.components.resize(0);
 		--entity_count_;
 	}
+	bool HasEntity(EntityId index) {
+		if (index >= 0 && index < static_cast<EntityId>(entities_.size())) {
+			return entities_[index].alive;
+		}
+		return false;
+	}
 	template <class T, typename ...TArgs>
 	void AddComponent(EntityId index, TArgs&&... args) {
-		auto& components = entities_[index].components;
 		auto it = GetComponentIterator<T>(index);
+		auto& components = entities_[index].components;
 		if (it == std::end(components)) {
 			std::size_t size = sizeof(T);
 			if (size_ + size >= capacity_) {
@@ -522,19 +528,21 @@ public:
 			FreeComponent free_component = FindFreeComponentAddress(size);
 			new(free_component.address) T(std::forward<TArgs>(args)...);
 			destructor_func destruct = &destructor<T>;
-			//ComponentId id = typeid(T).hash_code();
 			components.emplace_back(GetTypeId<T>(), destruct, static_cast<void*>(free_component.address), free_component.bytes_from_begin, size);
 			if (!free_component.existed) {
 				size_ += size;
 			}
 		} else {
+			//LOG("Replacing component");
+			*static_cast<T*>((it->address)) = std::move(T(std::forward<TArgs>(args)...));
 			// Cannot add more than one of a single type of component
 		}
 	}
 	template <class T>
 	void RemoveComponent(EntityId index) {
-		auto& components = entities_[index].components;
+		// Make this assertion???
 		auto it = GetComponentIterator<T>(index);
+		auto& components = entities_[index].components;
 		if (it != std::end(components)) {
 			std::size_t size = sizeof(T);
 			auto map_it = free_component_map_.find(size);
@@ -568,9 +576,9 @@ public:
 	}
 	template <class T>
 	T& GetComponent(EntityId index) {
-		T* ptr = GetComponentP<T>(index);
-		assert(ptr, "No matching component in entity ", std::to_string(index));
-		return *ptr;
+		T* component = GetComponentP<T>(index);
+		assert(component, "No matching component exists");
+		return *component;
 	}
 	std::size_t EntityCount() const {
 		return entity_count_;
@@ -578,6 +586,7 @@ public:
 private:
 	template <class T>
 	auto GetComponentIterator(EntityId index) {
+		assert(HasEntity(index), "Entity does not exist in manager");
 		auto& components = entities_[index].components;
 		ComponentId id = GetTypeId<T>();
 		auto end = std::end(components);
@@ -637,8 +646,8 @@ private:
 				free_entity_list_.pop_back();
 			}
 			return free_id;
-		} 
-		return entity_count_;
+		}
+		return entity_count_++;
 	}
 public:
 	std::unordered_map<std::size_t, std::vector<FreeComponent>> free_component_map_;
@@ -675,14 +684,8 @@ private:
 	T data;
 };
 
-//#define MAP_LOOKUP
-
 struct EntityData3 {
-	#ifdef MAP_LOOKUP
-	std::map<ComponentId, BaseComponent*> components;
-	#else
 	std::vector<std::pair<ComponentId, BaseComponent*>> components;
-	#endif
 	bool alive;
 };
 
@@ -692,7 +695,7 @@ public:
 		entities_.resize(entities_.capacity() + additional_amount);
 	}
 	EntityId CreateEntity() {
-		if (entity_count_ >= static_cast<EntityId>(entities_.capacity())) {
+		if (entity_count_ >= entities_.capacity()) {
 			ResizeEntities(entities_.capacity() + 2);
 		}
 		EntityId free_index(entity_count_++);
@@ -701,80 +704,75 @@ public:
 		entities_[free_index] = std::move(new_entity);
 		return free_index;
 	}
+	bool HasEntity(EntityId index) {
+		if (index >= 0 && index < static_cast<EntityId>(entities_.size())) {
+			return entities_[index].alive;
+		}
+		return false;
+	}
 	template <class T, typename ...TArgs>
 	void AddComponent(EntityId index, TArgs&&... args) {
-		#ifdef MAP_LOOKUP
-		entities_[index].components.emplace(GetTypeId<T>(), new Component<T>(T{ std::forward<TArgs>(args)... }));
-		#else
-		entities_[index].components.emplace_back(GetTypeId<T>(), new Component<T>(T{ std::forward<TArgs>(args)... }));
-		#endif
+		auto it = GetComponentIterator<T>(index);
+		auto& components = entities_[index].components;
+		ComponentId id = GetTypeId<T>();
+		if (it == std::end(components)) {
+			components.emplace_back(id, new Component<T>(T(std::forward<TArgs>(args)...)));
+		} else {
+			BaseComponent* ptr = it->second;
+			static_cast<Component<T>*>(ptr)->get().~T();
+			delete ptr;
+			it->second = new Component<T>(T(std::forward<TArgs>(args)...));
+		}
 	}
 	template <class T>
 	void RemoveComponent(EntityId index) {
+		auto it = GetComponentIterator<T>(index);
 		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		#ifdef MAP_LOOKUP
-		auto it = components.find(id);
 		if (it != std::end(components)) {
 			BaseComponent* ptr = it->second;
 			static_cast<Component<T>*>(ptr)->get().~T();
 			delete ptr;
 			ptr = nullptr;
-			components.erase(id);
+			components.erase(it);
 		}
-		#else
-		for (auto it = std::begin(components); it != std::end(components); ++it) {
-			if (it->first == id) {
-				BaseComponent* ptr = it->second;
-				static_cast<Component<T>*>(ptr)->get().~T();
-				delete ptr;
-				ptr = nullptr;
-				it = components.erase(it);
-				break;
-			}
-		}
-		#endif
 	}
 	template <class T>
 	bool HasComponent(EntityId index) {
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		#ifdef MAP_LOOKUP
-		auto it = components.find(id);
-		if (it != std::end(components)) {
-			return true;
+		auto it = GetComponentIterator<T>(index);
+		return it->second;
+	}
+	template <class T>
+	T* GetComponentP(EntityId index) {
+		auto it = GetComponentIterator<T>(index);
+		if (it->second) {
+			return &static_cast<Component<T>*>(it->second)->get();
 		}
-		#else
-		for (auto& pair : components) {
-			if (pair.first == id) {
-				return true;
-			}
-		}
-		#endif
-		return false;
+		return nullptr;
 	}
 	template <class T>
 	T& GetComponent(EntityId index) {
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		#ifdef MAP_LOOKUP
-		auto it = components.find(id);
-		assert(it != std::end(components));
+		auto it = GetComponentIterator<T>(index);
+		assert(it->second);
 		return static_cast<Component<T>*>(it->second)->get();
-		#else
-		for (auto& pair : components) {
-			if (pair.first == id) {
-				return static_cast<Component<T>*>(pair.second)->get();
-			}
-		}
-		return static_cast<Component<T>*>(components[0].second)->get();
-		#endif
 	}
-	EntityId EntityCount() const {
+	std::size_t EntityCount() const {
 		return entity_count_;
 	}
 private:
-	EntityId entity_count_ = 0;
+	template <class T>
+	auto GetComponentIterator(EntityId index) {
+		assert(HasEntity(index), "Entity does not exist in manager");
+		auto& components = entities_[index].components;
+		ComponentId id = GetTypeId<T>();
+		auto end = std::end(components);
+		for (auto it = std::begin(components); it != end; ++it) {
+			if (it->first == id) {
+				return it;
+			}
+		}
+		return end;
+	}
+	std::size_t entity_count_ = 0;
 	std::vector<EntityData3> entities_;
 };
 
