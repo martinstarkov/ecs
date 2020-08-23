@@ -665,12 +665,11 @@ private:
 
 
 template<typename T>
-void destruct(char* ptr) {
+void DestroyComponent(char* ptr) {
 	static_cast<T*>((void*)ptr)->~T();
 }
 
-typedef void (*destruct_func)(char*);
-
+typedef void (*destructor_function)(char*);
 
 struct EntityData5 {
 	std::vector<std::pair<ComponentId, std::int64_t>> components;
@@ -768,12 +767,12 @@ public:
 			}
 			auto pair = GetFreeComponentAddress(size);
 			new((void*)(mega_array_ + pair.first)) T(std::forward<TArgs>(args)...);
-			destruct_func d = &destruct<T>;
-			if (GetDestructorIterator(id) == std::end(destructors_)) {
-				destructors_.emplace_back(id, d);
-			}
 			components.emplace_back(id, pair.first);
+			// Component did not exist in free_component_map_
 			if (!pair.second) {
+				if (GetDestructorIterator(id) == std::end(destructors_)) {
+					destructors_.emplace_back(id, &DestroyComponent<T>);
+				}
 				size_ += size;
 			}
 		} else {
@@ -798,9 +797,7 @@ public:
 			} else {
 				map_it->second.emplace_back(address);
 			}
-			auto destructor_it = GetDestructorIterator(id);
-			assert(destructor_it != std::end(destructors_), "Could not find destructor iterator");
-			destructor_it->second(address);
+			DestroyComponent<T>(address);
 			memset((void*)address, 0, size);
 			components.erase(component_it);
 		}
@@ -914,7 +911,7 @@ public:
 	std::unordered_map<std::size_t, std::vector<std::int64_t>> free_component_map_;
 	std::vector<std::size_t> free_entity_list_;
 private:
-	std::vector<std::pair<ComponentId, destruct_func>> destructors_;
+	std::vector<std::pair<ComponentId, destructor_function>> destructors_;
 	std::size_t entity_count_{ 0 };
 	std::size_t capacity_{ 0 };
 	std::size_t size_{ 0 };
