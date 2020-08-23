@@ -14,6 +14,8 @@
 #include <sstream>
 #include <cmath>
 
+#include <atomic>
+
 #include <string>
 
 // TODO: Add license at top of file when you get there
@@ -393,6 +395,20 @@ private:
 	std::vector<EntityData2> entities_;
 };
 
+
+
+
+extern std::atomic_int component_counter;
+
+template <typename T>
+int GetTypeId() {
+	static int id = ++component_counter;
+	return id;
+}
+
+// In a *.cpp file:
+std::atomic_int component_counter{ 0 };
+
 template<typename T>
 void destructor(void* ptr) {
 	static_cast<T*>(ptr)->~T();
@@ -452,21 +468,20 @@ public:
 				mega_array_ = malloc(new_capacity);
 				capacity_ = new_capacity;
 			} else {
-				ReAllocate();
 			}
 		}*/
 		if (mega_array_ == nullptr) {
-			std::size_t new_capacity = new_entities * 48;
+			std::size_t new_capacity = new_entities;
 			mega_array_ = malloc(new_capacity);
 			capacity_ = new_capacity;
 			entities_.resize(entities_.capacity() + new_entities);
 		} else {
-			assert(false);
+			ReAllocate();
 		}
 	}
 	EntityId CreateEntity() {
-		if (entity_count_ >= static_cast<EntityId>(entities_.capacity())) {
-			assert("out of entity space");
+		if (entity_count_ >= entities_.capacity()) {
+			ResizeEntities(entities_.capacity() + 2);
 		}
 		EntityId free_id(FindFreeEntityId());
 		++entity_count_;
@@ -497,84 +512,94 @@ public:
 	}
 	template <class T, typename ...TArgs>
 	void AddComponent(EntityId index, TArgs&&... args) {
-		std::size_t size = sizeof(T);
-		if (size_ + size >= capacity_) {
-			assert(false, "out of component space");
-			LOG("Reallocating at : " << size_);
-			ReAllocate();
-		}
-		FreeComponent free_component = FindFreeComponentAddress(size);
-		new(free_component.address) T{ std::forward<TArgs>(args)... };
-		destructor_func destruct = &destructor<T>;
-		ComponentId id = typeid(T).hash_code();
-		entities_[index].components.emplace_back(id, destruct, static_cast<void*>(free_component.address), free_component.bytes_from_begin, size);
-		if (!free_component.existed) {
-			size_ += size;
+		auto& components = entities_[index].components;
+		auto it = GetComponentIterator<T>(index);
+		if (it == std::end(components)) {
+			std::size_t size = sizeof(T);
+			if (size_ + size >= capacity_) {
+				ReAllocate();
+			}
+			FreeComponent free_component = FindFreeComponentAddress(size);
+			new(free_component.address) T(std::forward<TArgs>(args)...);
+			destructor_func destruct = &destructor<T>;
+			//ComponentId id = typeid(T).hash_code();
+			components.emplace_back(GetTypeId<T>(), destruct, static_cast<void*>(free_component.address), free_component.bytes_from_begin, size);
+			if (!free_component.existed) {
+				size_ += size;
+			}
+		} else {
+			// Cannot add more than one of a single type of component
 		}
 	}
 	template <class T>
 	void RemoveComponent(EntityId index) {
 		auto& components = entities_[index].components;
-		ComponentId id = typeid(T).hash_code();
-		for (auto component_it = std::begin(components); component_it != std::end(components); ++component_it) {
-			if (component_it->id == id) {
-				// add component address to free_component_map_
-				std::size_t size = sizeof(T);
-				auto map_it = free_component_map_.find(size);
-				if (map_it == std::end(free_component_map_)) {
-					std::vector<FreeComponent> vector;
-					vector.emplace_back(component_it->bytes_from_begin, component_it->address);
-					free_component_map_.emplace(size, std::move(vector));
-				} else {
-					map_it->second.emplace_back(component_it->bytes_from_begin, component_it->address);
-				}
-				component_it->destructor(component_it->address);
-				memset(component_it->address, 0, component_it->size);
-				component_it = components.erase(component_it);
-				// CONSIDER: without break this could support multiple component removal (future feature?)
-				break;
+		auto it = GetComponentIterator<T>(index);
+		if (it != std::end(components)) {
+			std::size_t size = sizeof(T);
+			auto map_it = free_component_map_.find(size);
+			if (map_it == std::end(free_component_map_)) {
+				std::vector<FreeComponent> vector;
+				vector.emplace_back(it->bytes_from_begin, it->address);
+				free_component_map_.emplace(size, std::move(vector));
+			} else {
+				map_it->second.emplace_back(it->bytes_from_begin, it->address);
 			}
+			it->destructor(it->address);
+			memset(it->address, 0, it->size);
+			components.erase(it);
 		}
-
 	}
 	template <class T>
 	bool HasComponent(EntityId index) {
-		auto& components = entities_[index].components;
-		ComponentId id = typeid(T).hash_code();
-		for (auto& c : components) {
-			if (c.id == id) {
-				return true;
-			}
+		auto it = GetComponentIterator<T>(index);
+		if (it != std::end(entities_[index].components)) {
+			return true;
 		}
 		return false;
 	}
 	template <class T>
-	T& GetComponent(EntityId index) {
-		auto& components = entities_[index].components;
-		ComponentId id = typeid(T).hash_code();
-		for (auto& c : components) {
-			if (c.id == id) {
-				return *static_cast<T*>(c.address);
-			}
+	T* GetComponentP(EntityId index) {
+		auto it = GetComponentIterator<T>(index);
+		if (it != std::end(entities_[index].components)) {
+			return static_cast<T*>(it->address);
 		}
-		assert(false, "No matching component in entity ", std::to_string(index));
-		// Return first element of components vector if no match is found
-		return *static_cast<T*>(components[0].address);
+		return nullptr;
 	}
-	EntityId EntityCount() const {
+	template <class T>
+	T& GetComponent(EntityId index) {
+		T* ptr = GetComponentP<T>(index);
+		assert(ptr, "No matching component in entity ", std::to_string(index));
+		return *ptr;
+	}
+	std::size_t EntityCount() const {
 		return entity_count_;
 	}
 private:
+	template <class T>
+	auto GetComponentIterator(EntityId index) {
+		auto& components = entities_[index].components;
+		ComponentId id = GetTypeId<T>();
+		auto end = std::end(components);
+		for (auto it = std::begin(components); it != end; ++it) {
+			if (it->id == id) {
+				return it;
+			}
+		}
+		return end;
+	}
 	void ReAllocate() {
-		void* p = realloc(mega_array_, capacity_ * 2);
-		assert(p, "could not reallocate ", std::to_string(capacity_ * 2));
+		std::size_t new_capacity = capacity_ * 2;
+		LOG("Reallocating " << new_capacity << " bytes...");
+		void* p = realloc(mega_array_, new_capacity);
+		assert(p, "could not reallocate ", std::to_string(new_capacity));
 		mega_array_ = p;
 		for (auto& e : entities_) {
 			for (auto& c : e.components) {
 				c.address = (void*)((char*)mega_array_ + c.bytes_from_begin);
 			}
 		}
-		capacity_ = capacity_ * 2;
+		capacity_ = new_capacity;
 	}
 	std::size_t Size() const {
 		return size_;
@@ -587,22 +612,24 @@ private:
 			auto it = free_component_map_.find(required_size);
 			if (it != std::end(free_component_map_)) {
 				std::vector<FreeComponent>& free_components = it->second;
-				// get copy of first free component
-				FreeComponent free_component = free_components.front();
-				if (free_components.size() == 1) { // one free component, erase size entry
-					free_component_map_.erase(required_size);
-				} else { // multiple free_components, swap and pop
-					std::iter_swap(std::begin(free_components), std::end(free_components) - 1);
-					free_components.pop_back();
+				if (free_components.size() > 0) {
+					// get copy of first free component
+					FreeComponent free_component = *free_components.begin();
+					if (free_components.size() == 1) { // one free component, erase size entry
+						free_component_map_.erase(it);
+					} else { // multiple free_components, swap and pop
+						std::iter_swap(std::begin(free_components), std::end(free_components) - 1);
+						free_components.pop_back();
+					}
+					return free_component;
 				}
-				return free_component;
 			}
 		}
 		return FreeComponent(size_, (void*)((char*)mega_array_ + size_), false);
 	}
-	EntityId FindFreeEntityId() {
+	std::size_t FindFreeEntityId() {
 		if (free_entity_list_.size() > 0) {
-			EntityId free_id = free_entity_list_.front();
+			std::size_t free_id = free_entity_list_.front();
 			if (free_entity_list_.size() == 1) { // one free entity, clear vector
 				free_entity_list_.resize(0);
 			} else { // multiple free entities, swap and pop
@@ -613,11 +640,13 @@ private:
 		} 
 		return entity_count_;
 	}
+public:
 	std::unordered_map<std::size_t, std::vector<FreeComponent>> free_component_map_;
-	std::vector<EntityId> free_entity_list_;
-	EntityId entity_count_ = 0;
-	std::size_t capacity_ = 0;
-	std::size_t size_ = 0;
+	std::vector<std::size_t> free_entity_list_;
+private:
+	std::size_t entity_count_{ 0 };
+	std::size_t capacity_{ 0 };
+	std::size_t size_{ 0 };
 	void* mega_array_ = nullptr;
 	std::vector<EntityData4> entities_;
 };
@@ -675,15 +704,15 @@ public:
 	template <class T, typename ...TArgs>
 	void AddComponent(EntityId index, TArgs&&... args) {
 		#ifdef MAP_LOOKUP
-		entities_[index].components.emplace(typeid(T).hash_code(), new Component<T>(T{ std::forward<TArgs>(args)... }));
+		entities_[index].components.emplace(GetTypeId<T>(), new Component<T>(T{ std::forward<TArgs>(args)... }));
 		#else
-		entities_[index].components.emplace_back(typeid(T).hash_code(), new Component<T>(T{ std::forward<TArgs>(args)... }));
+		entities_[index].components.emplace_back(GetTypeId<T>(), new Component<T>(T{ std::forward<TArgs>(args)... }));
 		#endif
 	}
 	template <class T>
 	void RemoveComponent(EntityId index) {
 		auto& components = entities_[index].components;
-		ComponentId id = typeid(T).hash_code();
+		ComponentId id = GetTypeId<T>();
 		#ifdef MAP_LOOKUP
 		auto it = components.find(id);
 		if (it != std::end(components)) {
@@ -709,7 +738,7 @@ public:
 	template <class T>
 	bool HasComponent(EntityId index) {
 		auto& components = entities_[index].components;
-		ComponentId id = typeid(T).hash_code();
+		ComponentId id = GetTypeId<T>();
 		#ifdef MAP_LOOKUP
 		auto it = components.find(id);
 		if (it != std::end(components)) {
@@ -727,7 +756,7 @@ public:
 	template <class T>
 	T& GetComponent(EntityId index) {
 		auto& components = entities_[index].components;
-		ComponentId id = typeid(T).hash_code();
+		ComponentId id = GetTypeId<T>();
 		#ifdef MAP_LOOKUP
 		auto it = components.find(id);
 		assert(it != std::end(components));
