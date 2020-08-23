@@ -107,6 +107,7 @@ void Assert(bool assertion, const char* condition, const char* file, int line, s
 namespace ecs {
 
 using ComponentId = int64_t;
+using Atomic_ComponentId = std::atomic_int64_t;
 using ComponentIndex = int64_t;
 using EntityId = int64_t;
 
@@ -398,16 +399,16 @@ private:
 
 
 
-extern std::atomic_int component_counter;
+extern Atomic_ComponentId component_counter;
 
 template <typename T>
-int GetTypeId() {
-	static int id = ++component_counter;
+ComponentId GetTypeId() {
+	static ComponentId id = ++component_counter;
 	return id;
 }
 
 // In a *.cpp file:
-std::atomic_int component_counter{ 0 };
+Atomic_ComponentId component_counter{ 0 };
 
 template<typename T>
 void destructor(void* ptr) {
@@ -436,9 +437,6 @@ struct EntityData4 {
 	std::vector<ComponentData> components;
 	bool alive;
 };
-
-// TODO: Freelist of some sort for free memory, figure out how EntityData4 should be changed when component is removed (do you shift everything???)
-// TODO: Add RemoveComponent method
 
 class Manager4 {
 public:
@@ -659,6 +657,279 @@ private:
 	void* mega_array_ = nullptr;
 	std::vector<EntityData4> entities_;
 };
+
+
+
+
+
+
+
+template<typename T>
+void destruct(char* ptr) {
+	static_cast<T*>((void*)ptr)->~T();
+}
+
+typedef void (*destruct_func)(char*);
+
+
+struct EntityData5 {
+	std::vector<std::pair<ComponentId, std::int64_t>> components;
+	bool alive;
+};
+
+class Manager5 {
+private:
+	auto GetDestructorIterator(ComponentId id) {
+		auto end = std::end(destructors_);
+		for (auto it = std::begin(destructors_); it != end; ++it) {
+			if (id == it->first) {
+				return it;
+			}
+		}
+		return end;
+	}
+public:
+	Manager5() = default;
+	~Manager5() {
+		for (auto& entity : entities_) {
+			for (auto& pair : entity.components) {
+				auto destructor_it = GetDestructorIterator(pair.first);
+				assert(destructor_it != std::end(destructors_), "Could not find destructor iterator");
+				destructor_it->second(mega_array_ + pair.second);
+			}
+		}
+		LOG("Destructed all component data");
+		free(mega_array_);
+		mega_array_ = nullptr;
+		LOG("Freed memory of mega array");
+	}
+	Manager5(const Manager5&) = delete;
+	Manager5& operator=(const Manager5&) = delete;
+	// TODO: Later implement move operators (and perhaps copy?)
+	Manager5(Manager5&&) = delete;
+	Manager5& operator=(Manager5&&) = delete;
+	void ResizeEntities(std::size_t new_entities) {
+		if (!mega_array_) {
+			std::size_t new_capacity = new_entities;
+			//LOG("Allocating " << new_capacity << " bytes...");
+			mega_array_ = (char*)malloc(new_capacity);
+			capacity_ = new_capacity;
+			entities_.resize(entities_.capacity() + new_entities);
+		} else {
+			ReAllocate();
+		}
+	}
+	EntityId CreateEntity() {
+		if (entity_count_ >= entities_.capacity()) {
+			ResizeEntities(entities_.capacity() + 2);
+		}
+		EntityId free_id(FindFreeEntityId());
+		assert(!HasEntity(free_id));
+		EntityData5 new_entity;
+		new_entity.alive = true;
+		entities_[free_id] = std::move(new_entity);
+		return free_id;
+	}
+	/*void DestroyEntity(EntityId index) {
+		assert(HasEntity(index));
+		free_entity_list_.push_back(index);
+		EntityData4& data = entities_[index];
+		for (auto& c : data.components) {
+			auto it = free_component_map_.find(c.size);
+			if (it == std::end(free_component_map_)) {
+				std::vector<FreeComponent> vector;
+				vector.emplace_back(c.bytes_from_begin, c.address);
+				free_component_map_.emplace(c.size, std::move(vector));
+			} else {
+				it->second.emplace_back(c.bytes_from_begin, c.address);
+			}
+			c.destructor(c.address);
+			memset(c.address, 0, c.size);
+		}
+		data.alive = false;
+		data.components.resize(0);
+		--entity_count_;
+	}*/
+	bool HasEntity(EntityId index) {
+		if (index >= 0 && index < static_cast<EntityId>(entities_.size())) {
+			return entities_[index].alive;
+		}
+		return false;
+	}
+	template <class T, typename ...TArgs>
+	void AddComponent(EntityId index, TArgs&&... args) {
+		ComponentId id = GetTypeId<T>();
+		auto it = GetComponentIterator(index, id);
+		auto& components = entities_[index].components;
+		if (it == std::end(components)) {
+			std::size_t size = sizeof(T);
+			if (size_ + size >= capacity_) {
+				ReAllocate();
+			}
+			auto pair = GetFreeComponentAddress(size);
+			new((void*)(mega_array_ + pair.first)) T(std::forward<TArgs>(args)...);
+			destruct_func d = &destruct<T>;
+			if (GetDestructorIterator(id) == std::end(destructors_)) {
+				destructors_.emplace_back(id, d);
+			}
+			components.emplace_back(id, pair.first);
+			if (!pair.second) {
+				size_ += size;
+			}
+		} else {
+			//LOG("Replacing component");
+			*static_cast<T*>((void*)(mega_array_ + it->second)) = std::move(T(std::forward<TArgs>(args)...));
+			// Cannot add more than one of a single type of component
+		}
+	}
+	template <class T>
+	void RemoveComponent(EntityId index) {
+		ComponentId id = GetTypeId<T>();
+		auto component_it = GetComponentIterator(index, id);
+		auto& components = entities_[index].components;
+		if (component_it != std::end(components)) {
+			auto address = mega_array_ + component_it->second;
+			std::size_t size = sizeof(T);
+			auto map_it = free_component_map_.find(size);
+			if (map_it == std::end(free_component_map_)) {
+				std::vector<char*> free_addresses;
+				free_addresses.emplace_back(address);
+				free_component_map_.emplace(size, std::move(free_addresses));
+			} else {
+				map_it->second.emplace_back(address);
+			}
+			auto destructor_it = GetDestructorIterator(id);
+			assert(destructor_it != std::end(destructors_), "Could not find destructor iterator");
+			destructor_it->second(address);
+			memset((void*)address, 0, size);
+			components.erase(component_it);
+		}
+	}
+	template <class T>
+	bool HasComponent(EntityId index) {
+		auto it = GetComponentIterator<T>(index);
+		if (it != std::end(entities_[index].components)) {
+			return true;
+		}
+		return false;
+	}
+	template <class T>
+	T* GetComponentP(EntityId index) {
+		return static_cast<T*>(GetComponentAddress<T>(index));
+	}
+	template <class T>
+	T& GetComponent(EntityId index) {
+		T* component = GetComponentP<T>(index);
+		assert(component, "No matching component exists");
+		return *component;
+	}
+	std::size_t EntityCount() const {
+		return entity_count_;
+	}
+private:
+	/*template <class T>
+	auto GetComponentIterator(EntityId index) {
+		assert(HasEntity(index), "Entity does not exist in manager");
+		auto& components = entities_[index].components;
+		ComponentId id = GetTypeId<T>();
+		auto end = std::end(components);
+		for (auto it = std::begin(components); it != end; ++it) {
+			if (it->id == id) {
+				return it;
+			}
+		}
+		return end;
+	}*/
+	void ReAllocate() {
+		std::size_t new_capacity = capacity_ * 2;
+		//LOG("Reallocating " << new_capacity << " bytes...");
+		void* p = realloc(mega_array_, new_capacity);
+		assert(p, "could not reallocate ", std::to_string(new_capacity));
+		mega_array_ = (char*)p;
+		capacity_ = new_capacity;
+	}
+	template <typename T>
+	auto GetComponentIterator(EntityId index) {
+		return GetComponentIterator(index, GetTypeId<T>());
+	}
+	auto GetComponentIterator(EntityId index, ComponentId id) {
+		assert(HasEntity(index));
+		auto& components = entities_[index].components;
+		auto end = std::end(components);
+		for (auto it = std::begin(components); it != end; ++it) {
+			if (id == it->first) {
+				return it;
+			}
+		}
+		return end;
+	}
+	template <typename T>
+	void* GetComponentAddress(EntityId index) {
+		auto it = GetComponentIterator<T>(index);
+		if (it != std::end(entities_[index].components)) {
+			return (void*)(mega_array_ + it->second);
+		}
+		return nullptr;
+	}
+	std::size_t Size() const {
+		return size_;
+	}
+	std::size_t Capacity() const {
+		return capacity_;
+	}
+	std::pair<std::int64_t, bool> GetFreeComponentAddress(std::size_t required_size) {
+		if (free_component_map_.size() > 0) {
+			auto it = free_component_map_.find(required_size);
+			if (it != std::end(free_component_map_)) {
+				auto& free_addresses = it->second;
+				if (free_addresses.size() > 0) {
+					// get copy of first free component
+					auto address_offset = free_addresses.front();
+					if (free_addresses.size() == 1) { // one free component, erase size entry
+						free_component_map_.erase(it);
+					} else { // multiple free_components, swap and pop
+						std::iter_swap(std::begin(free_addresses), std::end(free_addresses) - 1);
+						free_addresses.pop_back();
+					}
+					return { address_offset, true };
+				}
+			}
+		}
+		return { size_, false };
+	}
+	std::size_t FindFreeEntityId() {
+		if (free_entity_list_.size() > 0) {
+			std::size_t free_id = free_entity_list_.front();
+			if (free_entity_list_.size() == 1) { // one free entity, clear vector
+				free_entity_list_.resize(0);
+			} else { // multiple free entities, swap and pop
+				std::iter_swap(std::begin(free_entity_list_), std::end(free_entity_list_) - 1);
+				free_entity_list_.pop_back();
+			}
+			return free_id;
+		}
+		return entity_count_++;
+	}
+public:
+	std::unordered_map<std::size_t, std::vector<std::int64_t>> free_component_map_;
+	std::vector<std::size_t> free_entity_list_;
+private:
+	std::vector<std::pair<ComponentId, destruct_func>> destructors_;
+	std::size_t entity_count_{ 0 };
+	std::size_t capacity_{ 0 };
+	std::size_t size_{ 0 };
+	char* mega_array_ = nullptr;
+	std::vector<EntityData5> entities_;
+};
+
+
+
+
+
+
+
+
+
 
 
 
