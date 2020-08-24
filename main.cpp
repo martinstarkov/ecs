@@ -117,53 +117,42 @@ int fpsLimit() { return 240; }
 int main() {
 	ecs::Manager5 manager;
 	//ecs::Manager5 manager2;
-	ecs::EntityId entities = 1000000;
-	std::size_t loops = 100;
+	ecs::EntityId entities = 10000;
+	std::size_t loops = 50;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	assign(manager, entities, 0, 0);
 	LOG("ASSIGNEMT COMPLETED!");
 	LOG("TIMING LOOPS!");
-	auto start = std::chrono::high_resolution_clock::now();
-	for (std::size_t i = 0; i < loops; ++i) {
-		update(manager, 0);
-		//LOG(i);
-	}
 	LOG("LOOPS COMPLETED!");
-	//using namespace std::chrono;
-	//using dsec = duration<double>;
-	//auto invFpsLimit = duration_cast<system_clock::duration>(dsec{ 1. / fpsLimit() });
-	//auto m_BeginFrame = system_clock::now();
-	//auto m_EndFrame = m_BeginFrame + invFpsLimit;
-	//unsigned frame_count_per_second = 0;
-	//auto prev_time_in_seconds = time_point_cast<seconds>(m_BeginFrame);
-	//size_t counter = 0;
-	//while (counter < 10) {
-	//	// Do drawing work ...
-	//	if (counter == 4) {
-	//		//assign2(manager, entities, 0, 0);
-	//	}
-	//	update(manager);
-	//	//update(manager2);
-	//	// This part is just measuring if we're keeping the frame rate.
-	//	// It is not necessary to keep the frame rate.
-	//	auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
-	//	++frame_count_per_second;
-	//	if (time_in_seconds > prev_time_in_seconds) {
-	//		//LOG("manager1 pos: " << manager.GetComponent<Position>(0));
-	//		//LOG("manager2 pos: " << manager2.GetComponent<Position>(0));
-	//		std::cerr << frame_count_per_second << " frames per second\n";
-	//		//LOG("pos1: " << manager.GetComponentStorage().GetComponentId<Position>() << ", vel1: " << manager.GetComponentStorage().GetComponentId<Velocity>() << ", bool1: " << manager.GetComponentStorage().GetComponentId<bool>());
-	//		//LOG("pos2: " << manager2.GetComponentStorage().GetComponentId<Position>() << ", vel2: " << manager2.GetComponentStorage().GetComponentId<Velocity>() << ", bool2: " << manager2.GetComponentStorage().GetComponentId<bool>());
-	//		frame_count_per_second = 0;
-	//		prev_time_in_seconds = time_in_seconds;
-	//		++counter;
-	//	}
+	using namespace std::chrono;
+	using dsec = duration<double>;
+	auto invFpsLimit = duration_cast<system_clock::duration>(dsec{ 1. / fpsLimit() });
+	auto m_BeginFrame = system_clock::now();
+	auto m_EndFrame = m_BeginFrame + invFpsLimit;
+	unsigned frame_count_per_second = 0;
+	auto prev_time_in_seconds = time_point_cast<seconds>(m_BeginFrame);
+	size_t counter = 0;
+	auto start = std::chrono::high_resolution_clock::now();
+	while (counter <= 10) {
+		for (std::size_t i = 0; i < loops; ++i) {
+			update(manager, 0);
+		}
+		// This part is just measuring if we're keeping the frame rate.
+		// It is not necessary to keep the frame rate.
+		auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
+		++frame_count_per_second;
+		if (time_in_seconds > prev_time_in_seconds) {
+			std::cerr << frame_count_per_second << " frames per second\n";
+			frame_count_per_second = 0;
+			prev_time_in_seconds = time_in_seconds;
+			++counter;
+		}
 
-	//	// This part keeps the frame rate.
-	//	//std::this_thread::sleep_until(m_EndFrame);
-	//	m_BeginFrame = m_EndFrame;
-	//	m_EndFrame = m_BeginFrame + invFpsLimit;
-	//}
+		// This part keeps the frame rate.
+		//std::this_thread::sleep_until(m_EndFrame);
+		m_BeginFrame = m_EndFrame;
+		m_EndFrame = m_BeginFrame + invFpsLimit;
+	}
 	auto stop = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 	// To get the value of duration use the count() 
@@ -173,6 +162,20 @@ int main() {
 		<< duration.count() / 1000000.000 << std::endl;
 	//LOG("Manager size/capacity: " << manager.Size() << "/" << manager.Capacity());
 	//manager.~Manager5();
+
+
+	// 10000, 1 mil loops, 611, 643s, Manager 3
+	// 10000, 1 mil loops, 591, 592s, Manager 5
+
+	// 100, 10 mil loops, 61, 61, 61s, Manager 3
+	// 100, 10 mil loops, 56, 59, 61s, Manager 5
+
+	// 1 mil, 1k loops, 78.6s, Manager 5
+	// 1 mil, 1k loops, 75.7s, Manager 3
+
+
+
+
 
 	// 1 mil, 10 loops, 96s, Manager 4 custom allocator adding and removing components
 	// 1 mil, 10 loops, 77s, Manager 3 vector pairs adding and removing components
