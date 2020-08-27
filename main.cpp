@@ -71,44 +71,75 @@ struct Position3 {
 	}
 };
 
+template <std::size_t I>
+struct Test {
+	Test(double t) : t(t) {}
+	double t;
+};
+
 void assign(ecs::Manager5& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<Velocity>(entities);*/
 	manager.ResizeEntities(entities);
-	for (ecs::EntityId i = 0; i < entities; ++i) {
-		ecs::EntityId entity_id = manager.CreateEntity();
-		manager.AddComponent<Position>(entity_id, 0, 0);
-		manager.AddComponent<Velocity>(entity_id, 0, 0);
+	for (ecs::EntityId c = 0; c < entities; ++c) {
+		ecs::EntityId i = manager.CreateEntity();
+		manager.AddComponent<Position>(i, 0, 0);
+		manager.AddComponent<Velocity>(i, 0, 0);
 		// 32 ^
-		manager.AddComponent<Velocity2>(entity_id, 0, 0);
-		manager.AddComponent<Position2>(entity_id, 0, 0);
+		manager.AddComponent<Velocity2>(i, 0, 0);
+		manager.AddComponent<Position2>(i, 0, 0);
 		// 32 ^
-		manager.AddComponent<Velocity3>(entity_id, 0, 0);
-		manager.AddComponent<Position3>(entity_id, 0, 0);
+		manager.AddComponent<Velocity3>(i, 0, 0);
+		manager.AddComponent<Position3>(i, 0, 0);
 		// 32 ^
-		manager.AddComponent<int>(entity_id, 1);
-		manager.AddComponent<double>(entity_id, 2.0);
-		manager.AddComponent<float>(entity_id, 3.0f);
+		manager.AddComponent<int>(i, 1);
+		manager.AddComponent<double>(i, 2.0);
+		manager.AddComponent<float>(i, 3.0f);
+		manager.AddComponent<Test<0>>(i, 1);
+		manager.AddComponent<Test<1>>(i, 1);
+		manager.AddComponent<Test<2>>(i, 1);
+		manager.AddComponent<Test<3>>(i, 1);
+		manager.AddComponent<Test<4>>(i, 1);
+		manager.AddComponent<Test<5>>(i, 1);
+		manager.AddComponent<Test<6>>(i, 1);
+		manager.AddComponent<Test<7>>(i, 1);
+		manager.AddComponent<Test<8>>(i, 1);
+		manager.AddComponent<Test<9>>(i, 1);
+		manager.AddComponent<Test<10>>(i, 1);
+		manager.AddComponent<Test<11>>(i, 1);
+		manager.AddComponent<Test<12>>(i, 1);
 	}
 }
 
 void update(ecs::Manager5& manager, int increment = 1) {
 	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
-	for (std::size_t i = 0; i < manager.EntityCount(); ++i) {
-		ecs::EntityId entity_id = i;
-		manager.GetComponent<Position>(entity_id);
-		manager.GetComponent<Velocity>(entity_id);
+	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
+		manager.GetComponent<Position>(i);
+		manager.GetComponent<Velocity>(i);
 		// 32 ^
-		manager.GetComponent<Velocity2>(entity_id);
-		manager.GetComponent<Position2>(entity_id);
+		manager.GetComponent<Velocity2>(i);
+		manager.GetComponent<Position2>(i);
 		// 32 ^
-		manager.GetComponent<Velocity3>(entity_id);
-		manager.GetComponent<Position3>(entity_id);
+		manager.GetComponent<Velocity3>(i);
+		manager.GetComponent<Position3>(i);
 		// 32 ^
-		manager.GetComponent<int>(entity_id);
-		manager.GetComponent<double>(entity_id);
-		manager.GetComponent<float>(entity_id);
+		manager.GetComponent<int>(i);
+		manager.GetComponent<double>(i);
+		manager.GetComponent<float>(i);
+		manager.GetComponent<Test<0>>(i);
+		manager.GetComponent<Test<1>>(i);
+		manager.GetComponent<Test<2>>(i);
+		manager.GetComponent<Test<3>>(i);
+		manager.GetComponent<Test<4>>(i);
+		manager.GetComponent<Test<5>>(i);
+		manager.GetComponent<Test<6>>(i);
+		manager.GetComponent<Test<7>>(i);
+		manager.GetComponent<Test<8>>(i);
+		manager.GetComponent<Test<9>>(i);
+		manager.GetComponent<Test<10>>(i);
+		manager.GetComponent<Test<11>>(i);
+		manager.GetComponent<Test<12>>(i);
 	}
 }
 
@@ -117,13 +148,13 @@ int fpsLimit() { return 240; }
 int main() {
 	ecs::Manager5 manager;
 	//ecs::Manager5 manager2;
-	ecs::EntityId entities = 10000;
-	std::size_t loops = 50;
+	ecs::EntityId entities = 100000;
+	std::size_t loops = 10000;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
 	assign(manager, entities, 0, 0);
 	LOG("ASSIGNEMT COMPLETED!");
 	LOG("TIMING LOOPS!");
-	LOG("LOOPS COMPLETED!");
+	/*LOG("LOOPS COMPLETED!");
 	using namespace std::chrono;
 	using dsec = duration<double>;
 	auto invFpsLimit = duration_cast<system_clock::duration>(dsec{ 1. / fpsLimit() });
@@ -131,28 +162,31 @@ int main() {
 	auto m_EndFrame = m_BeginFrame + invFpsLimit;
 	unsigned frame_count_per_second = 0;
 	auto prev_time_in_seconds = time_point_cast<seconds>(m_BeginFrame);
-	size_t counter = 0;
+	size_t counter = 0;*/
 	auto start = std::chrono::high_resolution_clock::now();
-	while (counter <= 10) {
-		for (std::size_t i = 0; i < loops; ++i) {
-			update(manager, 0);
-		}
-		// This part is just measuring if we're keeping the frame rate.
-		// It is not necessary to keep the frame rate.
-		auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
-		++frame_count_per_second;
-		if (time_in_seconds > prev_time_in_seconds) {
-			std::cerr << frame_count_per_second << " frames per second\n";
-			frame_count_per_second = 0;
-			prev_time_in_seconds = time_in_seconds;
-			++counter;
-		}
-
-		// This part keeps the frame rate.
-		//std::this_thread::sleep_until(m_EndFrame);
-		m_BeginFrame = m_EndFrame;
-		m_EndFrame = m_BeginFrame + invFpsLimit;
+	for (std::size_t i = 0; i < loops; ++i) {
+		update(manager, 0);
 	}
+	//while (counter <= 10) {
+	//	for (std::size_t i = 0; i < loops; ++i) {
+	//		update(manager, 0);
+	//	}
+	//	// This part is just measuring if we're keeping the frame rate.
+	//	// It is not necessary to keep the frame rate.
+	//	auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
+	//	++frame_count_per_second;
+	//	if (time_in_seconds > prev_time_in_seconds) {
+	//		std::cerr << frame_count_per_second << " frames per second\n";
+	//		frame_count_per_second = 0;
+	//		prev_time_in_seconds = time_in_seconds;
+	//		++counter;
+	//	}
+
+	//	// This part keeps the frame rate.
+	//	//std::this_thread::sleep_until(m_EndFrame);
+	//	m_BeginFrame = m_EndFrame;
+	//	m_EndFrame = m_BeginFrame + invFpsLimit;
+	//}
 	auto stop = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 	// To get the value of duration use the count() 
@@ -174,7 +208,7 @@ int main() {
 	// 1 mil, 1k loops, 75.7s, Manager 3
 
 
-
+	// TODO: Test implementing map, sparse vector, unordered_map for entity component storage
 
 
 	// 1 mil, 10 loops, 96s, Manager 4 custom allocator adding and removing components
