@@ -106,10 +106,10 @@ void Assert(bool assertion, const char* condition, const char* file, int line, s
 // Entity Component System
 namespace ecs {
 
-using ComponentId = int64_t;
-using Atomic_ComponentId = std::atomic_int64_t;
-using ComponentIndex = int64_t;
-using EntityId = int64_t;
+using ComponentId = int32_t;
+using Atomic_ComponentId = std::atomic_int32_t;
+using ComponentIndex = int32_t;
+using EntityId = std::size_t;
 
 template <typename T, typename ...Ts>
 std::vector<T>& AccessTuple(std::tuple<Ts...>& tuple) {
@@ -634,9 +634,9 @@ private:
 		}
 		return FreeComponent(size_, (void*)((char*)mega_array_ + size_), false);
 	}
-	std::size_t FindFreeEntityId() {
+	EntityId FindFreeEntityId() {
 		if (free_entity_list_.size() > 0) {
-			std::size_t free_id = free_entity_list_.front();
+			EntityId free_id = free_entity_list_.front();
 			if (free_entity_list_.size() == 1) { // one free entity, clear vector
 				free_entity_list_.resize(0);
 			} else { // multiple free entities, swap and pop
@@ -671,8 +671,21 @@ void DestroyComponent(char* ptr) {
 
 typedef void (*destructor_function)(char*);
 
+using ByteOffset = std::int32_t;
+
+//#define MAP_LOOKUP
+#define SPARSE_VECTOR
+
 struct EntityData5 {
-	std::vector<std::pair<ComponentId, std::int64_t>> components;
+	#ifdef MAP_LOOKUP
+	std::map<ComponentId, ByteOffset> components;
+	#else
+	#ifdef SPARSE_VECTOR
+	std::vector<ByteOffset> components;
+	#else
+	std::vector<std::pair<ComponentId, ByteOffset>> components;
+	#endif
+	#endif
 	bool alive;
 };
 
@@ -689,7 +702,7 @@ private:
 	}
 public:
 	Manager5() = default;
-	~Manager5() {
+	/*~Manager5() {
 		for (auto& entity : entities_) {
 			for (auto& pair : entity.components) {
 				auto destructor_it = GetDestructorIterator(pair.first);
@@ -701,7 +714,7 @@ public:
 		free(mega_array_);
 		mega_array_ = nullptr;
 		LOG("Freed memory of mega array");
-	}
+	}*/
 	Manager5(const Manager5&) = delete;
 	Manager5& operator=(const Manager5&) = delete;
 	// TODO: Later implement move operators (and perhaps copy?)
@@ -722,9 +735,12 @@ public:
 		if (entity_count_ >= entities_.capacity()) {
 			ResizeEntities(entities_.capacity() + 2);
 		}
-		EntityId free_id(FindFreeEntityId());
+		EntityId free_id(static_cast<EntityId>(FindFreeEntityId()));
 		assert(!HasEntity(free_id));
 		EntityData5 new_entity;
+		#ifdef SPARSE_VECTOR
+		new_entity.components.resize(1, -1);
+		#endif
 		new_entity.alive = true;
 		entities_[free_id] = std::move(new_entity);
 		return free_id;
@@ -757,22 +773,37 @@ public:
 	}
 	template <class T, typename ...TArgs>
 	void AddComponent(EntityId index, TArgs&&... args) {
-		assert(HasEntity(index), "No matching entity");
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		for (auto& pair : components) {
+		//assert(HasEntity(index), "No matching entity");
+		/*auto it = components.find(id);
+		if (it != std::end(components)) {
+			return;
+		}*/
+		/*for (auto& pair : components) {
 			if (pair.first == id) {
 				*static_cast<T*>(static_cast<void*>(mega_array_ + pair.second)) = std::move(T(std::forward<TArgs>(args)...));
 				return;
 			}
-		}
+		}*/
+		ComponentId id = GetTypeId<T>();
 		std::size_t size = sizeof(T);
 		if (size_ + size >= capacity_) {
 			ReAllocate();
 		}
 		auto pair = GetFreeComponentAddress(size);
 		new((void*)(mega_array_ + pair.first)) T(std::forward<TArgs>(args)...);
-		components.emplace_back(id, pair.first);
+		#ifdef MAP_LOOKUP
+		entities_[index].components.emplace(id, pair.first);
+		#else
+		#ifdef SPARSE_VECTOR
+		auto& c = entities_[index].components;
+		if (id >= c.size()) {
+			c.resize(id + 1, -1);
+		}
+		entities_[index].components[id] = pair.first;
+		#else
+		entities_[index].components.emplace_back(id, pair.first);
+		#endif
+		#endif
 		// Component did not exist in free_component_map_
 		if (!pair.second) {
 			if (GetDestructorIterator(id) == std::end(destructors_)) {
@@ -781,62 +812,87 @@ public:
 			size_ += size;
 		}
 	}
-	template <class T>
-	void RemoveComponent(EntityId index) {
-		assert(HasEntity(index));
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		for (auto it = std::begin(components); it != std::end(components); ++it) {
-			if (it->first == id) {
-				auto address = mega_array_ + it->second;
-				std::size_t size = sizeof(T);
-				auto map_it = free_component_map_.find(size);
-				if (map_it == std::end(free_component_map_)) {
-					std::vector<char*> free_addresses;
-					free_addresses.emplace_back(address);
-					free_component_map_.emplace(size, std::move(free_addresses));
-				} else {
-					map_it->second.emplace_back(address);
-				}
-				auto mem_address = static_cast<void*>(address);
-				static_cast<T*>(mem_address)->~T();
-				memset(mem_address, 0, size);
-				components.erase(it);
-				return;
-			}
-		}
-	}
-	template <class T>
-	bool HasComponent(EntityId index) {
-		assert(HasEntity(index), "No matching entity");
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		for (auto& pair : components) {
-			if (pair.first == id) {
-				return true;
-			}
-		}
-		return false;
-	}
+	//template <class T>
+	//void RemoveComponent(EntityId index) {
+	//	assert(HasEntity(index));
+	//	auto& components = entities_[index].components;
+	//	ComponentId id = GetTypeId<T>();
+	//	auto it = components.find(id);
+	//	if (it != std::end(components)) {
+	//		auto address = mega_array_ + it->second;
+	//		std::size_t size = sizeof(T);
+	//		auto map_it = free_component_map_.find(size);
+	//		if (map_it == std::end(free_component_map_)) {
+	//			std::vector<char*> free_addresses;
+	//			free_addresses.emplace_back(address);
+	//			free_component_map_.emplace(size, std::move(free_addresses));
+	//		} else {
+	//			map_it->second.emplace_back(address);
+	//		}
+	//		auto mem_address = static_cast<void*>(address);
+	//		static_cast<T*>(mem_address)->~T();
+	//		memset(mem_address, 0, size);
+	//		components.erase(it);
+	//		return;
+	//	}
+	//	/*for (auto it = std::begin(components); it != std::end(components); ++it) {
+	//		if (it->first == id) {
+	//			
+	//		}
+	//	}*/
+	//}
+	//template <class T>
+	//bool HasComponent(EntityId index) {
+	//	assert(HasEntity(index), "No matching entity");
+	//	auto& components = entities_[index].components;
+	//	ComponentId id = GetTypeId<T>();
+	//	auto it = components.find(id);
+	//	return it != std::end(components);
+	//	/*for (auto& pair : components) {
+	//		if (pair.first == id) {
+	//			return true;
+	//		}
+	//	}
+	//	return false;*/
+	//}
 	template <class T>
 	T* GetComponentP(EntityId index) {
-		assert(HasEntity(index), "No matching entity");
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		for (auto& pair : components) {
+		//assert(HasEntity(index), "No matching entity");
+		/*ComponentId id = GetTypeId<T>();
+		for (auto p : entities_[index].components) {
+			if (p.first == id) {
+				return static_cast<T*>(static_cast<void*>(mega_array_ + p.second));
+			}
+		}
+		return nullptr;*/
+		/*for (auto& pair : components) {
 			if (pair.first == id) {
 				return static_cast<T*>(static_cast<void*>(mega_array_ + pair.second));
 			}
 		}
-		return nullptr;
+		return nullptr;*/
 	}
 	template <class T>
 	T& GetComponent(EntityId index) {
-		T* component = GetComponentP<T>(index);
+		#ifdef MAP_LOOKUP
+		return *static_cast<T*>(static_cast<void*>(mega_array_ + entities_[index].components.find(GetTypeId<T>())->second));
+		#else
+		#ifdef SPARSE_VECTOR
+		return *static_cast<T*>(static_cast<void*>(mega_array_ + entities_[index].components[GetTypeId<T>()]));
+		#else
+		ComponentId id = GetTypeId<T>();
+		for (auto p : entities_[index].components) {
+			if (p.first == id) {
+				return *static_cast<T*>(static_cast<void*>(mega_array_ + p.second));
+			}
+		}
+		#endif
+		#endif
+		/*T* component = GetComponentP<T>(index);
 		assert(component, "No matching component");
-		return *component;
+		return *component;*/
 	}
-	std::size_t EntityCount() const {
+	auto EntityCount() const {
 		return entity_count_;
 	}
 private:
@@ -861,7 +917,7 @@ private:
 		mega_array_ = static_cast<char*>(p);
 		capacity_ = new_capacity;
 	}
-	template <typename T>
+	/*template <typename T>
 	auto GetComponentIterator(EntityId index) {
 		return GetComponentIterator(index, GetTypeId<T>());
 	}
@@ -875,22 +931,22 @@ private:
 			}
 		}
 		return end;
-	}
-	template <typename T>
+	}*/
+	/*template <typename T>
 	void* GetComponentAddress(EntityId index) {
 		auto it = GetComponentIterator(index, GetTypeId<T>());
 		if (it != std::end(entities_[index].components)) {
 			return static_cast<void*>(mega_array_ + it->second);
 		}
 		return nullptr;
-	}
-	std::size_t Size() const {
+	}*/
+	auto Size() const {
 		return size_;
 	}
-	std::size_t Capacity() const {
+	auto Capacity() const {
 		return capacity_;
 	}
-	std::pair<std::int64_t, bool> GetFreeComponentAddress(std::size_t required_size) {
+	std::pair<ByteOffset, bool> GetFreeComponentAddress(std::size_t required_size) {
 		if (free_component_map_.size() > 0) {
 			auto it = free_component_map_.find(required_size);
 			if (it != std::end(free_component_map_)) {
@@ -908,11 +964,11 @@ private:
 				}
 			}
 		}
-		return { size_, false };
+		return { static_cast<ByteOffset>(size_), false };
 	}
 	std::size_t FindFreeEntityId() {
 		if (free_entity_list_.size() > 0) {
-			std::size_t free_id = free_entity_list_.front();
+			auto free_id = free_entity_list_.front();
 			if (free_entity_list_.size() == 1) { // one free entity, clear vector
 				free_entity_list_.resize(0);
 			} else { // multiple free entities, swap and pop
@@ -925,11 +981,11 @@ private:
 	}
 public:
 	// CONSIDER: Performance improvement if switching to map or vector of pairs?
-	std::unordered_map<std::size_t, std::vector<std::int64_t>> free_component_map_;
+	std::unordered_map<std::size_t, std::vector<ByteOffset>> free_component_map_;
 	std::vector<std::size_t> free_entity_list_;
 private:
 	std::vector<std::pair<ComponentId, destructor_function>> destructors_;
-	std::size_t entity_count_{ 0 };
+	EntityId entity_count_{ 0 };
 	std::size_t capacity_{ 0 };
 	std::size_t size_{ 0 };
 	char* mega_array_ = nullptr;
