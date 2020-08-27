@@ -77,11 +77,11 @@ struct Test {
 	double t;
 };
 
-void assign(ecs::Manager5& manager, ecs::EntityId entities, double x = 0, double y = 0) {
+void assign(ecs::Manager6& manager, ecs::EntityId entities, double x = 0, double y = 0) {
 	/*manager.ReserveComponent<bool>(1);
 	manager.ReserveComponent<Position>(entities);
 	manager.ReserveComponent<Velocity>(entities);*/
-	manager.ResizeEntities(entities);
+	//manager.ResizeEntities(entities);
 	for (ecs::EntityId c = 0; c < entities; ++c) {
 		ecs::EntityId i = manager.CreateEntity();
 		manager.AddComponent<Position>(i, 0, 0);
@@ -112,7 +112,7 @@ void assign(ecs::Manager5& manager, ecs::EntityId entities, double x = 0, double
 	}
 }
 
-void update(ecs::Manager5& manager, int increment = 1) {
+void update(ecs::Manager6& manager, int increment = 1) {
 	//auto [p, v] = manager.GetComponentVectors<Position, Velocity>();
 	for (ecs::EntityId i = 0; i < manager.EntityCount(); ++i) {
 		manager.GetComponent<Position>(i);
@@ -146,8 +146,8 @@ void update(ecs::Manager5& manager, int increment = 1) {
 int fpsLimit() { return 240; }
 
 int main() {
-	ecs::Manager5 manager;
-	//ecs::Manager5 manager2;
+	ecs::Manager6 manager;
+	//ecs::Manager6 manager2;
 	ecs::EntityId entities = 100000;
 	std::size_t loops = 10000;
 	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
@@ -195,7 +195,7 @@ int main() {
 		<< std::fixed << std::setprecision(3)
 		<< duration.count() / 1000000.000 << std::endl;
 	//LOG("Manager size/capacity: " << manager.Size() << "/" << manager.Capacity());
-	//manager.~Manager5();
+	//manager.~Manager6();
 
 
 	// 10000, 1 mil loops, 611, 643s, Manager 3
