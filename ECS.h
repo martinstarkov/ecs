@@ -30,12 +30,18 @@
 ///*
 
 #define DEBUG
+//#define DEBUG_ASSERT
+
 
 #ifdef DEBUG
+#ifdef DEBUG_ASSERT
 	#define EXPAND( condition ) condition
 	#define assertion(condition, ...) { if (!(condition)) { internal::Assert(condition, #condition, __FILE__, __LINE__, { __VA_ARGS__ }); } }
 // Note: add parentheses when condition contains non argument commas, e.g. when using metaprogramming structs
 	#define assert(...) EXPAND(assertion(__VA_ARGS__))
+#else
+#define assert(...)
+#endif
 	#define LOG(x) { std::cout << x << std::endl; }
 	#define LOG_(x) { std::cout << x; }
 #else
@@ -129,8 +135,14 @@ ComponentId GetTypeId() {
 	return id;
 }
 
-// In a *.cpp file:
 AtomicComponentId component_counter{ 0 };
+
+template<typename T>
+void DestroyComponent(char* ptr) {
+	static_cast<T*>(static_cast<void*>(ptr))->~T();
+}
+
+typedef void (*destructor_function)(char*);
 
 /*
 template <typename T, typename ...Ts>
@@ -668,14 +680,6 @@ private:
 
 */
 
-
-template<typename T>
-void DestroyComponent(char* ptr) {
-	static_cast<T*>(static_cast<void*>(ptr))->~T();
-}
-
-typedef void (*destructor_function)(char*);
-
 struct EntityData5 {
 	std::vector<ByteOffset> components;
 	bool alive;
@@ -730,7 +734,7 @@ public:
 			ReAllocate();
 		}
 	}
-	EntityId CreateEntity() {
+	EntityId CreateEntity(Byte capacity = DEFAULT_POOL_CAPACITY) {
 		if (entity_count_ >= entities_.capacity()) {
 			ResizeEntities(entities_.capacity() + 2);
 		}
@@ -852,11 +856,12 @@ public:
 		return nullptr;*/
 	}
 	template <class T>
+	T* GetComponentPointer(EntityId index) {
+		return static_cast<T*>(static_cast<void*>(mega_array_ + entities_[index].components[GetTypeId<T>()]));
+	}
+	template <class T>
 	T& GetComponent(EntityId index) {
 		return *static_cast<T*>(static_cast<void*>(mega_array_ + entities_[index].components[GetTypeId<T>()]));
-		/*T* component = GetComponentP<T>(index);
-		assert(component, "No matching component");
-		return *component;*/
 	}
 	auto EntityCount() const {
 		return entity_count_;
@@ -967,145 +972,135 @@ private:
 
 
 
-
-
-
 struct EntityPool {
 	EntityPool() = delete;
-	EntityPool(Byte size, Byte capacity, Byte offset, bool taken) : offset{ offset }, size{ size }, capacity{ capacity }, taken{ taken } {}
+	// offset 0 indicates entity is destroyed / not in use (first byte of memory array)
+	EntityPool(Byte offset, Byte capacity = 0, bool alive = false) : offset{ offset }, capacity{ capacity }, alive{ alive }, size{ 0 } {}
 	Byte offset;
-	Byte size;
 	Byte capacity;
-	bool taken;
-};
-
-struct EntityData {
-	EntityData() = delete;
-	EntityData(bool alive, Byte pool_index) : alive{ alive }, pool_index{ pool_index } {}
-	std::vector<ByteOffset> components;
+	Byte size;
 	bool alive;
-	Byte pool_index;
+	std::vector<ByteOffset> components;
 };
 
 class Manager6 {
 public:
 	// Initialize NULL_ENTITY
-	Manager6(EntityId entities, std::size_t components = 0) : entities_{ { false, 0 } }, pools_{ { 0, 0, 0, true } } {
+	Manager6(EntityId entities, std::size_t components = 0) : entities_{ { 0, 0, true } } {
 		AllocateData(2);
-		ResizeEntities(entities, components);
+		Resize(entities * DEFAULT_POOL_CAPACITY, entities, components);
 	}
 	Manager6(const Manager6&) = delete;
 	Manager6& operator=(const Manager6&) = delete;
 	Manager6(Manager6&&) = delete;
 	Manager6& operator=(Manager6&&) = delete;
-	EntityId CreateEntity() {
+	EntityId CreateEntity(Byte capacity = DEFAULT_POOL_CAPACITY) {
 		EntityId id{ ++entity_count_ };
-		if (entity_count_ >= entities_.size()) {
-			entities_.emplace_back(true, GetAvailablePoolIndex(DEFAULT_POOL_CAPACITY));
-		}
+		AddPool(id, capacity);
 		return id;
+	}
+	template <typename T>
+	bool HasComponent(EntityId index) {
+		return entities_[index].components[GetTypeId<T>()] != NULL_COMPONENT_OFFSET;
+	}
+	template <typename ...Ts>
+	bool HasComponents(EntityId index) {
+		return (HasComponent<Ts>(index) && ...);
 	}
 	template <class T, typename ...TArgs>
 	void AddComponent(EntityId index, TArgs&&... args) {
 		ComponentId id = GetTypeId<T>();
-		Byte size = static_cast<Byte>(sizeof(T));
-		//assert(index < entities_.size());
-		auto& entity = entities_[index];
-		//assert(entity.pool_index < pools_.size());
-		EntityPool& old_pool = pools_[entity.pool_index];
-		Byte new_pool_size = old_pool.size + size;
-		if (new_pool_size > old_pool.capacity) {
-			Byte new_pool_index = GetAvailablePoolIndex(old_pool.capacity * 2);
-			MovePool(entity.pool_index, new_pool_index);
-			entity.pool_index = new_pool_index;
+		Byte component_size = static_cast<Byte>(sizeof(T));
+		assert(index < entities_.size());
+		auto& pool = entities_[index];
+		Byte new_pool_size = pool.size + component_size;
+		if (new_pool_size > pool.capacity) {
+			Byte new_capacity = new_pool_size * 2;
+			Byte new_offset = GetFreeOffset(new_capacity);
+			MovePool(pool, new_offset, new_capacity);
 		}
-		EntityPool& pool = pools_[entity.pool_index];
 		Byte offset = pool.offset + pool.size;
-		//assert(offset < capacity_, "Ran out of space in data array");
+		assert(offset < capacity_, "Ran out of space in data array");
 		new(static_cast<void*>(data_ + offset)) T(std::forward<TArgs>(args)...);
-		if (id >= entity.components.size()) {
-			entity.components.resize(id + 1, NULL_COMPONENT_OFFSET);
+		if (id >= pool.components.size()) {
+			pool.components.resize(static_cast<std::size_t>(id) + 1, NULL_COMPONENT_OFFSET);
 		}
-		entity.components[id] = pool.size;
+		pool.components[id] = pool.size;
 		pool.size = new_pool_size;
 	}
 	template <typename T>
 	T& GetComponent(EntityId index) {
+		assert(index < entities_.size());
 		auto& entity = entities_[index];
-		return *static_cast<T*>(static_cast<void*>(data_ + pools_[entity.pool_index].offset + entity.components[GetTypeId<T>()]));
+		return *static_cast<T*>(static_cast<void*>(data_ + entity.offset + entity.components[GetTypeId<T>()]));
+	}
+	template <typename ...Ts>
+	std::tuple<Ts&...> GetComponents(EntityId index) {
+		return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(index)...);
+	}
+	template <typename ...Ts, typename T>
+	void ForEach(T&& lambda) {
+		for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
+			auto& entity = entities_[i];
+			if (HasComponents<Ts...>(i)) {
+				lambda(i, (*static_cast<Ts*>(static_cast<void*>(data_ + entity.offset + entity.components[GetTypeId<Ts>()])))...);
+			}
+		}
 	}
 	auto EntityCount() {
 		return entity_count_;
 	}
-	void ResizeEntities(EntityId entities, std::size_t components = 0) {
-		ReAllocateData(entities * DEFAULT_POOL_CAPACITY);
-		entities_.resize(entities + 10, { false, 0 });
-		pools_.resize(entities + 10, { 0, DEFAULT_POOL_CAPACITY, 0, false });
-		for (std::size_t i = first_valid_entity; i < pools_.size(); ++i) {
-			pools_[i].offset = DEFAULT_POOL_CAPACITY * (i - first_valid_entity);
-			entities_[i].pool_index = i;
-			entities_[i].components.resize(components, -1);
+	void Resize(Byte bytes, EntityId entities, std::size_t components = 0) {
+		// Allocate at least one byte per new entity
+		ReAllocateData(bytes);
+		ResizeEntities(entities);
+		if (components) {
+			EntityId size = static_cast<EntityId>(entities_.size());
+			for (EntityId i = first_valid_entity; i < size; ++i) {
+				ResizeComponent(i, components);
+			}
 		}
 	}
 private:
-	EntityPool& AddPool(Byte capacity) {
-		Byte new_size = size_ + capacity;
-		if (new_size >= capacity_) {
-			ReAllocateData(new_size * 2);
-		}
-		pools_.emplace_back(0, capacity, size_, true);
-		size_ = new_size;
-		return pools_.back();
+	void ResizeEntities(std::size_t new_capacity) {
+		entities_.resize(new_capacity, { 0, 0, false });
 	}
-	std::size_t FreePoolCount(Byte capacity) {
-		std::size_t count = 0;
-		for (std::size_t i = 0; i < pools_.size(); ++i) {
-			auto& pool = pools_[i];
-			if (!pool.taken) {
-				if (pool.capacity == capacity) {
-					++count;
-				}
-			}
-		}
-		return count;
+	void ResizeComponent(EntityId index, std::size_t new_capacity) {
+		assert(index < entities_.size());
+		entities_[index].components.resize(new_capacity, NULL_COMPONENT_OFFSET);
 	}
-	void MovePool(Byte from_index, Byte to_index) {
-		assert(from_index < pools_.size());
-		assert(to_index < pools_.size());
-		EntityPool& from = pools_[from_index];
-		EntityPool& to = pools_[to_index];
-		//assert(from.taken == true, "Cannot copy from free pool");
-		std::memcpy(data_ + to.offset, data_ + from.offset, from.size);
-		std::memset(data_ + from.offset, 0, from.size);
-		to.size = from.size;
-		to.taken = true;
-		from.size = 0;
-		from.taken = false;
+	void MovePool(EntityPool& pool, Byte to_offset, Byte to_capacity) {
+		assert(pool.size > 0, "Attempting to move from empty pool, are you sure?");
+		assert(pool.alive == true, "Cannot move from unoccupied pool");
+		std::memcpy(data_ + to_offset, data_ + pool.offset, pool.size);
+		std::memset(data_ + pool.offset, 0, pool.size);
+		free_memory_.emplace(pool.capacity, pool.offset);
+		pool.offset = to_offset;
+		pool.capacity = to_capacity;
 	}
-	EntityPool& GetAvailablePool(Byte capacity) {
-		for (std::size_t i = 0; i < pools_.size(); ++i) {
-			auto& pool = pools_[i];
-			if (!pool.taken) {
-				if (pool.capacity == capacity) {
-					pool.taken = true;
-					return pool;
-				}
-			}
+	void AddPool(EntityId index, Byte capacity) {
+		// Double entities capacity when limit is reached
+		if (index >= entities_.capacity()) {
+			ResizeEntities(entities_.capacity() * 2);
 		}
-		return AddPool(capacity);
+		auto& pool = entities_[index];
+		pool.offset = GetFreeOffset(capacity);
+		pool.capacity = capacity;
+		pool.alive = true;
 	}
-	Byte GetAvailablePoolIndex(Byte capacity) {
-		for (std::size_t i = 0; i < pools_.size(); ++i) {
-			auto& pool = pools_[i];
-			if (!pool.taken) {
-				if (pool.capacity == capacity) {
-					pool.taken = true;
-					return static_cast<Byte>(i);
-				}
-			}
+	// Return next matching capacity memory block in data_
+	// If nothing existing found, take from end of data_
+	Byte GetFreeOffset(Byte capacity) {
+		auto it = free_memory_.find(capacity);
+		if (it != std::end(free_memory_)) {
+			return it->second;
 		}
-		AddPool(capacity);
-		return static_cast<Byte>(pools_.size() - 1);
+		Byte free_offset = size_;
+		size_ += capacity;
+		if (size_ >= capacity_) {
+			ReAllocateData(size_ * 2);
+		}
+		return free_offset;
 	}
 	void AllocateData(Byte new_capacity) {
 		assert(!data_);
@@ -1127,8 +1122,8 @@ private:
 	Byte size_{ 0 };
 	char* data_{ nullptr };
 	EntityId entity_count_{ 0 };
-	std::vector<EntityPool> pools_;
-	std::vector<EntityData> entities_;
+	std::vector<EntityPool> entities_;
+	std::unordered_map<Byte, Byte> free_memory_;
 };
 
 
