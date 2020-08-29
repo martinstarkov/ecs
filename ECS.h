@@ -22,16 +22,8 @@
 
 // TODO: Add license at top of file when you get there
 
-// TODO: Add a function called CreateComponent which will be called in AddComponent and generate a new ID if
-// the AddComponent <T>::GetId() does not exist already, this will also resize the components vector and 
-// grow them each by one
-
-// TEMPORARY 
-///*
-
 #define DEBUG
 //#define DEBUG_ASSERT
-
 
 #ifdef DEBUG
 #ifdef DEBUG_ASSERT
@@ -125,7 +117,7 @@ constexpr EntityId first_valid_entity = NULL_ENTITY + 1;
 constexpr ByteOffset NULL_COMPONENT_OFFSET = -1;
 using Byte = std::uint32_t;
 
-constexpr Byte DEFAULT_POOL_CAPACITY = 16 * 20;
+constexpr Byte DEFAULT_POOL_CAPACITY = 256;
 
 extern AtomicComponentId component_counter;
 
@@ -680,297 +672,313 @@ private:
 
 */
 
-struct EntityData5 {
-	std::vector<ByteOffset> components;
-	bool alive;
+//struct EntityData5 {
+//	std::vector<ByteOffset> components;
+//	bool alive;
+//};
+//
+//class Manager5 {
+//private:
+//	auto GetDestructorIterator(ComponentId id) {
+//		auto end = std::end(destructors_);
+//		for (auto it = std::begin(destructors_); it != end; ++it) {
+//			if (id == it->first) {
+//				return it;
+//			}
+//		}
+//		return end;
+//	}
+//public:
+//	Manager5(EntityId entities, std::size_t components = 0) {
+//		ResizeEntities(entities, components);
+//	}
+//	/*~Manager5() {
+//		for (auto& entity : entities_) {
+//			for (auto& pair : entity.components) {
+//				auto destructor_it = GetDestructorIterator(pair.first);
+//				assert(destructor_it != std::end(destructors_), "Could not find destructor iterator");
+//				destructor_it->second(mega_array_ + pair.second);
+//			}
+//		}
+//		LOG("Destructed all component data");
+//		free(mega_array_);
+//		mega_array_ = nullptr;
+//		LOG("Freed memory of mega array");
+//	}*/
+//	Manager5(const Manager5&) = delete;
+//	Manager5& operator=(const Manager5&) = delete;
+//	// TODO: Later implement move operators (and perhaps copy?)
+//	Manager5(Manager5&&) = delete;
+//	Manager5& operator=(Manager5&&) = delete;
+//	void ResizeEntities(std::size_t new_entities, std::size_t components = 0) {
+//		if (!mega_array_) {
+//			std::size_t new_capacity = new_entities;
+//			//LOG("Allocating " << new_capacity << " bytes...");
+//			mega_array_ = static_cast<char*>(malloc(new_capacity));
+//			capacity_ = new_capacity;
+//			entities_.resize(entities_.capacity() + new_entities);
+//			if (components > 0) {
+//				for (auto& entity : entities_) {
+//					entity.components.resize(components, -1);
+//				}
+//			}
+//		} else {
+//			ReAllocate();
+//		}
+//	}
+//	EntityId CreateEntity(Byte capacity = DEFAULT_POOL_CAPACITY) {
+//		if (entity_count_ >= entities_.capacity()) {
+//			ResizeEntities(entities_.capacity() + 2);
+//		}
+//		EntityId free_id(static_cast<EntityId>(FindFreeEntityId()));
+//		assert(!HasEntity(free_id));
+//		EntityData5 new_entity;
+//		new_entity.components.resize(1, -1);
+//		new_entity.alive = true;
+//		entities_[free_id] = std::move(new_entity);
+//		return free_id;
+//	}
+//	/*void DestroyEntity(EntityId index) {
+//		assert(HasEntity(index));
+//		free_entity_list_.push_back(index);
+//		EntityData4& data = entities_[index];
+//		for (auto& c : data.components) {
+//			auto it = free_component_map_.find(c.size);
+//			if (it == std::end(free_component_map_)) {
+//				std::vector<FreeComponent> vector;
+//				vector.emplace_back(c.bytes_from_begin, c.address);
+//				free_component_map_.emplace(c.size, std::move(vector));
+//			} else {
+//				it->second.emplace_back(c.bytes_from_begin, c.address);
+//			}
+//			c.destructor(c.address);
+//			memset(c.address, 0, c.size);
+//		}
+//		data.alive = false;
+//		data.components.resize(0);
+//		--entity_count_;
+//	}*/
+//	bool HasEntity(EntityId index) {
+//		if (index >= 0 && index < static_cast<EntityId>(entities_.size())) {
+//			return entities_[index].alive;
+//		}
+//		return false;
+//	}
+//	template <class T, typename ...TArgs>
+//	void AddComponent(EntityId index, TArgs&&... args) {
+//		//assert(HasEntity(index), "No matching entity");
+//		ComponentId id = GetTypeId<T>();
+//		std::size_t size = sizeof(T);
+//		if (size_ + size >= capacity_) {
+//			ReAllocate();
+//		}
+//		auto pair = GetFreeComponentAddress(size);
+//		new((void*)(mega_array_ + pair.first)) T(std::forward<TArgs>(args)...);
+//		auto& c = entities_[index].components;
+//		if (id >= c.size()) {
+//			c.resize(id + 1, NULL_COMPONENT_OFFSET);
+//		}
+//		entities_[index].components[id] = pair.first;
+//		// Component did not exist in free_component_map_
+//		if (!pair.second) {
+//			if (GetDestructorIterator(id) == std::end(destructors_)) {
+//				destructors_.emplace_back(id, &DestroyComponent<T>);
+//			}
+//			size_ += size;
+//		}
+//	}
+//	//template <class T>
+//	//void RemoveComponent(EntityId index) {
+//	//	assert(HasEntity(index));
+//	//	auto& components = entities_[index].components;
+//	//	ComponentId id = GetTypeId<T>();
+//	//	auto it = components.find(id);
+//	//	if (it != std::end(components)) {
+//	//		auto address = mega_array_ + it->second;
+//	//		std::size_t size = sizeof(T);
+//	//		auto map_it = free_component_map_.find(size);
+//	//		if (map_it == std::end(free_component_map_)) {
+//	//			std::vector<char*> free_addresses;
+//	//			free_addresses.emplace_back(address);
+//	//			free_component_map_.emplace(size, std::move(free_addresses));
+//	//		} else {
+//	//			map_it->second.emplace_back(address);
+//	//		}
+//	//		auto mem_address = static_cast<void*>(address);
+//	//		static_cast<T*>(mem_address)->~T();
+//	//		memset(mem_address, 0, size);
+//	//		components.erase(it);
+//	//		return;
+//	//	}
+//	//	/*for (auto it = std::begin(components); it != std::end(components); ++it) {
+//	//		if (it->first == id) {
+//	//			
+//	//		}
+//	//	}*/
+//	//}
+//	//template <class T>
+//	//bool HasComponent(EntityId index) {
+//	//	assert(HasEntity(index), "No matching entity");
+//	//	auto& components = entities_[index].components;
+//	//	ComponentId id = GetTypeId<T>();
+//	//	auto it = components.find(id);
+//	//	return it != std::end(components);
+//	//	/*for (auto& pair : components) {
+//	//		if (pair.first == id) {
+//	//			return true;
+//	//		}
+//	//	}
+//	//	return false;*/
+//	//}
+//	template <class T>
+//	T* GetComponentP(EntityId index) {
+//		//assert(HasEntity(index), "No matching entity");
+//		/*ComponentId id = GetTypeId<T>();
+//		for (auto p : entities_[index].components) {
+//			if (p.first == id) {
+//				return static_cast<T*>(static_cast<void*>(mega_array_ + p.second));
+//			}
+//		}
+//		return nullptr;*/
+//		/*for (auto& pair : components) {
+//			if (pair.first == id) {
+//				return static_cast<T*>(static_cast<void*>(mega_array_ + pair.second));
+//			}
+//		}
+//		return nullptr;*/
+//	}
+//	template <class T>
+//	T* GetComponentPointer(EntityId index) {
+//		return static_cast<T*>(static_cast<void*>(mega_array_ + entities_[index].components[GetTypeId<T>()]));
+//	}
+//	template <class T>
+//	T& GetComponent(EntityId index) {
+//		return *static_cast<T*>(static_cast<void*>(mega_array_ + entities_[index].components[GetTypeId<T>()]));
+//	}
+//	auto EntityCount() const {
+//		return entity_count_;
+//	}
+//private:
+//	/*template <class T>
+//	auto GetComponentIterator(EntityId index) {
+//		assert(HasEntity(index), "Entity does not exist in manager");
+//		auto& components = entities_[index].components;
+//		ComponentId id = GetTypeId<T>();
+//		auto end = std::end(components);
+//		for (auto it = std::begin(components); it != end; ++it) {
+//			if (it->id == id) {
+//				return it;
+//			}
+//		}
+//		return end;
+//	}*/
+//	void ReAllocate() {
+//		std::size_t new_capacity = capacity_ * 2;
+//		//LOG("Reallocating " << new_capacity << " bytes...");
+//		void* p = realloc(mega_array_, new_capacity);
+//		assert(p, "could not reallocate ", std::to_string(new_capacity));
+//		mega_array_ = static_cast<char*>(p);
+//		capacity_ = new_capacity;
+//	}
+//	/*template <typename T>
+//	auto GetComponentIterator(EntityId index) {
+//		return GetComponentIterator(index, GetTypeId<T>());
+//	}
+//	auto GetComponentIterator(EntityId index, ComponentId id) {
+//		assert(HasEntity(index));
+//		auto& components = entities_[index].components;
+//		auto end = std::end(components);
+//		for (auto it = std::begin(components); it != end; ++it) {
+//			if (id == it->first) {
+//				return it;
+//			}
+//		}
+//		return end;
+//	}*/
+//	/*template <typename T>
+//	void* GetComponentAddress(EntityId index) {
+//		auto it = GetComponentIterator(index, GetTypeId<T>());
+//		if (it != std::end(entities_[index].components)) {
+//			return static_cast<void*>(mega_array_ + it->second);
+//		}
+//		return nullptr;
+//	}*/
+//	auto Size() const {
+//		return size_;
+//	}
+//	auto Capacity() const {
+//		return capacity_;
+//	}
+//	std::pair<ByteOffset, bool> GetFreeComponentAddress(std::size_t required_size) {
+//		if (free_component_map_.size() > 0) {
+//			auto it = free_component_map_.find(required_size);
+//			if (it != std::end(free_component_map_)) {
+//				auto& free_addresses = it->second;
+//				if (free_addresses.size() > 0) {
+//					// get copy of first free component
+//					auto address_offset = free_addresses.front();
+//					if (free_addresses.size() == 1) { // one free component, erase size entry
+//						free_component_map_.erase(it);
+//					} else { // multiple free_components, swap and pop
+//						std::iter_swap(std::begin(free_addresses), std::end(free_addresses) - 1);
+//						free_addresses.pop_back();
+//					}
+//					return { address_offset, true };
+//				}
+//			}
+//		}
+//		return { static_cast<ByteOffset>(size_), false };
+//	}
+//	std::size_t FindFreeEntityId() {
+//		if (free_entity_list_.size() > 0) {
+//			auto free_id = free_entity_list_.front();
+//			if (free_entity_list_.size() == 1) { // one free entity, clear vector
+//				free_entity_list_.resize(0);
+//			} else { // multiple free entities, swap and pop
+//				std::iter_swap(std::begin(free_entity_list_), std::end(free_entity_list_) - 1);
+//				free_entity_list_.pop_back();
+//			}
+//			return free_id;
+//		}
+//		return entity_count_++;
+//	}
+//public:
+//	// CONSIDER: Performance improvement if switching to map or vector of pairs?
+//	std::unordered_map<std::size_t, std::vector<ByteOffset>> free_component_map_;
+//	std::vector<std::size_t> free_entity_list_;
+//private:
+//	std::vector<std::pair<ComponentId, destructor_function>> destructors_;
+//	EntityId entity_count_{ 0 };
+//	std::size_t capacity_{ 0 };
+//	std::size_t size_{ 0 };
+//	char* mega_array_ = nullptr;
+//	std::vector<EntityData5> entities_;
+//};
+
+
+
+class Manager6;
+
+class BaseCache {
+public:
+	virtual void UpdateCache() = 0;
 };
 
-class Manager5 {
-private:
-	auto GetDestructorIterator(ComponentId id) {
-		auto end = std::end(destructors_);
-		for (auto it = std::begin(destructors_); it != end; ++it) {
-			if (id == it->first) {
-				return it;
-			}
-		}
-		return end;
-	}
+template <typename ...Ts>
+class Cache : public BaseCache {
 public:
-	Manager5(EntityId entities, std::size_t components = 0) {
-		ResizeEntities(entities, components);
+	using VectorOfTuples = std::vector<std::tuple<const EntityId, Ts&...>>;
+	Cache(Manager6& manager) : manager_(manager) {
+		UpdateCache();
 	}
-	/*~Manager5() {
-		for (auto& entity : entities_) {
-			for (auto& pair : entity.components) {
-				auto destructor_it = GetDestructorIterator(pair.first);
-				assert(destructor_it != std::end(destructors_), "Could not find destructor iterator");
-				destructor_it->second(mega_array_ + pair.second);
-			}
-		}
-		LOG("Destructed all component data");
-		free(mega_array_);
-		mega_array_ = nullptr;
-		LOG("Freed memory of mega array");
-	}*/
-	Manager5(const Manager5&) = delete;
-	Manager5& operator=(const Manager5&) = delete;
-	// TODO: Later implement move operators (and perhaps copy?)
-	Manager5(Manager5&&) = delete;
-	Manager5& operator=(Manager5&&) = delete;
-	void ResizeEntities(std::size_t new_entities, std::size_t components = 0) {
-		if (!mega_array_) {
-			std::size_t new_capacity = new_entities;
-			//LOG("Allocating " << new_capacity << " bytes...");
-			mega_array_ = static_cast<char*>(malloc(new_capacity));
-			capacity_ = new_capacity;
-			entities_.resize(entities_.capacity() + new_entities);
-			if (components > 0) {
-				for (auto& entity : entities_) {
-					entity.components.resize(components, -1);
-				}
-			}
-		} else {
-			ReAllocate();
-		}
+	VectorOfTuples GetEntities() const {
+		return entities_;
 	}
-	EntityId CreateEntity(Byte capacity = DEFAULT_POOL_CAPACITY) {
-		if (entity_count_ >= entities_.capacity()) {
-			ResizeEntities(entities_.capacity() + 2);
-		}
-		EntityId free_id(static_cast<EntityId>(FindFreeEntityId()));
-		assert(!HasEntity(free_id));
-		EntityData5 new_entity;
-		new_entity.components.resize(1, -1);
-		new_entity.alive = true;
-		entities_[free_id] = std::move(new_entity);
-		return free_id;
-	}
-	/*void DestroyEntity(EntityId index) {
-		assert(HasEntity(index));
-		free_entity_list_.push_back(index);
-		EntityData4& data = entities_[index];
-		for (auto& c : data.components) {
-			auto it = free_component_map_.find(c.size);
-			if (it == std::end(free_component_map_)) {
-				std::vector<FreeComponent> vector;
-				vector.emplace_back(c.bytes_from_begin, c.address);
-				free_component_map_.emplace(c.size, std::move(vector));
-			} else {
-				it->second.emplace_back(c.bytes_from_begin, c.address);
-			}
-			c.destructor(c.address);
-			memset(c.address, 0, c.size);
-		}
-		data.alive = false;
-		data.components.resize(0);
-		--entity_count_;
-	}*/
-	bool HasEntity(EntityId index) {
-		if (index >= 0 && index < static_cast<EntityId>(entities_.size())) {
-			return entities_[index].alive;
-		}
-		return false;
-	}
-	template <class T, typename ...TArgs>
-	void AddComponent(EntityId index, TArgs&&... args) {
-		//assert(HasEntity(index), "No matching entity");
-		ComponentId id = GetTypeId<T>();
-		std::size_t size = sizeof(T);
-		if (size_ + size >= capacity_) {
-			ReAllocate();
-		}
-		auto pair = GetFreeComponentAddress(size);
-		new((void*)(mega_array_ + pair.first)) T(std::forward<TArgs>(args)...);
-		auto& c = entities_[index].components;
-		if (id >= c.size()) {
-			c.resize(id + 1, NULL_COMPONENT_OFFSET);
-		}
-		entities_[index].components[id] = pair.first;
-		// Component did not exist in free_component_map_
-		if (!pair.second) {
-			if (GetDestructorIterator(id) == std::end(destructors_)) {
-				destructors_.emplace_back(id, &DestroyComponent<T>);
-			}
-			size_ += size;
-		}
-	}
-	//template <class T>
-	//void RemoveComponent(EntityId index) {
-	//	assert(HasEntity(index));
-	//	auto& components = entities_[index].components;
-	//	ComponentId id = GetTypeId<T>();
-	//	auto it = components.find(id);
-	//	if (it != std::end(components)) {
-	//		auto address = mega_array_ + it->second;
-	//		std::size_t size = sizeof(T);
-	//		auto map_it = free_component_map_.find(size);
-	//		if (map_it == std::end(free_component_map_)) {
-	//			std::vector<char*> free_addresses;
-	//			free_addresses.emplace_back(address);
-	//			free_component_map_.emplace(size, std::move(free_addresses));
-	//		} else {
-	//			map_it->second.emplace_back(address);
-	//		}
-	//		auto mem_address = static_cast<void*>(address);
-	//		static_cast<T*>(mem_address)->~T();
-	//		memset(mem_address, 0, size);
-	//		components.erase(it);
-	//		return;
-	//	}
-	//	/*for (auto it = std::begin(components); it != std::end(components); ++it) {
-	//		if (it->first == id) {
-	//			
-	//		}
-	//	}*/
-	//}
-	//template <class T>
-	//bool HasComponent(EntityId index) {
-	//	assert(HasEntity(index), "No matching entity");
-	//	auto& components = entities_[index].components;
-	//	ComponentId id = GetTypeId<T>();
-	//	auto it = components.find(id);
-	//	return it != std::end(components);
-	//	/*for (auto& pair : components) {
-	//		if (pair.first == id) {
-	//			return true;
-	//		}
-	//	}
-	//	return false;*/
-	//}
-	template <class T>
-	T* GetComponentP(EntityId index) {
-		//assert(HasEntity(index), "No matching entity");
-		/*ComponentId id = GetTypeId<T>();
-		for (auto p : entities_[index].components) {
-			if (p.first == id) {
-				return static_cast<T*>(static_cast<void*>(mega_array_ + p.second));
-			}
-		}
-		return nullptr;*/
-		/*for (auto& pair : components) {
-			if (pair.first == id) {
-				return static_cast<T*>(static_cast<void*>(mega_array_ + pair.second));
-			}
-		}
-		return nullptr;*/
-	}
-	template <class T>
-	T* GetComponentPointer(EntityId index) {
-		return static_cast<T*>(static_cast<void*>(mega_array_ + entities_[index].components[GetTypeId<T>()]));
-	}
-	template <class T>
-	T& GetComponent(EntityId index) {
-		return *static_cast<T*>(static_cast<void*>(mega_array_ + entities_[index].components[GetTypeId<T>()]));
-	}
-	auto EntityCount() const {
-		return entity_count_;
-	}
+	void UpdateCache() override final;
 private:
-	/*template <class T>
-	auto GetComponentIterator(EntityId index) {
-		assert(HasEntity(index), "Entity does not exist in manager");
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		auto end = std::end(components);
-		for (auto it = std::begin(components); it != end; ++it) {
-			if (it->id == id) {
-				return it;
-			}
-		}
-		return end;
-	}*/
-	void ReAllocate() {
-		std::size_t new_capacity = capacity_ * 2;
-		//LOG("Reallocating " << new_capacity << " bytes...");
-		void* p = realloc(mega_array_, new_capacity);
-		assert(p, "could not reallocate ", std::to_string(new_capacity));
-		mega_array_ = static_cast<char*>(p);
-		capacity_ = new_capacity;
-	}
-	/*template <typename T>
-	auto GetComponentIterator(EntityId index) {
-		return GetComponentIterator(index, GetTypeId<T>());
-	}
-	auto GetComponentIterator(EntityId index, ComponentId id) {
-		assert(HasEntity(index));
-		auto& components = entities_[index].components;
-		auto end = std::end(components);
-		for (auto it = std::begin(components); it != end; ++it) {
-			if (id == it->first) {
-				return it;
-			}
-		}
-		return end;
-	}*/
-	/*template <typename T>
-	void* GetComponentAddress(EntityId index) {
-		auto it = GetComponentIterator(index, GetTypeId<T>());
-		if (it != std::end(entities_[index].components)) {
-			return static_cast<void*>(mega_array_ + it->second);
-		}
-		return nullptr;
-	}*/
-	auto Size() const {
-		return size_;
-	}
-	auto Capacity() const {
-		return capacity_;
-	}
-	std::pair<ByteOffset, bool> GetFreeComponentAddress(std::size_t required_size) {
-		if (free_component_map_.size() > 0) {
-			auto it = free_component_map_.find(required_size);
-			if (it != std::end(free_component_map_)) {
-				auto& free_addresses = it->second;
-				if (free_addresses.size() > 0) {
-					// get copy of first free component
-					auto address_offset = free_addresses.front();
-					if (free_addresses.size() == 1) { // one free component, erase size entry
-						free_component_map_.erase(it);
-					} else { // multiple free_components, swap and pop
-						std::iter_swap(std::begin(free_addresses), std::end(free_addresses) - 1);
-						free_addresses.pop_back();
-					}
-					return { address_offset, true };
-				}
-			}
-		}
-		return { static_cast<ByteOffset>(size_), false };
-	}
-	std::size_t FindFreeEntityId() {
-		if (free_entity_list_.size() > 0) {
-			auto free_id = free_entity_list_.front();
-			if (free_entity_list_.size() == 1) { // one free entity, clear vector
-				free_entity_list_.resize(0);
-			} else { // multiple free entities, swap and pop
-				std::iter_swap(std::begin(free_entity_list_), std::end(free_entity_list_) - 1);
-				free_entity_list_.pop_back();
-			}
-			return free_id;
-		}
-		return entity_count_++;
-	}
-public:
-	// CONSIDER: Performance improvement if switching to map or vector of pairs?
-	std::unordered_map<std::size_t, std::vector<ByteOffset>> free_component_map_;
-	std::vector<std::size_t> free_entity_list_;
-private:
-	std::vector<std::pair<ComponentId, destructor_function>> destructors_;
-	EntityId entity_count_{ 0 };
-	std::size_t capacity_{ 0 };
-	std::size_t size_{ 0 };
-	char* mega_array_ = nullptr;
-	std::vector<EntityData5> entities_;
+	Manager6& manager_;
+	VectorOfTuples entities_;
 };
-
-
-
-
-
-
-
-
-
 
 struct EntityPool {
 	EntityPool() = delete;
@@ -983,63 +991,114 @@ struct EntityPool {
 	std::vector<ByteOffset> components;
 };
 
+// TODO: Add remove component, remove entity, make those call destructors properly and work with manager update
+// TODO: Add systems
+
 class Manager6 {
 public:
-	// Initialize NULL_ENTITY
-	Manager6(EntityId entities, std::size_t components = 0) : entities_{ { 0, 0, true } } {
+	// Important: Initialize a null entity in entities_
+	Manager6(EntityId entities = 0, std::size_t components = 0) : entities_{ { 0, 0, true } } {
 		AllocateData(2);
+		// TODO: Move this out of here?
 		Resize(entities * DEFAULT_POOL_CAPACITY, entities, components);
 	}
 	Manager6(const Manager6&) = delete;
 	Manager6& operator=(const Manager6&) = delete;
 	Manager6(Manager6&&) = delete;
 	Manager6& operator=(Manager6&&) = delete;
+	// Capacity of initial entity pool allocated (in bytes)
 	EntityId CreateEntity(Byte capacity = DEFAULT_POOL_CAPACITY) {
 		EntityId id{ ++entity_count_ };
 		AddPool(id, capacity);
 		return id;
 	}
+	void Update() {
+		if (entity_change) {
+			for (auto& cache : caches_) {
+				cache->UpdateCache();
+			}
+			entity_change = false;
+		}
+	}
 	template <typename T>
-	bool HasComponent(EntityId index) {
-		return entities_[index].components[GetTypeId<T>()] != NULL_COMPONENT_OFFSET;
+	bool HasComponent(EntityId index) const {
+		auto& components = entities_[index].components;
+		ComponentId id = GetTypeId<T>();
+		if (id < components.size()) {
+			return components[id] != NULL_COMPONENT_OFFSET;
+		}
+		return false;
+	}
+	bool HasComponent(EntityId index, ComponentId id) const {
+		auto& components = entities_[index].components;
+		if (id < components.size()) {
+			return components[id] != NULL_COMPONENT_OFFSET;
+		}
+		return false;
 	}
 	template <typename ...Ts>
-	bool HasComponents(EntityId index) {
+	bool HasComponents(EntityId index) const {
 		return (HasComponent<Ts>(index) && ...);
 	}
 	template <class T, typename ...TArgs>
 	void AddComponent(EntityId index, TArgs&&... args) {
-		ComponentId id = GetTypeId<T>();
-		Byte component_size = static_cast<Byte>(sizeof(T));
 		assert(index < entities_.size());
 		auto& pool = entities_[index];
-		Byte new_pool_size = pool.size + component_size;
+		ComponentId id = GetTypeId<T>();
+		if (id < pool.components.size()) {
+			if (pool.components[id] != NULL_COMPONENT_OFFSET) {
+				// Replace component
+				return;
+			}
+		}
+		Byte new_pool_size = pool.size + sizeof(T);
 		if (new_pool_size > pool.capacity) {
 			Byte new_capacity = new_pool_size * 2;
-			Byte new_offset = GetFreeOffset(new_capacity);
-			MovePool(pool, new_offset, new_capacity);
+			MovePool(pool, GetFreeOffset(new_capacity), new_capacity);
 		}
 		Byte offset = pool.offset + pool.size;
-		assert(offset < capacity_, "Ran out of space in data array");
 		new(static_cast<void*>(data_ + offset)) T(std::forward<TArgs>(args)...);
 		if (id >= pool.components.size()) {
 			pool.components.resize(static_cast<std::size_t>(id) + 1, NULL_COMPONENT_OFFSET);
 		}
 		pool.components[id] = pool.size;
 		pool.size = new_pool_size;
+		entity_change = true;
 	}
 	template <typename T>
-	T& GetComponent(EntityId index) {
+	T* GetComponentPointer(EntityId index) const {
 		assert(index < entities_.size());
 		auto& entity = entities_[index];
-		return *static_cast<T*>(static_cast<void*>(data_ + entity.offset + entity.components[GetTypeId<T>()]));
+		ComponentId id = GetTypeId<T>();
+		if (HasComponent(index, id)) {
+			return static_cast<T*>(static_cast<void*>(data_ + entity.offset + entity.components[id]));
+		}
+		return nullptr;
+	}
+	template <typename T>
+	T& GetComponent(EntityId index) const {
+		T* component = GetComponentPointer<T>(index);
+		assert(component != nullptr);
+		return *component;
 	}
 	template <typename ...Ts>
-	std::tuple<Ts&...> GetComponents(EntityId index) {
+	std::tuple<Ts&...> GetComponents(EntityId index) const {
 		return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(index)...);
+	}
+	template <typename ...Ts>
+	std::vector<std::tuple<const EntityId, Ts&...>> GetMatchingEntities() {
+		std::vector<std::tuple<const EntityId, Ts&...>> vector;
+		for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
+			if (HasComponents<Ts...>(i)) {
+				vector.emplace_back(i, GetComponent<Ts>(i)...);
+			}
+		}
+		// NRVO? C:
+		return vector;
 	}
 	template <typename ...Ts, typename T>
 	void ForEach(T&& lambda) {
+		// TODO: write some tests for lambda parameters
 		for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
 			auto& entity = entities_[i];
 			if (HasComponents<Ts...>(i)) {
@@ -1047,19 +1106,27 @@ public:
 			}
 		}
 	}
-	auto EntityCount() {
+	EntityId EntityCount() const {
 		return entity_count_;
 	}
 	void Resize(Byte bytes, EntityId entities, std::size_t components = 0) {
 		// Allocate at least one byte per new entity
-		ReAllocateData(bytes);
-		ResizeEntities(entities);
+		if (bytes) {
+			ReAllocateData(bytes);
+		}
+		if (entities) {
+			ResizeEntities(entities);
+		}
 		if (components) {
 			EntityId size = static_cast<EntityId>(entities_.size());
 			for (EntityId i = first_valid_entity; i < size; ++i) {
 				ResizeComponent(i, components);
 			}
 		}
+	}
+	template <typename ...Ts>
+	Cache<Ts...>& AddCache() {
+		return *static_cast<Cache<Ts...>*>(caches_.emplace_back(std::make_unique<Cache<Ts...>>(*this)).get());
 	}
 private:
 	void ResizeEntities(std::size_t new_capacity) {
@@ -1070,7 +1137,7 @@ private:
 		entities_[index].components.resize(new_capacity, NULL_COMPONENT_OFFSET);
 	}
 	void MovePool(EntityPool& pool, Byte to_offset, Byte to_capacity) {
-		assert(pool.size > 0, "Attempting to move from empty pool, are you sure?");
+		assert(pool.size > 0, "Cannot move from empty pool");
 		assert(pool.alive == true, "Cannot move from unoccupied pool");
 		std::memcpy(data_ + to_offset, data_ + pool.offset, pool.size);
 		std::memset(data_ + pool.offset, 0, pool.size);
@@ -1102,6 +1169,7 @@ private:
 		}
 		return free_offset;
 	}
+	// Only called once in constructor
 	void AllocateData(Byte new_capacity) {
 		assert(!data_);
 		capacity_ = new_capacity;
@@ -1118,137 +1186,128 @@ private:
 		}
 	}
 private:
+	bool entity_change = false;
 	Byte capacity_{ 0 };
 	Byte size_{ 0 };
 	char* data_{ nullptr };
 	EntityId entity_count_{ 0 };
 	std::vector<EntityPool> entities_;
 	std::unordered_map<Byte, Byte> free_memory_;
+	std::vector<std::unique_ptr<BaseCache>> caches_;
 };
 
+template <typename ...Ts>
+void Cache<Ts...>::UpdateCache() {
+	entities_ = manager_.GetMatchingEntities<Ts...>();
+}
 
 
 
-
-
-
-
-class BaseComponent {};
-
-template <class T>
-class Component : public BaseComponent {
-public:
-	Component(T data) : data(std::move(data)) {}
-	~Component() {
-		data.~T();
-	}
-	T& get() { return data; }
-private:
-	T data;
-};
-
-struct EntityData3 {
-	std::vector<std::pair<ComponentId, BaseComponent*>> components;
-	bool alive;
-};
-
-class Manager3 {
-public:
-	void ResizeEntities(std::size_t additional_amount) {
-		entities_.resize(entities_.capacity() + additional_amount);
-	}
-	EntityId CreateEntity() {
-		if (entity_count_ >= entities_.capacity()) {
-			ResizeEntities(entities_.capacity() + 2);
-		}
-		EntityId free_index(static_cast<EntityId>(entity_count_++));
-		EntityData3 new_entity;
-		new_entity.alive = true;
-		entities_[free_index] = std::move(new_entity);
-		return free_index;
-	}
-	bool HasEntity(EntityId index) {
-		if (index >= 0 && index < static_cast<EntityId>(entities_.size())) {
-			return entities_[index].alive;
-		}
-		return false;
-	}
-	template <class T, typename ...TArgs>
-	void AddComponent(EntityId index, TArgs&&... args) {
-		auto it = GetComponentIterator<T>(index);
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		if (it == std::end(components)) {
-			components.emplace_back(id, new Component<T>(T(std::forward<TArgs>(args)...)));
-		} else {
-			BaseComponent* ptr = it->second;
-			static_cast<Component<T>*>(ptr)->get().~T();
-			delete ptr;
-			it->second = new Component<T>(T(std::forward<TArgs>(args)...));
-		}
-	}
-	template <class T>
-	void RemoveComponent(EntityId index) {
-		auto it = GetComponentIterator<T>(index);
-		auto& components = entities_[index].components;
-		if (it != std::end(components)) {
-			BaseComponent* ptr = it->second;
-			static_cast<Component<T>*>(ptr)->get().~T();
-			delete ptr;
-			ptr = nullptr;
-			components.erase(it);
-		}
-	}
-	template <class T>
-	bool HasComponent(EntityId index) {
-		auto it = GetComponentIterator<T>(index);
-		return it->second;
-	}
-	template <class T>
-	T* GetComponentP(EntityId index) {
-		auto it = GetComponentIterator<T>(index);
-		if (it->second) {
-			return &static_cast<Component<T>*>(it->second)->get();
-		}
-		return nullptr;
-	}
-	template <class T>
-	T& GetComponent(EntityId index) {
-		auto it = GetComponentIterator<T>(index);
-		assert(it->second);
-		return static_cast<Component<T>*>(it->second)->get();
-	}
-	std::size_t EntityCount() const {
-		return entity_count_;
-	}
-private:
-	template <class T>
-	auto GetComponentIterator(EntityId index) {
-		assert(HasEntity(index), "Entity does not exist in manager");
-		auto& components = entities_[index].components;
-		ComponentId id = GetTypeId<T>();
-		auto end = std::end(components);
-		for (auto it = std::begin(components); it != end; ++it) {
-			if (it->first == id) {
-				return it;
-			}
-		}
-		return end;
-	}
-	std::size_t entity_count_ = 0;
-	std::vector<EntityData3> entities_;
-};
-
-
-
-
-
-
-
-
-
-
-
+//class BaseComponent {};
+//
+//template <class T>
+//class Component : public BaseComponent {
+//public:
+//	Component(T data) : data(std::move(data)) {}
+//	~Component() {
+//		data.~T();
+//	}
+//	T& get() { return data; }
+//private:
+//	T data;
+//};
+//
+//struct EntityData3 {
+//	std::vector<std::pair<ComponentId, BaseComponent*>> components;
+//	bool alive;
+//};
+//
+//class Manager3 {
+//public:
+//	void ResizeEntities(std::size_t additional_amount) {
+//		entities_.resize(entities_.capacity() + additional_amount);
+//	}
+//	EntityId CreateEntity() {
+//		if (entity_count_ >= entities_.capacity()) {
+//			ResizeEntities(entities_.capacity() + 2);
+//		}
+//		EntityId free_index(static_cast<EntityId>(entity_count_++));
+//		EntityData3 new_entity;
+//		new_entity.alive = true;
+//		entities_[free_index] = std::move(new_entity);
+//		return free_index;
+//	}
+//	bool HasEntity(EntityId index) {
+//		if (index >= 0 && index < static_cast<EntityId>(entities_.size())) {
+//			return entities_[index].alive;
+//		}
+//		return false;
+//	}
+//	template <class T, typename ...TArgs>
+//	void AddComponent(EntityId index, TArgs&&... args) {
+//		auto it = GetComponentIterator<T>(index);
+//		auto& components = entities_[index].components;
+//		ComponentId id = GetTypeId<T>();
+//		if (it == std::end(components)) {
+//			components.emplace_back(id, new Component<T>(T(std::forward<TArgs>(args)...)));
+//		} else {
+//			BaseComponent* ptr = it->second;
+//			static_cast<Component<T>*>(ptr)->get().~T();
+//			delete ptr;
+//			it->second = new Component<T>(T(std::forward<TArgs>(args)...));
+//		}
+//	}
+//	template <class T>
+//	void RemoveComponent(EntityId index) {
+//		auto it = GetComponentIterator<T>(index);
+//		auto& components = entities_[index].components;
+//		if (it != std::end(components)) {
+//			BaseComponent* ptr = it->second;
+//			static_cast<Component<T>*>(ptr)->get().~T();
+//			delete ptr;
+//			ptr = nullptr;
+//			components.erase(it);
+//		}
+//	}
+//	template <class T>
+//	bool HasComponent(EntityId index) {
+//		auto it = GetComponentIterator<T>(index);
+//		return it->second;
+//	}
+//	template <class T>
+//	T* GetComponentP(EntityId index) {
+//		auto it = GetComponentIterator<T>(index);
+//		if (it->second) {
+//			return &static_cast<Component<T>*>(it->second)->get();
+//		}
+//		return nullptr;
+//	}
+//	template <class T>
+//	T& GetComponent(EntityId index) {
+//		auto it = GetComponentIterator<T>(index);
+//		assert(it->second);
+//		return static_cast<Component<T>*>(it->second)->get();
+//	}
+//	std::size_t EntityCount() const {
+//		return entity_count_;
+//	}
+//private:
+//	template <class T>
+//	auto GetComponentIterator(EntityId index) {
+//		assert(HasEntity(index), "Entity does not exist in manager");
+//		auto& components = entities_[index].components;
+//		ComponentId id = GetTypeId<T>();
+//		auto end = std::end(components);
+//		for (auto it = std::begin(components); it != end; ++it) {
+//			if (it->first == id) {
+//				return it;
+//			}
+//		}
+//		return end;
+//	}
+//	std::size_t entity_count_ = 0;
+//	std::vector<EntityData3> entities_;
+//};
 
 /*
 
