@@ -42,6 +42,40 @@ struct Collision {
 	}
 };
 
+void TestCreateAndAddComponent(std::size_t tests, std::size_t cycles) {
+	ecs::Manager6 manager;
+	using namespace std::chrono;
+	nanoseconds totalTime{ 0 };
+	for (std::size_t i = 0; i < tests; ++i) {
+		auto start = high_resolution_clock::now();
+		for (std::size_t j = 0; j < cycles; ++j) {
+			manager.CreateEntity(sizeof(int) + sizeof(float));
+			manager.AddComponent<int>(0, 1);
+			manager.AddComponent<float>(0, 1.0f);
+		}
+		auto stop = high_resolution_clock::now();
+		totalTime = totalTime + duration_cast<nanoseconds>(stop - start);
+	}
+	std::cout << "(Tests=" << tests << ") TestCreateAndAddComponent Average (Cycles=" << cycles << ") : " << std::fixed << std::setprecision(2) << totalTime.count() / (1000000000.00 * tests) << std::endl;
+}
+
+void TestHasComponent(std::size_t tests, std::size_t cycles) {
+	ecs::Manager6 manager;
+	manager.AddComponent<int>(0, 1);
+	using namespace std::chrono;
+	nanoseconds totalTime{ 0 };
+	for (std::size_t i = 0; i < tests; ++i) {
+		auto start = high_resolution_clock::now();
+		for (std::size_t j = 0; j < cycles; ++j) {
+			bool test = manager.HasComponent<int>(0);
+			test = manager.HasComponent<float>(0);
+		}
+		auto stop = high_resolution_clock::now();
+		totalTime = totalTime + duration_cast<nanoseconds>(stop - start);
+	}
+	std::cout << "(Tests=" << tests << ") HasComponent Average (Cycles=" << cycles << ") : " << std::fixed << std::setprecision(2) << totalTime.count() / (1000000000.00 * tests) << std::endl;
+}
+
 void assign(ecs::Manager6& manager, ecs::EntityId entities) {
 	for (ecs::EntityId counter = 0; counter < entities; ++counter) {
 		ecs::EntityId i = manager.CreateEntity();
@@ -52,118 +86,56 @@ void assign(ecs::Manager6& manager, ecs::EntityId entities) {
 }
 
 void update(ecs::Manager6& manager) {
-	manager.ForEach<Position, Velocity, Collision>([](auto& id, auto& pos, auto& vel, auto& col) {
-		if (id == 1) {
-			pos.x += 1;
-			vel.y += 1;
-			col.x += 1;
-		}
-	});
-	/*manager.ForEach<Test<1>, Test<2>, Test<3>, Test<4>, Test<5>, Test<6>, Test<7>, Test<8>, Test<9>, Test<10>, Test<11>, Test<12>, Test<13>, Test<14>, Test<15>, Test<16>, Test<17>, Test<18>, Test<19>, Test<20>>([](auto& c1, auto& c2, auto& c3, auto& c4, auto& c5, auto& c6, auto& c7, auto& c8, auto& c9, auto& c10, auto& c11, auto& c12, auto& c13, auto& c14, auto& c15, auto& c16, auto& c17, auto& c18, auto& c19, auto& c20) {
-		c1.x += 1;
-		c2.x += 1;
-		c3.x += 1;
-		c4.x += 1;
-		c5.x += 1;
-		c6.x += 1;
-		c7.x += 1;
-		c8.x += 1;
-		c9.x += 1;
-		c10.x += 1;
-		c11.x += 1;
-		c12.x += 1;
-		c13.x += 1;
-		c14.x += 1;
-		c15.x += 1;
-		c16.x += 1;
-		c17.x += 1;
-		c18.x += 1;
-		c19.x += 1;
-		c20.x += 1;
-	});*/
-	//for (ecs::EntityId i = ecs::first_valid_entity; i < manager.EntityCount(); ++i) {
-	//	/*auto [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18, c19, c20] = manager.GetComponents<Test<1>, Test<2>, Test<3>, Test<4>, Test<5>, Test<6>, Test<7>, Test<8>, Test<9>, Test<10>, Test<11>, Test<12>, Test<13>, Test<14>, Test<15>, Test<16>, Test<17>, Test<18>, Test<19>, Test<20>>(i);*/
-	//	/*auto& c1 = manager.GetComponent<Test<1>>(i);
-	//	auto& c2 = manager.GetComponent<Test<2>>(i);
-	//	auto& c3 = manager.GetComponent<Test<3>>(i);
-	//	auto& c4 = manager.GetComponent<Test<4>>(i);
-	//	auto& c5 = manager.GetComponent<Test<5>>(i);
-	//	auto& c6 = manager.GetComponent<Test<6>>(i);
-	//	auto& c7 = manager.GetComponent<Test<7>>(i);
-	//	auto& c8 = manager.GetComponent<Test<8>>(i);
-	//	auto& c9 = manager.GetComponent<Test<9>>(i);
-	//	auto& c10 = manager.GetComponent<Test<10>>(i);
-	//	auto& c11 = manager.GetComponent<Test<11>>(i);
-	//	auto& c12 = manager.GetComponent<Test<12>>(i);
-	//	auto& c13 = manager.GetComponent<Test<13>>(i);
-	//	auto& c14 = manager.GetComponent<Test<14>>(i);
-	//	auto& c15 = manager.GetComponent<Test<15>>(i);
-	//	auto& c16 = manager.GetComponent<Test<16>>(i);
-	//	auto& c17 = manager.GetComponent<Test<17>>(i);
-	//	auto& c18 = manager.GetComponent<Test<18>>(i);
-	//	auto& c19 = manager.GetComponent<Test<19>>(i);
-	//	auto& c20 = manager.GetComponent<Test<20>>(i);*/
-	//	/*c1.x += 1;
-	//	c2.x += 1;
-	//	c3.x += 1;
-	//	c4.x += 1;
-	//	c5.x += 1;
-	//	c6.x += 1;
-	//	c7.x += 1;
-	//	c8.x += 1;
-	//	c9.x += 1;
-	//	c10.x += 1;
-	//	c11.x += 1;
-	//	c12.x += 1;
-	//	c13.x += 1;
-	//	c14.x += 1;
-	//	c15.x += 1;
-	//	c16.x += 1;
-	//	c17.x += 1;
-	//	c18.x += 1;
-	//	c19.x += 1;
-	//	c20.x += 1;*/
-	//}
+	static auto& cache = manager.AddCache<Position, Velocity, Collision>();
+	for (auto [id, pos, vel, col] : cache.GetEntities()) {
+		manager.AddComponent<int>(id, 1);
+		pos.x += 1;
+		vel.y += 1;
+		col.x += 1;
+	}
+	manager.Update();
 }
 
 int main() {
-	ecs::EntityId entities = 1000000;
-	ecs::Manager6 manager(entities, 20);
-	std::size_t loops = 100;
-	// 1 mil, 1k, 758mb, 8.9, 9.0, M5
-	// 1 mil, 1k, 941mb, 9.2, 9.3, M6
-	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
-	assign(manager, entities);
-	LOG("ASSIGNEMT COMPLETED!");
-	LOG("TIMING LOOPS!");
-	auto start = std::chrono::high_resolution_clock::now();
-	for (std::size_t i = 0; i < loops; ++i) {
-		update(manager);
+	bool fullTest = false;
+	if (!fullTest) {
+		TestHasComponent(1000, 10000000);
+		TestCreateAndAddComponent(100, 100000);
 	}
-	LOG(manager.GetComponent<Position>(1));
-	LOG(manager.GetComponent<Velocity>(1));
-	LOG("LOOPS COMPLETED!");
-	/*using namespace std::chrono;
-	unsigned frame_count_per_second = 0;
-	auto prev_time_in_seconds = time_point_cast<seconds>(system_clock::now());
-	size_t counter = 0;
-	while (counter <= 10) {
-		for (std::size_t i = 0; i < loops; ++i) {
+	if (fullTest) {
+		ecs::EntityId entities = 30000;
+		ecs::Manager6 manager(entities, 20);
+		std::size_t loops = 20;
+		LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
+		assign(manager, entities);
+		LOG("ASSIGNEMT COMPLETED!");
+		LOG("TIMING LOOPS!");
+		auto start = std::chrono::high_resolution_clock::now();
+		/*for (std::size_t i = 0; i < loops; ++i) {
 			update(manager);
+		}*/
+		LOG("LOOPS COMPLETED!");
+		using namespace std::chrono;
+		unsigned frame_count_per_second = 0;
+		auto prev_time_in_seconds = time_point_cast<seconds>(system_clock::now());
+		size_t counter = 0;
+		while (counter <= 10) {
+			for (std::size_t i = 0; i < loops; ++i) {
+				update(manager);
+			}
+			auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
+			++frame_count_per_second;
+			if (time_in_seconds > prev_time_in_seconds) {
+				std::cerr << frame_count_per_second << " frames per second\n";
+				frame_count_per_second = 0;
+				prev_time_in_seconds = time_in_seconds;
+				++counter;
+			}
 		}
-		auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
-		++frame_count_per_second;
-		if (time_in_seconds > prev_time_in_seconds) {
-			std::cerr << frame_count_per_second << " frames per second\n";
-			frame_count_per_second = 0;
-			prev_time_in_seconds = time_in_seconds;
-			++counter;
-		}
-	}*/
-	auto stop = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-	std::cout << "execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
-
+		auto stop = std::chrono::high_resolution_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+		std::cout << "execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
+	}
 	// 10000, 1 mil loops, 611, 643s, Manager 3
 	// 10000, 1 mil loops, 591, 592s, Manager 5
 
