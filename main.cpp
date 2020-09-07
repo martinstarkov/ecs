@@ -5,15 +5,8 @@
 #include <thread>
 #include <iomanip>
 
-template <std::size_t I>
-struct Test {
-	Test(double x, double y) : x(x), y(y) {}
-	double x, y;
-	friend std::ostream& operator<<(std::ostream& os, const Test<I>& obj) {
-		os << "(" << obj.x << "," << obj.y << ")";
-		return os;
-	}
-};
+#define LOG(x) { std::cout << x << std::endl; }
+#define LOG_(x) { std::cout << x; }
 
 struct Position {
 	Position(double x, double y) : x(x), y(y) {}
@@ -33,109 +26,53 @@ struct Velocity {
 	}
 };
 
-struct Collision {
-	Collision(double x, double y) : x(x), y(y) {}
-	double x, y;
-	friend std::ostream& operator<<(std::ostream& os, const Collision& obj) {
-		os << "(" << obj.x << "," << obj.y << ")";
-		return os;
-	}
-};
-
-void TestCreateAndAddComponent(std::size_t tests, std::size_t cycles) {
-	ecs::Manager6 manager;
-	using namespace std::chrono;
-	nanoseconds totalTime{ 0 };
-	for (std::size_t i = 0; i < tests; ++i) {
-		auto start = high_resolution_clock::now();
-		for (std::size_t j = 0; j < cycles; ++j) {
-			manager.CreateEntity(sizeof(int) + sizeof(float));
-			manager.AddComponent<int>(0, 1);
-			manager.AddComponent<float>(0, 1.0f);
-		}
-		auto stop = high_resolution_clock::now();
-		totalTime = totalTime + duration_cast<nanoseconds>(stop - start);
-	}
-	std::cout << "(Tests=" << tests << ") TestCreateAndAddComponent Average (Cycles=" << cycles << ") : " << std::fixed << std::setprecision(2) << totalTime.count() / (1000000000.00 * tests) << std::endl;
-}
-
-void TestHasComponent(std::size_t tests, std::size_t cycles) {
-	ecs::Manager6 manager;
-	manager.AddComponent<int>(0, 1);
-	using namespace std::chrono;
-	nanoseconds totalTime{ 0 };
-	for (std::size_t i = 0; i < tests; ++i) {
-		auto start = high_resolution_clock::now();
-		for (std::size_t j = 0; j < cycles; ++j) {
-			bool test = manager.HasComponent<int>(0);
-			test = manager.HasComponent<float>(0);
-		}
-		auto stop = high_resolution_clock::now();
-		totalTime = totalTime + duration_cast<nanoseconds>(stop - start);
-	}
-	std::cout << "(Tests=" << tests << ") HasComponent Average (Cycles=" << cycles << ") : " << std::fixed << std::setprecision(2) << totalTime.count() / (1000000000.00 * tests) << std::endl;
-}
-
-void assign(ecs::Manager6& manager, ecs::EntityId entities) {
-	for (ecs::EntityId counter = 0; counter < entities; ++counter) {
-		ecs::EntityId i = manager.CreateEntity();
-		manager.AddComponent<Position>(i, 50, 50);
-		manager.AddComponent<Velocity>(i, 25, 25);
-		manager.AddComponent<Collision>(i, 75, 75);
-	}
-}
-
-void update(ecs::Manager6& manager) {
-	static auto& cache = manager.AddCache<Position, Velocity, Collision>();
-	for (auto [id, pos, vel, col] : cache.GetEntities()) {
-		manager.AddComponent<int>(id, 1);
-		pos.x += 1;
-		vel.y += 1;
-		col.x += 1;
-	}
-	manager.Update();
-}
+//void update(ecs::Manager& manager) {
+//	static auto& cache = manager.AddCache<Position, Velocity>();
+//	for (auto [id, pos, vel, col] : cache.GetEntities()) {
+//		manager.AddComponent<int>(id, 1);
+//		pos.x += 1;
+//		vel.y += 1;
+//		col.x += 1;
+//	}
+//	manager.Update();
+//}
 
 int main() {
-	bool fullTest = false;
-	if (!fullTest) {
-		TestHasComponent(1000, 10000000);
-		TestCreateAndAddComponent(100, 100000);
-	}
-	if (fullTest) {
-		ecs::EntityId entities = 30000;
-		ecs::Manager6 manager(entities, 20);
-		std::size_t loops = 20;
-		LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
-		assign(manager, entities);
-		LOG("ASSIGNEMT COMPLETED!");
-		LOG("TIMING LOOPS!");
-		auto start = std::chrono::high_resolution_clock::now();
-		/*for (std::size_t i = 0; i < loops; ++i) {
-			update(manager);
-		}*/
-		LOG("LOOPS COMPLETED!");
-		using namespace std::chrono;
-		unsigned frame_count_per_second = 0;
-		auto prev_time_in_seconds = time_point_cast<seconds>(system_clock::now());
-		size_t counter = 0;
-		while (counter <= 10) {
-			for (std::size_t i = 0; i < loops; ++i) {
-				update(manager);
-			}
-			auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
-			++frame_count_per_second;
-			if (time_in_seconds > prev_time_in_seconds) {
-				std::cerr << frame_count_per_second << " frames per second\n";
-				frame_count_per_second = 0;
-				prev_time_in_seconds = time_in_seconds;
-				++counter;
-			}
-		}
-		auto stop = std::chrono::high_resolution_clock::now();
-		auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-		std::cout << "execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
-	}
+
+	//if (true) {
+	//	ecs::EntityId entities = 30000;
+	//	ecs::Manager manager(entities, 20);
+	//	std::size_t loops = 20;
+	//	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
+	//	assign(manager, entities);
+	//	LOG("ASSIGNEMT COMPLETED!");
+	//	LOG("TIMING LOOPS!");
+	//	auto start = std::chrono::high_resolution_clock::now();
+	//	/*for (std::size_t i = 0; i < loops; ++i) {
+	//		update(manager);
+	//	}*/
+	//	LOG("LOOPS COMPLETED!");
+	//	using namespace std::chrono;
+	//	unsigned frame_count_per_second = 0;
+	//	auto prev_time_in_seconds = time_point_cast<seconds>(system_clock::now());
+	//	size_t counter = 0;
+	//	while (counter <= 10) {
+	//		for (std::size_t i = 0; i < loops; ++i) {
+	//			update(manager);
+	//		}
+	//		auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
+	//		++frame_count_per_second;
+	//		if (time_in_seconds > prev_time_in_seconds) {
+	//			std::cerr << frame_count_per_second << " frames per second\n";
+	//			frame_count_per_second = 0;
+	//			prev_time_in_seconds = time_in_seconds;
+	//			++counter;
+	//		}
+	//	}
+	//	auto stop = std::chrono::high_resolution_clock::now();
+	//	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+	//	std::cout << "execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
+	//}
 	// 10000, 1 mil loops, 611, 643s, Manager 3
 	// 10000, 1 mil loops, 591, 592s, Manager 5
 
