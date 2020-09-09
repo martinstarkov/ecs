@@ -131,51 +131,121 @@ public:
 			}
 		}
 	}
+	void Resize(Byte bytes, EntityId entities, std::size_t components = 0) {
+		// Allocate at least one byte per new entity
+		ReallocateData(bytes);
+		ResizeEntities(entities);
+		if (components) {
+			for (auto i = first_valid_entity; i < entities_.size(); ++i) {
+				ResizeComponents(i, components);
+			}
+		}
+	}
+	void Update() {
+		UpdateCaches();
+	}
 private:
 	void UpdateCaches() {
-		for (auto& cache : caches_) {
-			cache->UpdateCache();
+		if (entity_changed_) {
+			for (auto& cache : caches_) {
+				cache->UpdateCache();
+			}
+			entity_changed_ = false;
 		}
 	}
 	void DestroyEntity(EntityId id) {
-		entities_[id].alive = false;
+		auto& pool = entities_[id];
+		// Only destroy entity if it is alive
+		if (pool.alive) {
+			// Reset pool memory
+			std::memset(data_ + pool.offset, 0, pool.capacity);
+			// Add deleted pool offset to free memory list
+			free_memory_.emplace(pool.capacity, pool.offset);
+			pool.alive = false;
+			pool.components.clear();
+			pool.size = 0;
+		}
 	}
 	template <typename T>
 	bool HasComponent(EntityId id) const {
 		auto& components = entities_[id].components;
 		ComponentId component_id = GetComponentTypeId<T>();
-		if (component_id < components.size()) {
-			return components[component_id] != NULL_COMPONENT;
-		}
-		return false;
+		return id < components.size() && components[component_id] != NULL_COMPONENT;
 	}
 	bool HasComponent(EntityId id, ComponentId component_id) const {
 		auto& components = entities_[id].components;
-		if (id < components.size()) {
-			return components[component_id] != NULL_COMPONENT;
-		}
-		return false;
+		return id < components.size() && components[component_id] != NULL_COMPONENT;
 	}
 	template <typename T>
 	void RemoveComponent(EntityId id) {
-		auto& components = entities_[id].components;
-		// call destructor
-		// clear offset and shift all offsets
+		assert(id < entities_.size());
+		auto& pool = entities_[id];
+		ComponentId component_id = GetComponentTypeId<T>();
+		auto& component_offset = pool.components[component_id];
+		auto pool_location = data_ + pool.offset;
+		auto component_location = pool_location + component_offset;
+		auto& destructor_function = destructors_[component_id];
+		assert(destructor_function != nullptr && "Could not find component destructor");
+		destructor_function(component_location);
+		destructor_function = nullptr;
+		// Clear component offset
+		// TODO: Possibly shrink destructors_ if this is the final component of this type?
+		auto shifted_bytes = pool.capacity - (component_offset + sizeof(T));
+		assert(shifted_bytes > 0 && "Cannot shift memory forward");
+		std::memset(component_location, 0, sizeof(T));
+		// Copy rest of bytes backward
+		std::memcpy(component_location, component_location + sizeof(T), shifted_bytes);
+		// Shift remaining offset by shifted amount;
+		for (auto& component : pool.components) {
+			if (component != NULL_COMPONENT && component > component_offset) {
+				component -= sizeof(T);
+				assert(component > 0 && "Component offset cannot be negative");
+			}
+		}
+		pool.size -= sizeof(T);
+		assert(pool.size > 0 && "Cannot shrink pool below 0");
+		component_offset = NULL_COMPONENT;
+	}
+	std::size_t ComponentCount(EntityId id) const {
+		std::size_t count = 0;
+		assert(id < entities_.size());
+		auto& pool = entities_[id];
+		for (auto& component : pool.components) {
+			if (component != NULL_COMPONENT) {
+				++count;
+			}
+		}
+		return count;
 	}
 	template <typename ...Ts>
 	bool HasComponents(EntityId id) const {
 		return (HasComponent<Ts>(id) && ...);
 	}
-	template <class T, typename ...TArgs>
-	void AddComponent(EntityId id, TArgs&&... args) {
+	template <typename T, typename ...TArgs>
+	T& ReplaceComponent(EntityId id, TArgs&&... args) {
+		return ReplaceComponent<T>(id, GetComponentTypeId<T>(), std::forward<TArgs>(args)...);
+	}
+	template <typename T, typename ...TArgs>
+	T& ReplaceComponent(EntityId id, ComponentId component_id, TArgs&&... args) {
+		assert(id < entities_.size());
+		auto& pool = entities_[id];
+		auto location = data_ + pool.offset + pool.components[component_id];
+		// call destructor of previous component;
+		auto destructor_function = destructors_[component_id];
+		assert(destructor_function != nullptr && "Could not find component destructor");
+		destructor_function(location);
+		T& component = *static_cast<T*>(static_cast<void*>(location));
+		component = T(std::forward<TArgs>(args)...);
+		return component;
+	}
+	template <typename T, typename ...TArgs>
+	T& AddComponent(EntityId id, TArgs&&... args) {
+		// TODO: Add static assertion to check that args is valid
 		assert(id < entities_.size());
 		auto& pool = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
-		if (component_id < pool.components.size()) {
-			if (pool.components[component_id] != NULL_COMPONENT) {
-				// Replace component
-				return;
-			}
+		if (component_id < pool.components.size() && pool.components[component_id] != NULL_COMPONENT) {
+			return ReplaceComponent<T>(id, component_id, std::forward<TArgs>(args)...);
 		}
 		Byte new_pool_size = pool.size + sizeof(T);
 		if (new_pool_size > pool.capacity) {
@@ -187,13 +257,19 @@ private:
 		if (component_id >= pool.components.size()) {
 			pool.components.resize(static_cast<std::size_t>(component_id) + 1, NULL_COMPONENT);
 		}
+		if (component_id >= destructors_.size()) {
+			destructors_.resize(static_cast<std::size_t>(component_id) + 1, nullptr);
+		}
+		destructors_[component_id] = &DestroyComponent<T>;
 		pool.components[component_id] = pool.size;
 		pool.size = new_pool_size;
-		UpdateCaches();
+		// TODO: This invalidates caches?
+		entity_changed_ = true;
+		return *static_cast<T*>(static_cast<void*>(data_ + offset));
 	}
 	template <typename T>
 	T* GetComponentPointer(EntityId id) const {
-		assert(id < entities_.size());
+		assert(id < entities_.size() && "Entity id out of range");
 		auto& entity = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
 		if (HasComponent(id, component_id)) {
@@ -212,55 +288,40 @@ private:
 		return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(id)...);
 	}
 	template <typename ...Ts>
-	std::vector<std::tuple<const EntityId, Ts&...>> GetMatchingEntities() {
-		std::vector<std::tuple<const EntityId, Ts&...>> vector;
-		for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
-			if (entities_[i].alive && HasComponents<Ts...>(i)) {
-				vector.emplace_back(i, GetComponent<Ts>(i)...);
-			}
-		}
-		// NRVO? C:
-		return vector;
-	}
-	EntityId EntityCount() const {
-		return entity_count_;
-	}
-	void Resize(Byte bytes, EntityId entities, std::size_t components = 0) {
-		// Allocate at least one byte per new entity
-		ReAllocateData(bytes);
-		ResizeEntities(entities);
-		if (components) {
-			for (auto i = first_valid_entity; i < entities_.size(); ++i) {
-				ResizeComponent(i, components);
-			}
-		}
-	}
+	std::vector<std::tuple<Entity&, Ts&...>> GetEntities();
 	template <typename ...Ts>
 	Cache<Ts...>& AddCache() {
 		return *static_cast<Cache<Ts...>*>(caches_.emplace_back(std::make_unique<Cache<Ts...>>(*this)).get());
 	}
 	void ResizeEntities(std::size_t new_capacity) {
-		entities_.resize(new_capacity, { 0, 0, false });
+		if (new_capacity > entities_.capacity()) {
+			entities_.resize(new_capacity, { 0, 0, false });
+		}
 	}
-	void ResizeComponent(EntityId index, std::size_t new_capacity) {
-		assert(index < entities_.size());
-		entities_[index].components.resize(new_capacity, NULL_COMPONENT);
+	void ResizeComponents(EntityId id, std::size_t new_capacity) {
+		assert(id < entities_.size());
+		auto& components = entities_[id].components;
+		if (new_capacity > components.capacity()) {
+			components.resize(new_capacity, NULL_COMPONENT);
+		}
 	}
-	void MovePool(EntityPool& pool, Byte to_offset, Byte to_capacity) {
+	void MovePool(EntityPool& pool, const Byte to_offset, const Byte to_capacity) {
 		assert(pool.size > 0 && "Cannot move from empty pool");
 		assert(pool.alive == true && "Cannot move from unoccupied pool");
 		std::memcpy(data_ + to_offset, data_ + pool.offset, pool.size);
 		std::memset(data_ + pool.offset, 0, pool.size);
+		// Add old pool offset to free memory list
 		free_memory_.emplace(pool.capacity, pool.offset);
 		pool.offset = to_offset;
 		pool.capacity = to_capacity;
 	}
-	void AddPool(EntityId index, Byte capacity) {
-		// Double entities capacity when limit is reached
-		if (index >= entities_.capacity()) {
+	void AddPool(EntityId id, Byte capacity) {
+		// Double entity capacity when limit is reached
+		if (id >= entities_.capacity()) {
 			ResizeEntities(entities_.capacity() * 2);
 		}
-		auto& pool = entities_[index];
+		assert(id < entities_.size());
+		auto& pool = entities_[id];
 		pool.offset = GetFreeOffset(capacity);
 		pool.capacity = capacity;
 		pool.alive = true;
@@ -269,36 +330,38 @@ private:
 	// If nothing existing found, take from end of data_
 	Byte GetFreeOffset(Byte capacity) {
 		auto it = free_memory_.find(capacity);
+		// Get offset from free memory list
 		if (it != std::end(free_memory_)) {
 			return it->second;
 		}
+		// Get offset from end of memory block
 		Byte free_offset = size_;
 		size_ += capacity;
 		if (size_ >= capacity_) {
-			ReAllocateData(size_ * 2);
+			ReallocateData(size_ * 2);
 		}
 		return free_offset;
 	}
-	// Only called once in constructor
+	// Called once in manager constructor
 	void AllocateData(Byte new_capacity) {
-		assert(!data_);
+		assert(!data_ && "Cannot call AllocateData more than once per manager");
+		auto memory = static_cast<char*>(std::malloc(new_capacity));
+		assert(memory && "Failed to allocate memory for manager");
 		capacity_ = new_capacity;
-		auto memory = static_cast<char*>(std::malloc(capacity_));
-		assert(memory);
 		data_ = memory;
 	}
-	void ReAllocateData(Byte new_capacity) {
+	void ReallocateData(Byte new_capacity) {
 		if (new_capacity > capacity_) {
 			auto memory = static_cast<char*>(std::realloc(data_, new_capacity));
-			assert(memory);
-			data_ = memory;
+			assert(memory && "Failed to reallocate memory for manager");
 			capacity_ = new_capacity;
+			data_ = memory;
 		}
 	}
 
 	// TODO: Map component ids to their corresponding destructor function (to clean everything on manager destruction)
 
-	bool entity_change = false;
+	bool entity_changed_ = false;
 	Byte capacity_{ 0 };
 	Byte size_{ 0 };
 	char* data_{ nullptr };
@@ -307,9 +370,11 @@ private:
 	std::unordered_map<Byte, Byte> free_memory_;
 	std::vector<std::unique_ptr<BaseCache>> caches_;
 	std::size_t id_;
+	static std::vector<destructor> destructors_;
 	static std::size_t manager_count_;
 };
 
+std::vector<destructor> Manager::destructors_;
 std::size_t Manager::manager_count_ = 0;
 
 class Entity {
@@ -328,20 +393,31 @@ public:
 		return manager_.GetComponent<T>(id_);
 	}
 	template <typename ...Ts>
-	std::tuple<Ts&...> GetComponents(EntityId id) const {
-		return manager_.GetComponents<Ts...>(id);
+	std::tuple<Ts&...> GetComponents() const {
+		return manager_.GetComponents<Ts...>(id_);
 	}
 	template <typename T>
 	bool HasComponent() const {
 		return manager_.HasComponent<T>(id_);
 	}
+	template <typename ...Ts>
+	bool HasComponents() const {
+		return manager_.HasComponents<Ts...>(id_);
+	}
 	template <typename T, typename ...TArgs>
 	T& AddComponent(TArgs&&... args) {
 		return manager_.AddComponent<T>(id_, std::forward<TArgs>(args)...);
 	}
+	template <typename T, typename ...TArgs>
+	T& ReplaceComponent(TArgs&&... args) {
+		return manager_.ReplaceComponent<T>(id_, std::forward<TArgs>(args)...);
+	}
 	template <typename T>
 	void RemoveComponent() {
 		manager_.RemoveComponent<T>(id_);
+	}
+	std::size_t ComponentCount() const {
+		return manager_.ComponentCount(id_);
 	}
 	void Destroy() {
 		manager_.DestroyEntity(id_);
@@ -361,8 +437,20 @@ Entity Manager::CreateEntity(Byte byte_capacity) {
 }
 
 template <typename ...Ts>
+std::vector<std::tuple<Entity&, Ts&...>> Manager::GetEntities() {
+	std::vector<std::tuple<Entity&, Ts&...>> vector;
+	for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
+		if (entities_[i].alive && HasComponents<Ts...>(i)) {
+			vector.emplace_back(i, GetComponent<Ts>(i)...);
+		}
+	}
+	// NRVO? C:
+	return vector;
+}
+
+template <typename ...Ts>
 void Cache<Ts...>::UpdateCache() {
-	entity_components_ = manager_.GetMatchingEntities<Ts...>();
+	entity_components_ = manager_.GetEntities<Ts...>();
 }
 
 } // namespace ecs
