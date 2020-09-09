@@ -146,6 +146,8 @@ public:
 	Cache<Ts...>& AddCache() {
 		return *static_cast<Cache<Ts...>*>(caches_.emplace_back(std::make_unique<Cache<Ts...>>(*this)).get());
 	}
+	template <typename ...Ts>
+	std::vector<std::tuple<Entity&, Ts&...>> GetEntities();
 private:
 	inline bool HasEntity(EntityId id) const {
 		return id != null && id < entities_.size() && entities_[id].alive;
@@ -177,7 +179,7 @@ private:
 	}
 	template <typename T>
 	inline bool HasComponent(EntityId id) const {
-		return HasComponent(GetComponentTypeId<T>());
+		return HasComponent(id, GetComponentTypeId<T>());
 	}
 	template <typename T>
 	void RemoveComponent(EntityId id) {
@@ -237,9 +239,8 @@ private:
 		auto destructor_function = destructors_[component_id];
 		assert(destructor_function != nullptr && "Could not find component destructor");
 		destructor_function(location);
-		T& component = *static_cast<T*>(static_cast<void*>(location));
-		component = T(std::forward<TArgs>(args)...);
-		return component;
+		new(static_cast<void*>(location)) T(std::forward<TArgs>(args)...);
+		return *static_cast<T*>(static_cast<void*>(location));
 	}
 	template <typename T, typename ...TArgs>
 	T& AddComponent(EntityId id, TArgs&&... args) {
@@ -290,8 +291,6 @@ private:
 	std::tuple<Ts&...> GetComponents(EntityId id) const {
 		return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(id)...);
 	}
-	template <typename ...Ts>
-	std::vector<std::tuple<Entity&, Ts&...>> GetEntities();
 	inline void ResizeEntities(std::size_t new_capacity) {
 		if (new_capacity > entities_.capacity()) {
 			entities_.resize(new_capacity, { 0, 0, false });
@@ -453,7 +452,7 @@ public:
 		return !(lhs == rhs);
 	}
 private:
-	const EntityId id_;
+	EntityId id_;
 	Manager* manager_;
 };
 
@@ -468,7 +467,7 @@ std::vector<std::tuple<Entity&, Ts&...>> Manager::GetEntities() {
 	std::vector<std::tuple<Entity&, Ts&...>> vector;
 	for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
 		if (entities_[i].alive && HasComponents<Ts...>(i)) {
-			vector.emplace_back(i, GetComponent<Ts>(i)...);
+			vector.emplace_back(Entity{ i, this }, GetComponent<Ts>(i)...);
 		}
 	}
 	// NRVO? C:
