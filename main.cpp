@@ -8,24 +8,41 @@
 #define LOG(x) { std::cout << x << std::endl; }
 #define LOG_(x) { std::cout << x; }
 
-struct Position {
-	Position(double x, double y) : x(x), y(y) {}
-	double x, y;
+struct Position { // 8 bytes total
+	Position(std::uint32_t x, std::uint32_t y) : x(x), y(y) {}
+	std::uint32_t x, y;
 	friend std::ostream& operator<<(std::ostream& os, const Position& obj) {
 		os << "(" << obj.x << "," << obj.y << ")";
 		return os;
 	}
 };
 
-struct Velocity {
-	Velocity(double x, double y) : x(x), y(y) {}
-	double x, y;
+struct Velocity { // 16 bytes total
+	Velocity(std::uint64_t x, std::uint64_t y) : x(x), y(y) {}
+	std::uint64_t x, y;
 	friend std::ostream& operator<<(std::ostream& os, const Velocity& obj) {
 		os << "(" << obj.x << "," << obj.y << ")";
 		return os;
 	}
 };
 
+struct OtherThing { // 32 bytes total
+	OtherThing(std::uint64_t x, std::uint64_t y, std::uint64_t z, std::uint64_t w) : x(x), y(y), z{ z }, w{ w } {}
+	std::uint64_t x, y, z, w;
+	friend std::ostream& operator<<(std::ostream& os, const OtherThing& obj) {
+		os << "(" << obj.x << "," << obj.y << "," << obj.z << "," << obj.w << ")";
+		return os;
+	}
+};
+
+struct Euler { // 32 bytes total
+	Euler(std::uint64_t x, std::uint64_t y, std::uint64_t z, std::uint64_t w) : x(x), y(y), z{ z }, w{w} {}
+	std::uint64_t x, y, z, w;
+	friend std::ostream& operator<<(std::ostream& os, const Euler& obj) {
+		os << "(" << obj.x << "," << obj.y << "," << obj.z << "," << obj.w << ")";
+		return os;
+	}
+};
 //void update(ecs::Manager& manager) {
 //	static auto& cache = manager.AddCache<Position, Velocity>();
 //	for (auto [id, pos, vel, col] : cache.GetEntities()) {
@@ -38,7 +55,35 @@ struct Velocity {
 //}
 
 int main() {
-
+	ecs::Manager ecs;
+	ecs::Entity e1 = ecs.CreateEntity();
+	ecs::Entity e2 = ecs.CreateEntity();
+	ecs::Entity e3 = ecs.CreateEntity();
+	LOG("e1 id: " << e1.GetId());
+	LOG("e2 id: " << e2.GetId());
+	LOG("e3 id: " << e3.GetId());
+	LOG("---------");
+	LOG("e1 components: " << e1.ComponentCount());
+	LOG("e2 components: " << e2.ComponentCount());
+	LOG("e3 components: " << e3.ComponentCount());
+	e1.AddComponent<Position>(1, 2);
+	e2.AddComponent<Position>(1, 2);
+	e2.AddComponent<Velocity>(3, 4);
+	e3.AddComponent<Position>(1, 1);
+	e3.AddComponent<Velocity>(2, 2);
+	e3.AddComponent<Euler>(3, 4, 5, 6);
+	LOG("---------");
+	LOG("e1 components: " << e1.ComponentCount());
+	LOG("e2 components: " << e2.ComponentCount());
+	LOG("e3 components: " << e3.ComponentCount());
+	e3.RemoveComponent<Velocity>();
+	e3.AddComponent<OtherThing>(7, 8, 7, 8);
+	LOG("---------");
+	LOG("e1 components: " << e1.ComponentCount());
+	LOG("e2 components: " << e2.ComponentCount());
+	LOG("e3 components: " << e3.ComponentCount());
+	auto [p, v] = e3.GetComponents<Position, Euler>();
+	LOG("e3 components: " << p << "," << v);
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
@@ -127,6 +172,6 @@ int main() {
 	// 100k, 1k loops, 8.7s, Manager 4 custom allocator 
 	// 100k, 1k loops, 9.0s, Manager 3 vector pairs
 
-	std::cin.get();
+	//std::cin.get();
 	return 0;
 }
