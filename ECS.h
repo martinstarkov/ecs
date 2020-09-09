@@ -145,6 +145,9 @@ public:
 		UpdateCaches();
 	}
 private:
+	inline bool HasEntity(EntityId id) const {
+		return id < entities_.size() && entities_[id].alive;
+	}
 	void UpdateCaches() {
 		if (entity_changed_) {
 			for (auto& cache : caches_) {
@@ -166,19 +169,17 @@ private:
 			pool.size = 0;
 		}
 	}
-	template <typename T>
-	bool HasComponent(EntityId id) const {
+	inline bool HasComponent(EntityId id, ComponentId component_id) const {
 		auto& components = entities_[id].components;
-		ComponentId component_id = GetComponentTypeId<T>();
 		return id < components.size() && components[component_id] != NULL_COMPONENT;
 	}
-	bool HasComponent(EntityId id, ComponentId component_id) const {
-		auto& components = entities_[id].components;
-		return id < components.size() && components[component_id] != NULL_COMPONENT;
+	template <typename T>
+	inline bool HasComponent(EntityId id) const {
+		return HasComponent(GetComponentTypeId<T>());
 	}
 	template <typename T>
 	void RemoveComponent(EntityId id) {
-		assert(id < entities_.size());
+		assert(HasEntity(id));
 		auto& pool = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
 		auto& component_offset = pool.components[component_id];
@@ -207,8 +208,8 @@ private:
 		component_offset = NULL_COMPONENT;
 	}
 	std::size_t ComponentCount(EntityId id) const {
+		assert(HasEntity(id));
 		std::size_t count = 0;
-		assert(id < entities_.size());
 		auto& pool = entities_[id];
 		for (auto& component : pool.components) {
 			if (component != NULL_COMPONENT) {
@@ -218,16 +219,16 @@ private:
 		return count;
 	}
 	template <typename ...Ts>
-	bool HasComponents(EntityId id) const {
+	inline bool HasComponents(EntityId id) const {
 		return (HasComponent<Ts>(id) && ...);
 	}
 	template <typename T, typename ...TArgs>
-	T& ReplaceComponent(EntityId id, TArgs&&... args) {
+	inline T& ReplaceComponent(EntityId id, TArgs&&... args) {
 		return ReplaceComponent<T>(id, GetComponentTypeId<T>(), std::forward<TArgs>(args)...);
 	}
 	template <typename T, typename ...TArgs>
 	T& ReplaceComponent(EntityId id, ComponentId component_id, TArgs&&... args) {
-		assert(id < entities_.size());
+		assert(HasEntity(id));
 		auto& pool = entities_[id];
 		auto location = data_ + pool.offset + pool.components[component_id];
 		// call destructor of previous component;
@@ -241,7 +242,7 @@ private:
 	template <typename T, typename ...TArgs>
 	T& AddComponent(EntityId id, TArgs&&... args) {
 		// TODO: Add static assertion to check that args is valid
-		assert(id < entities_.size());
+		assert(HasEntity(id));
 		auto& pool = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
 		if (component_id < pool.components.size() && pool.components[component_id] != NULL_COMPONENT) {
@@ -269,7 +270,7 @@ private:
 	}
 	template <typename T>
 	T* GetComponentPointer(EntityId id) const {
-		assert(id < entities_.size() && "Entity id out of range");
+		assert(HasEntity(id));
 		auto& entity = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
 		if (HasComponent(id, component_id)) {
@@ -293,13 +294,13 @@ private:
 	Cache<Ts...>& AddCache() {
 		return *static_cast<Cache<Ts...>*>(caches_.emplace_back(std::make_unique<Cache<Ts...>>(*this)).get());
 	}
-	void ResizeEntities(std::size_t new_capacity) {
+	inline void ResizeEntities(std::size_t new_capacity) {
 		if (new_capacity > entities_.capacity()) {
 			entities_.resize(new_capacity, { 0, 0, false });
 		}
 	}
-	void ResizeComponents(EntityId id, std::size_t new_capacity) {
-		assert(id < entities_.size());
+	inline void ResizeComponents(EntityId id, std::size_t new_capacity) {
+		assert(HasEntity(id));
 		auto& components = entities_[id].components;
 		if (new_capacity > components.capacity()) {
 			components.resize(new_capacity, NULL_COMPONENT);
@@ -389,37 +390,37 @@ public:
 		return id_;
 	}
 	template <typename T>
-	T& GetComponent() const {
+	inline T& GetComponent() const {
 		return manager_.GetComponent<T>(id_);
 	}
 	template <typename ...Ts>
-	std::tuple<Ts&...> GetComponents() const {
+	inline std::tuple<Ts&...> GetComponents() const {
 		return manager_.GetComponents<Ts...>(id_);
 	}
 	template <typename T>
-	bool HasComponent() const {
+	inline bool HasComponent() const {
 		return manager_.HasComponent<T>(id_);
 	}
 	template <typename ...Ts>
-	bool HasComponents() const {
+	inline bool HasComponents() const {
 		return manager_.HasComponents<Ts...>(id_);
 	}
 	template <typename T, typename ...TArgs>
-	T& AddComponent(TArgs&&... args) {
+	inline T& AddComponent(TArgs&&... args) {
 		return manager_.AddComponent<T>(id_, std::forward<TArgs>(args)...);
 	}
 	template <typename T, typename ...TArgs>
-	T& ReplaceComponent(TArgs&&... args) {
+	inline T& ReplaceComponent(TArgs&&... args) {
 		return manager_.ReplaceComponent<T>(id_, std::forward<TArgs>(args)...);
 	}
 	template <typename T>
-	void RemoveComponent() {
+	inline void RemoveComponent() {
 		manager_.RemoveComponent<T>(id_);
 	}
-	std::size_t ComponentCount() const {
+	inline std::size_t ComponentCount() const {
 		return manager_.ComponentCount(id_);
 	}
-	void Destroy() {
+	inline void Destroy() {
 		manager_.DestroyEntity(id_);
 	}
 	friend inline bool operator==(const Entity& lhs, const Entity& rhs) {
