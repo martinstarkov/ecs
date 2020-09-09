@@ -65,11 +65,20 @@ int main() {
 	e.AddComponent<Position>(1, 1);
 	e.AddComponent<Velocity>(2, 2);
 	e.AddComponent<Euler>(3, 4, 5, 6);
+	ecs.CreateEntity().AddComponent<Velocity>(20, 20);
+	auto& cache1 = ecs.AddCache<Velocity>();
+	for (auto [entity, velocity] : cache1.GetEntities()) {
+		LOG("Entity: " << entity.GetId() << ", Velocity: " << velocity);
+	}
 	LOG("---------");
 	LOG("e component count: " << e.ComponentCount());
 	LOG("---------");
 	LOG("Removing Velocity");
-	e.RemoveComponent<Velocity>();
+	e.Destroy();
+	ecs.Update();
+	for (auto [entity, velocity] : cache1.GetEntities()) {
+		LOG("Entity: " << entity.GetId() << ", Velocity: " << velocity);
+	}
 	LOG("---------");
 	LOG("e component count: " << e.ComponentCount());
 	LOG("---------");
@@ -79,6 +88,11 @@ int main() {
 	LOG("e component count: " << e.ComponentCount());
 	auto [p, v] = e.GetComponents<Position, Euler>();
 	LOG("e components: " << p << "," << v);
+	LOG("Destroying Entity");
+	e.Destroy();
+	LOG("---------");
+	LOG("Adding euler");
+	LOG("---------");
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
