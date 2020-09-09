@@ -67,7 +67,14 @@ using ComponentVector = std::vector<std::tuple<Entity, Ts&...>>;
 class BaseCache {
 public:
 	virtual void UpdateCache() = 0;
+	virtual bool IsValid() = 0;
+	virtual void Invalidate() = 0;
 };
+
+template<typename T, typename... Ts>
+constexpr bool UsesComponent() {
+	return std::disjunction_v<std::is_same<T, Ts>...>;
+}
 
 template <typename ...Ts>
 class Cache : public BaseCache {
@@ -75,11 +82,12 @@ public:
 	Cache(Manager& manager) : manager_{ manager } {
 		UpdateCache();
 	}
-	ComponentVector<Ts...> GetEntities() const {
-		return entity_components_;
-	}
+	ComponentVector<Ts...> GetEntities() const;
 	void UpdateCache() override final;
+	bool IsValid() override final { return valid_; }
+	void Invalidate() override final { valid_ = false; }
 private:
+	bool valid_ = true;
 	Manager& manager_;
 	ComponentVector<Ts...> entity_components_;
 };
@@ -143,7 +151,17 @@ public:
 		}
 	}
 	void Update() {
-		UpdateCaches();
+		for (auto& cache : caches_) {
+			if (!cache->IsValid()) {
+				cache->UpdateCache();
+			}
+		}
+	}
+	void InvalidateCaches() {
+		// TODO: Make a check which only invalidates relevant caches using template comparison
+		for (auto& cache : caches_) {
+			cache->Invalidate();
+		}
 	}
 	template <typename ...Ts>
 	Cache<Ts...>& AddCache() {
@@ -152,38 +170,34 @@ public:
 	template <typename ...Ts>
 	ComponentVector<Ts...> GetEntities();
 private:
-	inline bool HasEntity(EntityId id) const {
-		return id != null && id < entities_.size() && entities_[id].alive;
+	inline bool IsAlive(EntityId id) const {
+		assert(HasEntity(id) && "Cannot check if nonexistent entity is alive");
+		return entities_[id].alive;
 	}
-	void UpdateCaches() {
-		if (entity_changed_) {
-			for (auto& cache : caches_) {
-				cache->UpdateCache();
-			}
-			entity_changed_ = false;
-		}
+	inline bool HasEntity(EntityId id) const {
+		return id != null && id < entities_.size();
 	}
 	void DestroyEntity(EntityId id) {
-		assert(HasEntity(id));
+		assert(HasEntity(id) && "Cannot destroy nonexistent entity");
+		assert(IsAlive(id) && "Cannot destroy dead entity");
 		auto& pool = entities_[id];
-		// Only destroy entity if it is alive
-		if (pool.alive) {
-			// Reset pool memory
-			std::memset(data_ + pool.offset, 0, pool.capacity);
-			// Add deleted pool offset to free memory list
-			free_memory_.emplace(pool.capacity, pool.offset);
-			pool.alive = false;
-			pool.components.clear();
-			pool.size = 0;
-		}
+		// Reset pool memory
+		std::memset(data_ + pool.offset, 0, pool.capacity);
+		// Add deleted pool offset to free memory list
+		free_memory_.emplace(pool.capacity, pool.offset);
+		pool.alive = false;
+		pool.components.clear();
+		pool.size = 0;
+		InvalidateCaches();
 	}
 	inline bool HasDestructor(ComponentId component_id) const {
 		return component_id < destructors_.size() && destructors_[component_id] != nullptr;
 	}
 	inline bool HasComponent(EntityId id, ComponentId component_id) const {
-		assert(HasEntity(id));
+		assert(HasEntity(id) && "Cannot check if nonexistent entity has component");
+		assert(IsAlive(id) && "Cannot check if dead entity has component");
 		auto& components = entities_[id].components;
-		return id < components.size() && components[component_id] != NULL_COMPONENT;
+		return component_id < components.size() && components[component_id] != NULL_COMPONENT;
 	}
 	template <typename T>
 	inline bool HasComponent(EntityId id) const {
@@ -191,21 +205,22 @@ private:
 	}
 	template <typename T>
 	void RemoveComponent(EntityId id) {
-		assert(HasEntity(id));
+		assert(HasEntity(id) && "Cannot remove component from nonexistent entity");
+		assert(IsAlive(id) && "Cannot remove component from dead entity");
 		auto& pool = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
-		assert(HasComponent(id, component_id));
+		assert(HasComponent(id, component_id) && "Cannot remove component when it doesn't exist");
 		auto& component_offset = pool.components[component_id];
 		auto pool_location = data_ + pool.offset;
 		auto component_location = pool_location + component_offset;
-		assert(HasDestructor(component_id));
+		assert(HasDestructor(component_id) && "Cannot call nonexistent destructor");
 		auto& destructor_function = destructors_[component_id];
 		destructor_function(component_location);
 		destructor_function = nullptr;
 		// Clear component offset
 		// TODO: Possibly shrink destructors_ if this is the final component of this type?
 		auto shifted_bytes = pool.capacity - (component_offset + sizeof(T));
-		assert(shifted_bytes > 0 && "Cannot shift memory forward");
+		assert(shifted_bytes > 0 && "Cannot shift component memory block forward");
 		std::memset(component_location, 0, sizeof(T));
 		// Copy rest of bytes backward
 		std::memcpy(component_location, component_location + sizeof(T), shifted_bytes);
@@ -213,15 +228,17 @@ private:
 		for (auto& component : pool.components) {
 			if (component != NULL_COMPONENT && component > component_offset) {
 				component -= sizeof(T);
-				assert(component > 0 && "Component offset cannot be negative");
+				assert(component > 0 && "Components cannot have negative offsets");
 			}
 		}
 		pool.size -= sizeof(T);
 		assert(pool.size > 0 && "Cannot shrink pool below 0");
 		component_offset = NULL_COMPONENT;
+		InvalidateCaches();
 	}
 	std::size_t ComponentCount(EntityId id) const {
-		assert(HasEntity(id));
+		assert(HasEntity(id) && "Cannot check component count of nonexistent entity");
+		assert(IsAlive(id) && "Cannot check component count of dead entity");
 		std::size_t count = 0;
 		auto& pool = entities_[id];
 		for (auto& component : pool.components) {
@@ -241,12 +258,13 @@ private:
 	}
 	template <typename T, typename ...TArgs>
 	T& ReplaceComponent(EntityId id, ComponentId component_id, TArgs&&... args) {
-		assert(HasEntity(id));
+		assert(HasEntity(id) && "Cannot replace component of nonexistent entity");
+		assert(IsAlive(id) && "Cannot replace component of dead entity");
 		auto& pool = entities_[id];
-		assert(HasComponent(id, component_id));
+		assert(HasComponent(id, component_id) && "Cannot replace component when it doesn't exist");
 		auto location = data_ + pool.offset + pool.components[component_id];
 		// call destructor of previous component;
-		assert(HasDestructor(component_id));
+		assert(HasDestructor(component_id) && "Cannot call nonexistent destructor");
 		auto destructor_function = destructors_[component_id];
 		destructor_function(location);
 		new(static_cast<void*>(location)) T(std::forward<TArgs>(args)...);
@@ -255,7 +273,8 @@ private:
 	template <typename T, typename ...TArgs>
 	T& AddComponent(EntityId id, TArgs&&... args) {
 		// TODO: Add static assertion to check that args is valid
-		assert(HasEntity(id));
+		assert(HasEntity(id) && "Cannot add component to nonexistent entity");
+		assert(IsAlive(id) && "Cannot add component to dead entity");
 		auto& pool = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
 		if (HasComponent(id, component_id)) {
@@ -274,18 +293,18 @@ private:
 		if (component_id >= destructors_.size()) {
 			destructors_.resize(static_cast<std::size_t>(component_id) + 1, nullptr);
 		}
-		assert(component_id < destructors_.size());
-		assert(component_id < pool.components.size());
+		assert(component_id < destructors_.size() && "Component id out of range for destructors");
+		assert(component_id < pool.components.size() && "Component id out of range for pool component offsets");
 		destructors_[component_id] = &DestroyComponent<T>;
 		pool.components[component_id] = pool.size;
 		pool.size = new_pool_size;
-		// TODO: This invalidates caches?
-		entity_changed_ = true;
+		InvalidateCaches();
 		return *static_cast<T*>(static_cast<void*>(data_ + offset));
 	}
 	template <typename T>
 	T* GetComponentPointer(EntityId id) const {
-		assert(HasEntity(id));
+		assert(HasEntity(id) && "Cannot get component pointer of nonexistent entity");
+		assert(IsAlive(id) && "Cannot get component pointer of dead entity");
 		auto& entity = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
 		if (HasComponent(id, component_id)) {
@@ -296,7 +315,7 @@ private:
 	template <typename T>
 	T& GetComponent(EntityId id) const {
 		T* component = GetComponentPointer<T>(id);
-		assert(component != nullptr && "Cannot dereference nonexistent component");
+		assert(component != nullptr && "Cannot use GetComponent without HasComponent check for nonexistent components");
 		return *component;
 	}
 	template <typename ...Ts>
@@ -309,7 +328,8 @@ private:
 		}
 	}
 	inline void ResizeComponents(EntityId id, std::size_t new_capacity) {
-		assert(HasEntity(id));
+		assert(HasEntity(id) && "Cannot resize components of nonexistent entity");
+		assert(IsAlive(id) && "Cannot resize components of dead entity");
 		auto& components = entities_[id].components;
 		if (new_capacity > components.capacity()) {
 			components.resize(new_capacity, NULL_COMPONENT);
@@ -330,7 +350,7 @@ private:
 		if (id >= entities_.capacity()) {
 			ResizeEntities(entities_.capacity() * 2);
 		}
-		assert(id < entities_.size());
+		assert(id < entities_.size() && "Cannot add pool to entities_ vector");
 		auto& pool = entities_[id];
 		pool.offset = GetFreeOffset(capacity);
 		pool.capacity = capacity;
@@ -368,10 +388,6 @@ private:
 			data_ = memory;
 		}
 	}
-
-	// TODO: Map component ids to their corresponding destructor function (to clean everything on manager destruction)
-
-	bool entity_changed_ = false;
 	Byte capacity_{ 0 };
 	Byte size_{ 0 };
 	char* data_{ nullptr };
@@ -396,7 +412,7 @@ public:
 	Entity(Entity&&) = default;
 	Entity& operator=(Entity&&) = default;
 	bool IsValid() const {
-		return manager_ != nullptr && manager_->HasEntity(id_);
+		return manager_ != nullptr && id_ != null;
 	}
 	const EntityId GetId() const {
 		assert(IsValid() && "Cannot call function on null entity");
@@ -476,8 +492,8 @@ Entity Manager::CreateEntity(Byte byte_capacity) {
 
 template <typename ...Ts>
 ComponentVector<Ts...> Manager::GetEntities() {
-	ComponentVector vector;
-	for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
+	ComponentVector<Ts...> vector;
+	for (EntityId i = first_valid_entity; i <= entity_count_; ++i) {
 		assert(i < entities_.size());
 		if (entities_[i].alive && HasComponents<Ts...>(i)) {
 			vector.emplace_back(Entity{ i, this }, GetComponent<Ts>(i)...);
@@ -488,8 +504,15 @@ ComponentVector<Ts...> Manager::GetEntities() {
 }
 
 template <typename ...Ts>
+ComponentVector<Ts...> Cache<Ts...>::GetEntities() const {
+	assert(valid_ == true && "Cache has been invalidated by an entity change");
+	return entity_components_;
+}
+
+template <typename ...Ts>
 void Cache<Ts...>::UpdateCache() {
 	entity_components_ = manager_.GetEntities<Ts...>();
+	valid_ = true;
 }
 
 } // namespace ecs
