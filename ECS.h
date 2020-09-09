@@ -61,6 +61,9 @@ typedef void (*destructor)(char*);
 class Manager;
 class Entity;
 
+template <typename ...Ts>
+using ComponentVector = std::vector<std::tuple<Entity, Ts&...>>;
+
 class BaseCache {
 public:
 	virtual void UpdateCache() = 0;
@@ -69,17 +72,16 @@ public:
 template <typename ...Ts>
 class Cache : public BaseCache {
 public:
-	using VectorOfTuples = std::vector<std::tuple<Entity&, Ts&...>>;
 	Cache(Manager& manager) : manager_{ manager } {
 		UpdateCache();
 	}
-	VectorOfTuples GetEntities() const {
+	ComponentVector<Ts...> GetEntities() const {
 		return entity_components_;
 	}
 	void UpdateCache() override final;
 private:
 	Manager& manager_;
-	VectorOfTuples entity_components_;
+	ComponentVector<Ts...> entity_components_;
 };
 
 struct EntityPool {
@@ -123,6 +125,7 @@ public:
 	void ForEach(T&& function) {
 		// TODO: write some tests for lambda parameters
 		for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
+			assert(i < entities_.size());
 			auto& entity = entities_[i];
 			if (entity.alive && HasComponents<Ts...>(i)) {
 				function(i, (*static_cast<Ts*>(static_cast<void*>(data_ + entity.offset + entity.components[GetComponentTypeId<Ts>()])))...);
@@ -147,7 +150,7 @@ public:
 		return *static_cast<Cache<Ts...>*>(caches_.emplace_back(std::make_unique<Cache<Ts...>>(*this)).get());
 	}
 	template <typename ...Ts>
-	std::vector<std::tuple<Entity&, Ts&...>> GetEntities();
+	ComponentVector<Ts...> GetEntities();
 private:
 	inline bool HasEntity(EntityId id) const {
 		return id != null && id < entities_.size() && entities_[id].alive;
@@ -161,6 +164,7 @@ private:
 		}
 	}
 	void DestroyEntity(EntityId id) {
+		assert(HasEntity(id));
 		auto& pool = entities_[id];
 		// Only destroy entity if it is alive
 		if (pool.alive) {
@@ -173,7 +177,11 @@ private:
 			pool.size = 0;
 		}
 	}
+	inline bool HasDestructor(ComponentId component_id) const {
+		return component_id < destructors_.size() && destructors_[component_id] != nullptr;
+	}
 	inline bool HasComponent(EntityId id, ComponentId component_id) const {
+		assert(HasEntity(id));
 		auto& components = entities_[id].components;
 		return id < components.size() && components[component_id] != NULL_COMPONENT;
 	}
@@ -186,11 +194,12 @@ private:
 		assert(HasEntity(id));
 		auto& pool = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
+		assert(HasComponent(id, component_id));
 		auto& component_offset = pool.components[component_id];
 		auto pool_location = data_ + pool.offset;
 		auto component_location = pool_location + component_offset;
+		assert(HasDestructor(component_id));
 		auto& destructor_function = destructors_[component_id];
-		assert(destructor_function != nullptr && "Could not find component destructor");
 		destructor_function(component_location);
 		destructor_function = nullptr;
 		// Clear component offset
@@ -234,10 +243,11 @@ private:
 	T& ReplaceComponent(EntityId id, ComponentId component_id, TArgs&&... args) {
 		assert(HasEntity(id));
 		auto& pool = entities_[id];
+		assert(HasComponent(id, component_id));
 		auto location = data_ + pool.offset + pool.components[component_id];
 		// call destructor of previous component;
+		assert(HasDestructor(component_id));
 		auto destructor_function = destructors_[component_id];
-		assert(destructor_function != nullptr && "Could not find component destructor");
 		destructor_function(location);
 		new(static_cast<void*>(location)) T(std::forward<TArgs>(args)...);
 		return *static_cast<T*>(static_cast<void*>(location));
@@ -248,7 +258,7 @@ private:
 		assert(HasEntity(id));
 		auto& pool = entities_[id];
 		ComponentId component_id = GetComponentTypeId<T>();
-		if (component_id < pool.components.size() && pool.components[component_id] != NULL_COMPONENT) {
+		if (HasComponent(id, component_id)) {
 			return ReplaceComponent<T>(id, component_id, std::forward<TArgs>(args)...);
 		}
 		Byte new_pool_size = pool.size + sizeof(T);
@@ -264,6 +274,8 @@ private:
 		if (component_id >= destructors_.size()) {
 			destructors_.resize(static_cast<std::size_t>(component_id) + 1, nullptr);
 		}
+		assert(component_id < destructors_.size());
+		assert(component_id < pool.components.size());
 		destructors_[component_id] = &DestroyComponent<T>;
 		pool.components[component_id] = pool.size;
 		pool.size = new_pool_size;
@@ -463,9 +475,10 @@ Entity Manager::CreateEntity(Byte byte_capacity) {
 }
 
 template <typename ...Ts>
-std::vector<std::tuple<Entity&, Ts&...>> Manager::GetEntities() {
-	std::vector<std::tuple<Entity&, Ts&...>> vector;
+ComponentVector<Ts...> Manager::GetEntities() {
+	ComponentVector vector;
 	for (EntityId i = first_valid_entity; i < entity_count_; ++i) {
+		assert(i < entities_.size());
 		if (entities_[i].alive && HasComponents<Ts...>(i)) {
 			vector.emplace_back(Entity{ i, this }, GetComponent<Ts>(i)...);
 		}
