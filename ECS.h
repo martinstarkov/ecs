@@ -151,11 +151,10 @@ public:
 		}
 	}
 	void Update() {
-		UpdateDestroyedEntities();
-		RevalidateCaches();
+		UpdateCaches();
 	}
+	// TODO: Make a check which only invalidates relevant caches using template comparison
 	void InvalidateCaches() {
-		// TODO: Make a check which only invalidates relevant caches using template comparison
 		for (auto& cache : caches_) {
 			cache->Invalidate();
 		}
@@ -175,30 +174,22 @@ private:
 		return id != null && id < entities_.size();
 	}
 	void DestroyEntity(EntityId id) {
-		destroyed_entities_.push_back(id);
-		InvalidateCaches();
+		assert(HasEntity(id) && "Cannot destroy nonexistent entity");
+		assert(IsAlive(id) && "Cannot destroy dead entity");
+		auto& pool = entities_[id];
+		// Reset pool memory
+		std::memset(data_ + pool.offset, 0, pool.capacity);
+		// Add deleted pool offset to free memory list
+		free_memory_.emplace(pool.capacity, pool.offset);
+		pool.alive = false;
+		pool.components.clear();
+		pool.size = 0;
+		UpdateCaches();
 	}
-	void RevalidateCaches() {
+	void UpdateCaches() {
 		for (auto& cache : caches_) {
-			if (!cache->IsValid()) {
-				cache->UpdateCache();
-			}
+			cache->UpdateCache();
 		}
-	}
-	void UpdateDestroyedEntities() {
-		for (auto id : destroyed_entities_) {
-			assert(HasEntity(id) && "Cannot destroy nonexistent entity");
-			assert(IsAlive(id) && "Cannot destroy dead entity");
-			auto& pool = entities_[id];
-			// Reset pool memory
-			std::memset(data_ + pool.offset, 0, pool.capacity);
-			// Add deleted pool offset to free memory list
-			free_memory_.emplace(pool.capacity, pool.offset);
-			pool.alive = false;
-			pool.components.clear();
-			pool.size = 0;
-		}
-		destroyed_entities_.clear();
 	}
 	inline bool HasDestructor(ComponentId component_id) const {
 		return component_id < destructors_.size() && destructors_[component_id] != nullptr;
@@ -245,7 +236,7 @@ private:
 		pool.size -= sizeof(T);
 		assert(pool.size > 0 && "Cannot shrink pool below 0");
 		component_offset = NULL_COMPONENT;
-		InvalidateCaches();
+		UpdateCaches();
 	}
 	std::size_t ComponentCount(EntityId id) const {
 		assert(HasEntity(id) && "Cannot check component count of nonexistent entity");
@@ -309,7 +300,7 @@ private:
 		destructors_[component_id] = &DestroyComponent<T>;
 		pool.components[component_id] = pool.size;
 		pool.size = new_pool_size;
-		InvalidateCaches();
+		UpdateCaches();
 		return *static_cast<T*>(static_cast<void*>(data_ + offset));
 	}
 	template <typename T>
@@ -404,7 +395,6 @@ private:
 	char* data_{ nullptr };
 	EntityId entity_count_{ 0 };
 	std::vector<EntityPool> entities_;
-	std::vector<EntityId> destroyed_entities_;
 	std::unordered_map<Byte, Byte> free_memory_;
 	std::vector<std::unique_ptr<BaseCache>> caches_;
 	std::size_t id_;
@@ -523,6 +513,7 @@ ComponentVector<Ts...> Cache<Ts...>::GetEntities() const {
 
 template <typename ...Ts>
 void Cache<Ts...>::UpdateCache() {
+	// TODO: Fix this invalidating the iterators in the loop
 	entity_components_ = manager_.GetEntities<Ts...>();
 	valid_ = true;
 }
