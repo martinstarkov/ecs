@@ -25,8 +25,6 @@
 // Do not use internal functions outside API
 namespace internal {
 
-
-
 } // namespace internal
 
 // Entity Component System
@@ -144,9 +142,13 @@ public:
 	void Update() {
 		UpdateCaches();
 	}
+	template <typename ...Ts>
+	Cache<Ts...>& AddCache() {
+		return *static_cast<Cache<Ts...>*>(caches_.emplace_back(std::make_unique<Cache<Ts...>>(*this)).get());
+	}
 private:
 	inline bool HasEntity(EntityId id) const {
-		return id < entities_.size() && entities_[id].alive;
+		return id != null && id < entities_.size() && entities_[id].alive;
 	}
 	void UpdateCaches() {
 		if (entity_changed_) {
@@ -290,10 +292,6 @@ private:
 	}
 	template <typename ...Ts>
 	std::vector<std::tuple<Entity&, Ts&...>> GetEntities();
-	template <typename ...Ts>
-	Cache<Ts...>& AddCache() {
-		return *static_cast<Cache<Ts...>*>(caches_.emplace_back(std::make_unique<Cache<Ts...>>(*this)).get());
-	}
 	inline void ResizeEntities(std::size_t new_capacity) {
 		if (new_capacity > entities_.capacity()) {
 			entities_.resize(new_capacity, { 0, 0, false });
@@ -380,61 +378,89 @@ std::size_t Manager::manager_count_ = 0;
 
 class Entity {
 public:
-	Entity(EntityId id, Manager& manager) : id_{ id }, manager_{ manager } {}
+	Entity(EntityId id = null, Manager* manager = nullptr) : id_{ id }, manager_{ manager } {}
 	~Entity() = default;
-	Entity(const Entity&) = default;
-	Entity& operator=(const Entity&) = default;
+	Entity(const Entity& copy) = default;
+	Entity& operator=(const Entity& copy) = default;
 	Entity(Entity&&) = default;
 	Entity& operator=(Entity&&) = default;
+	bool IsValid() const {
+		return manager_ != nullptr && manager_->HasEntity(id_);
+	}
 	const EntityId GetId() const {
+		assert(IsValid() && "Cannot call function on null entity");
 		return id_;
 	}
 	template <typename T>
 	inline T& GetComponent() const {
-		return manager_.GetComponent<T>(id_);
+		assert(IsValid() && "Cannot call function on null entity");
+		return manager_->GetComponent<T>(id_);
 	}
 	template <typename ...Ts>
 	inline std::tuple<Ts&...> GetComponents() const {
-		return manager_.GetComponents<Ts...>(id_);
+		assert(IsValid() && "Cannot call function on null entity");
+		return manager_->GetComponents<Ts...>(id_);
 	}
 	template <typename T>
 	inline bool HasComponent() const {
-		return manager_.HasComponent<T>(id_);
+		assert(IsValid() && "Cannot call function on null entity");
+		return manager_->HasComponent<T>(id_);
 	}
 	template <typename ...Ts>
 	inline bool HasComponents() const {
-		return manager_.HasComponents<Ts...>(id_);
+		assert(IsValid() && "Cannot call function on null entity");
+		return manager_->HasComponents<Ts...>(id_);
 	}
 	template <typename T, typename ...TArgs>
 	inline T& AddComponent(TArgs&&... args) {
-		return manager_.AddComponent<T>(id_, std::forward<TArgs>(args)...);
+		assert(IsValid() && "Cannot call function on null entity");
+		return manager_->AddComponent<T>(id_, std::forward<TArgs>(args)...);
 	}
 	template <typename T, typename ...TArgs>
 	inline T& ReplaceComponent(TArgs&&... args) {
-		return manager_.ReplaceComponent<T>(id_, std::forward<TArgs>(args)...);
+		assert(IsValid() && "Cannot call function on null entity");
+		return manager_->ReplaceComponent<T>(id_, std::forward<TArgs>(args)...);
 	}
 	template <typename T>
 	inline void RemoveComponent() {
-		manager_.RemoveComponent<T>(id_);
+		assert(IsValid() && "Cannot call function on null entity");
+		manager_->RemoveComponent<T>(id_);
 	}
 	inline std::size_t ComponentCount() const {
-		return manager_.ComponentCount(id_);
+		assert(IsValid() && "Cannot call function on null entity");
+		return manager_->ComponentCount(id_);
 	}
 	inline void Destroy() {
-		manager_.DestroyEntity(id_);
+		assert(IsValid() && "Cannot call function on null entity");
+		manager_->DestroyEntity(id_);
+	}
+	friend inline bool operator==(EntityId lhs, const Entity& rhs) {
+		return lhs == rhs.id_;
+	}
+	friend inline bool operator==(const Entity& lhs, EntityId rhs) {
+		return lhs.id_ == rhs;
 	}
 	friend inline bool operator==(const Entity& lhs, const Entity& rhs) {
 		return lhs.id_ == rhs.id_ && lhs.manager_ == rhs.manager_;
 	}
+	friend inline bool operator!=(const Entity& lhs, const Entity& rhs) {
+		return !(lhs == rhs);
+	}
+	friend inline bool operator!=(const Entity& lhs, EntityId rhs) {
+		return !(lhs == rhs);
+	}
+	friend inline bool operator!=(EntityId lhs, const Entity& rhs) {
+		return !(lhs == rhs);
+	}
 private:
 	const EntityId id_;
-	Manager& manager_;
+	Manager* manager_;
 };
 
 Entity Manager::CreateEntity(Byte byte_capacity) {
 	EntityId id{ ++entity_count_ };
 	AddPool(id, byte_capacity);
-	return Entity{ id, *this };
+	return Entity{ id, this };
 }
 
 template <typename ...Ts>
