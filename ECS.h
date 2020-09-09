@@ -151,11 +151,8 @@ public:
 		}
 	}
 	void Update() {
-		for (auto& cache : caches_) {
-			if (!cache->IsValid()) {
-				cache->UpdateCache();
-			}
-		}
+		UpdateDestroyedEntities();
+		RevalidateCaches();
 	}
 	void InvalidateCaches() {
 		// TODO: Make a check which only invalidates relevant caches using template comparison
@@ -178,17 +175,30 @@ private:
 		return id != null && id < entities_.size();
 	}
 	void DestroyEntity(EntityId id) {
-		assert(HasEntity(id) && "Cannot destroy nonexistent entity");
-		assert(IsAlive(id) && "Cannot destroy dead entity");
-		auto& pool = entities_[id];
-		// Reset pool memory
-		std::memset(data_ + pool.offset, 0, pool.capacity);
-		// Add deleted pool offset to free memory list
-		free_memory_.emplace(pool.capacity, pool.offset);
-		pool.alive = false;
-		pool.components.clear();
-		pool.size = 0;
+		destroyed_entities_.push_back(id);
 		InvalidateCaches();
+	}
+	void RevalidateCaches() {
+		for (auto& cache : caches_) {
+			if (!cache->IsValid()) {
+				cache->UpdateCache();
+			}
+		}
+	}
+	void UpdateDestroyedEntities() {
+		for (auto id : destroyed_entities_) {
+			assert(HasEntity(id) && "Cannot destroy nonexistent entity");
+			assert(IsAlive(id) && "Cannot destroy dead entity");
+			auto& pool = entities_[id];
+			// Reset pool memory
+			std::memset(data_ + pool.offset, 0, pool.capacity);
+			// Add deleted pool offset to free memory list
+			free_memory_.emplace(pool.capacity, pool.offset);
+			pool.alive = false;
+			pool.components.clear();
+			pool.size = 0;
+		}
+		destroyed_entities_.clear();
 	}
 	inline bool HasDestructor(ComponentId component_id) const {
 		return component_id < destructors_.size() && destructors_[component_id] != nullptr;
@@ -214,11 +224,12 @@ private:
 		auto pool_location = data_ + pool.offset;
 		auto component_location = pool_location + component_offset;
 		assert(HasDestructor(component_id) && "Cannot call nonexistent destructor");
-		auto& destructor_function = destructors_[component_id];
+		auto destructor_function = destructors_[component_id];
 		destructor_function(component_location);
-		destructor_function = nullptr;
-		// Clear component offset
 		// TODO: Possibly shrink destructors_ if this is the final component of this type?
+		// destructor_function = nullptr;
+
+		// Clear component offset
 		auto shifted_bytes = pool.capacity - (component_offset + sizeof(T));
 		assert(shifted_bytes > 0 && "Cannot shift component memory block forward");
 		std::memset(component_location, 0, sizeof(T));
@@ -393,6 +404,7 @@ private:
 	char* data_{ nullptr };
 	EntityId entity_count_{ 0 };
 	std::vector<EntityPool> entities_;
+	std::vector<EntityId> destroyed_entities_;
 	std::unordered_map<Byte, Byte> free_memory_;
 	std::vector<std::unique_ptr<BaseCache>> caches_;
 	std::size_t id_;
