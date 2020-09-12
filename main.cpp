@@ -9,7 +9,7 @@
 #define LOG_(x) { std::cout << x; }
 
 struct Position { // 8 bytes total
-	Position(std::uint32_t x, std::uint32_t y) : x(x), y(y) {}
+	Position(std::uint32_t x = 5, std::uint32_t y = 5) : x(x), y(y) {}
 	std::uint32_t x, y;
 	friend std::ostream& operator<<(std::ostream& os, const Position& obj) {
 		os << "(" << obj.x << "," << obj.y << ")";
@@ -18,7 +18,7 @@ struct Position { // 8 bytes total
 };
 
 struct Velocity { // 16 bytes total
-	Velocity(std::uint64_t x, std::uint64_t y) : x(x), y(y) {}
+	Velocity(std::uint64_t x = 4, std::uint64_t y = 4) : x(x), y(y) {}
 	std::uint64_t x, y;
 	friend std::ostream& operator<<(std::ostream& os, const Velocity& obj) {
 		os << "(" << obj.x << "," << obj.y << ")";
@@ -27,7 +27,7 @@ struct Velocity { // 16 bytes total
 };
 
 struct OtherThing { // 32 bytes total
-	OtherThing(std::uint64_t x, std::uint64_t y, std::uint64_t z, std::uint64_t w) : x(x), y(y), z{ z }, w{ w } {}
+	OtherThing(std::uint64_t x = 3, std::uint64_t y = 3, std::uint64_t z = 3, std::uint64_t w = 3) : x(x), y(y), z{ z }, w{ w } {}
 	std::uint64_t x, y, z, w;
 	friend std::ostream& operator<<(std::ostream& os, const OtherThing& obj) {
 		os << "(" << obj.x << "," << obj.y << "," << obj.z << "," << obj.w << ")";
@@ -36,26 +36,16 @@ struct OtherThing { // 32 bytes total
 };
 
 struct Euler { // 32 bytes total
-	Euler(std::uint64_t x, std::uint64_t y, std::uint64_t z, std::uint64_t w) : x(x), y(y), z{ z }, w{w} {}
+	Euler(std::uint64_t x = 2, std::uint64_t y = 2, std::uint64_t z = 2, std::uint64_t w = 2) : x(x), y(y), z{ z }, w{w} {}
 	std::uint64_t x, y, z, w;
 	friend std::ostream& operator<<(std::ostream& os, const Euler& obj) {
 		os << "(" << obj.x << "," << obj.y << "," << obj.z << "," << obj.w << ")";
 		return os;
 	}
 };
-//void update(ecs::Manager& manager) {
-//	static auto& cache = manager.AddCache<Position, Velocity>();
-//	for (auto [id, pos, vel, col] : cache.GetEntities()) {
-//		manager.AddComponent<int>(id, 1);
-//		pos.x += 1;
-//		vel.y += 1;
-//		col.x += 1;
-//	}
-//	manager.Update();
-//}
 
 struct RandomThing {
-	RandomThing(int i) : i{ i } {}
+	RandomThing(int i = 1) : i{ i } {}
 	int i;
 	friend std::ostream& operator<<(std::ostream& os, const RandomThing& obj) {
 		os << "(" << obj.i << ")";
@@ -63,7 +53,7 @@ struct RandomThing {
 	}
 };
 
-int main() {
+void test1() {
 	ecs::Manager ecs;
 	ecs::Entity e = ecs.CreateEntity();
 	LOG("e id: " << e.GetId());
@@ -75,16 +65,18 @@ int main() {
 	e.AddComponent<Velocity>(2, 2);
 	e.AddComponent<Euler>(3, 4, 5, 6);
 	auto e2 = ecs.CreateEntity();
+	e2.AddComponent<Position>(2, 2);
 	e2.AddComponent<Velocity>(20, 20);
 	e2.AddComponent<RandomThing>(20);
-	ecs.ForEachWrapper<Velocity>([&](auto entity, auto vel) {
-		ecs.ForEachWrapper<RandomThing>([&](auto entity2, auto vel2) {
+	ecs.ForEachWrapper<Velocity, Position>([&](auto entity, auto vel, auto pos) {
+		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel.Get());
+		ecs.ForEachWrappers<Velocity>([&](auto entity2, auto random) {
 			//entity.RemoveComponent<Velocity>();
-			//entity2.RemoveComponent<Velocity>();
-			entity2.Destroy();
-			LOG("Inner Entity: " << entity2.GetId() << ", Velocity: " << vel2);
-		}, false);
-		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel);
+			//entity2.RemoveComponent<RandomThing>();
+			//entity2.Destroy();
+			//ecs.Refresh();
+			LOG("Inner Entity: " << entity2.GetId() << ", RandomThing: " << random.Get());
+		});
 	});
 	LOG("---------");
 	LOG("e component count: " << e.ComponentCount());
@@ -110,6 +102,39 @@ int main() {
 	LOG("---------");
 	LOG("Adding euler");
 	LOG("---------");
+}
+
+void test2() {
+	ecs::Manager ecs;
+	for (auto i = 0; i < 100; ++i) {
+		auto e = ecs.CreateEntity();
+		e.AddComponent<Position>(i, i);
+		e.AddComponent<Velocity>();
+		e.AddComponent<OtherThing>();
+		e.AddComponent<RandomThing>();
+		e.AddComponent<Euler>();
+	}
+	auto block = ecs.GetPoolHandlerBlock();
+	auto e2 = ecs.GetEntity(2);
+	e2.RemoveComponent<OtherThing>();
+	ecs.GetEntity(3).Destroy();
+	ecs.Refresh();
+	ecs.GetEntity(4).Destroy();
+	ecs.Refresh();
+	ecs.GetEntity(5).Destroy();
+	ecs.Refresh();
+	ecs.GetEntity(6).Destroy();
+	ecs.Refresh();
+	ecs.GetEntity(7).Destroy();
+	ecs.Refresh();
+	ecs.GetEntity(8).Destroy();
+	ecs.Refresh();
+	ecs.GetEntity(9).Destroy();
+	ecs.Refresh();
+}
+
+int main() {
+	test1();
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
