@@ -8,7 +8,10 @@
 #include <atomic> // std::atomic_int
 #include <cassert> // assert
 
-#define NDEBUG
+//#define NDEBUG
+
+//#if __cplusplus < 201703L
+//#endif
 
 #include <type_traits> // future template checks
 
@@ -22,7 +25,7 @@ namespace internal {
 // Entity Component System
 namespace ecs {
 
-using EntityId = std::uint32_t;
+using EntityId = std::uint64_t;
 using ComponentId = std::uint32_t;
 using PoolIndex = std::int32_t;
 using AtomicComponentId = std::atomic_uint32_t;
@@ -39,7 +42,7 @@ constexpr PoolIndex INVALID_POOL_INDEX = -1;
 // This constant represents how many pool deletions should occur before compacting pool memory
 constexpr std::uint16_t FREE_POOLS_BEFORE_COMPACTING = 5;
 
-constexpr Byte DEFAULT_POOL_CAPACITY = 256;
+constexpr Byte DEFAULT_POOL_CAPACITY = 100; // 256 usually
 
 extern AtomicComponentId component_counter;
 
@@ -133,6 +136,11 @@ public:
 		assert(HasPool(index) && "Cannot shift component offsets for entity pool which does not exist");
 		auto& pool = pools_[index];
 		pool.ShiftComponentOffsets(removed_offset, shift_amount);
+		// Set the leftover memory after shifting the components to 0
+		std::memset(block_ + pool.offset + pool.size - shift_amount, 0, shift_amount);
+		// Shrink pool size
+		pool.size -= shift_amount;
+		assert(pool.size >= 0 && "Cannot shrink entity pool below 0 bytes");
 	}
 	bool HasComponent(PoolIndex index, ComponentId component_id) const {
 		assert(HasPool(index) && "Cannot check if nonexistent entity pool has component");
@@ -142,6 +150,10 @@ public:
 		auto pool_index = static_cast<PoolIndex>(pools_.size());
 		pools_.emplace_back(GetFreeOffset(pool_capacity), pool_capacity);
 		return pool_index;
+	}
+	Byte GetPoolSize(PoolIndex index) {
+		assert(HasPool(index) && "Cannot get size of nonexistent entity pool");
+		return pools_[index].size;
 	}
 	Byte GetPoolCapacity(PoolIndex index) {
 		assert(HasPool(index) && "Cannot get capacity of nonexistent entity pool");
@@ -167,6 +179,7 @@ public:
 		// Add deleted pool offset to free memory list
 		free_memory_.emplace_back(pool_iterator->capacity, pool_iterator->offset);
 		pools_.erase(pool_iterator);
+		RecompactBlockIfNeeded();
 	}
 	bool HasPool(PoolIndex index) const {
 		return index < pools_.size() && index != INVALID_POOL_INDEX;
@@ -212,11 +225,12 @@ public:
 		}
 	}
 	void RecompactBlockIfNeeded() {
-		if (free_memory_.size() > FREE_POOLS_BEFORE_COMPACTING) {
+		if (free_memory_.size() >= FREE_POOLS_BEFORE_COMPACTING) {
 			// Sort free memory by descending order of offsets so memory shifting can happen from end to beginning
 			std::sort(free_memory_.begin(), free_memory_.end(), [](const std::pair<Byte, Byte> lhs, const std::pair<Byte, Byte> rhs) {
 				return lhs.second > rhs.second;
 			});
+			Byte total_shifted_bytes = 0;
 			for (auto [free_capacity, free_offset] : free_memory_) {
 				// Shift each pool after free_offset back by free_capacity
 				for (auto& pool : pools_) {
@@ -226,11 +240,16 @@ public:
 					}
 				}
 				assert(size_ > free_offset + free_capacity);
-				// Shift all memory backward starting from free offset up until the end of the block by free_capacity
+				// Shift all memory backward starting from free offset + free_capacity up until the end of the block by free_capacity
 				std::memcpy(block_ + free_offset, block_ + free_offset + free_capacity, size_ - (free_offset + free_capacity));
+				total_shifted_bytes += free_capacity;
 			}
+			// Set end of shifted memory block to 0s
+			std::memset(block_ + size_ - total_shifted_bytes, 0, total_shifted_bytes);
+			free_memory_.clear();
 		}
 	}
+	const char* GetBlock() const { return block_; }
 private:
 	class EntityPool {
 	public:
@@ -274,9 +293,6 @@ private:
 					assert(offset >= 0 && "Components cannot have negative offsets");
 				}
 			}
-			// Shrink pool size
-			size -= shift_amount;
-			assert(size >= 0 && "Cannot shrink entity pool below 0 bytes");
 		}
 		std::size_t GetComponentCount() const {
 			std::size_t count = 0;
@@ -471,6 +487,8 @@ public:
 	}*/
 	template <typename ...Ts>
 	ComponentVector<Ts...> GetEntities();
+	const char* GetPoolHandlerBlock() const { return pool_handler_.GetBlock(); }
+	Entity GetEntity(EntityId id) const;
 private:
 	// Double entity capacity when limit is reached
 	inline void GrowEntitiesIfNeeded(EntityId id) {
@@ -518,15 +536,15 @@ private:
 			auto& component_offset = pool_handler_.GetComponentOffset(pool_index, component_id);
 			Byte component_size = sizeof(T);
 			// This value represents all the bytes after the removed component
-			auto remaining_bytes = pool_handler_.GetPoolCapacity(pool_index) - component_offset - component_size;
+			auto remaining_bytes = pool_handler_.GetPoolSize(pool_index) - component_offset - component_size;
 
-			assert(remaining_bytes > 0 && "Cannot shift component memory block forward");
+			assert(remaining_bytes >= 0 && "Cannot shift component memory block forward");
 
-			// Clear removed component data
-			std::memset(component_location, 0, component_size);
+			//// Clear removed component data
+			//std::memset(component_location, 0, component_size);
 
 			// Copy remaining bytes in front of removed component backward
-			std::memcpy(component_location, static_cast<void*>(static_cast<char*>(component_location) + component_size), remaining_bytes);
+			std::memcpy(component_location, static_cast<char*>(component_location) + component_size, remaining_bytes);
 
 			pool_handler_.ShiftComponentOffsets(pool_index, component_offset, component_size);
 			component_offset = INVALID_COMPONENT_OFFSET;
@@ -761,6 +779,13 @@ Entity Manager::CreateEntity(Byte entity_pool_capacity) {
 	GrowEntitiesIfNeeded(id);
 	entities_[id] = index;
 	return Entity{ id, this };
+}
+
+Entity Manager::GetEntity(EntityId id) const {
+	if (id == null) return Entity{ null, nullptr };
+	assert(HasEntity(id) && "Cannot get entity which is out of range of manager");
+	assert(IsAlive(id) && "Cannot get dead entity");
+	return Entity{ id, const_cast<Manager*>(this) };
 }
 
 template <typename ...Ts>
