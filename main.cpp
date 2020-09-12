@@ -54,6 +54,15 @@ struct Euler { // 32 bytes total
 //	manager.Update();
 //}
 
+struct RandomThing {
+	RandomThing(int i) : i{ i } {}
+	int i;
+	friend std::ostream& operator<<(std::ostream& os, const RandomThing& obj) {
+		os << "(" << obj.i << ")";
+		return os;
+	}
+};
+
 int main() {
 	ecs::Manager ecs;
 	ecs::Entity e = ecs.CreateEntity();
@@ -65,20 +74,27 @@ int main() {
 	e.AddComponent<Position>(1, 1);
 	e.AddComponent<Velocity>(2, 2);
 	e.AddComponent<Euler>(3, 4, 5, 6);
-	ecs.CreateEntity().AddComponent<Velocity>(20, 20);
-	auto& cache1 = ecs.AddCache<Velocity>();
-	for (auto [entity, velocity] : cache1.GetEntities()) {
-		LOG("Entity: " << entity.GetId() << ", Velocity: " << velocity);
-	}
+	auto e2 = ecs.CreateEntity();
+	e2.AddComponent<Velocity>(20, 20);
+	e2.AddComponent<RandomThing>(20);
+	ecs.ForEachWrapper<Velocity>([&](auto entity, auto vel) {
+		ecs.ForEachWrapper<RandomThing>([&](auto entity2, auto vel2) {
+			//entity.RemoveComponent<Velocity>();
+			//entity2.RemoveComponent<Velocity>();
+			entity2.Destroy();
+			LOG("Inner Entity: " << entity2.GetId() << ", Velocity: " << vel2);
+		}, false);
+		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel);
+	});
 	LOG("---------");
 	LOG("e component count: " << e.ComponentCount());
 	LOG("---------");
 	LOG("Removing Velocity");
-	e.Destroy();
-	ecs.Update();
-	for (auto [entity, velocity] : cache1.GetEntities()) {
-		LOG("Entity: " << entity.GetId() << ", Velocity: " << velocity);
-	}
+	e.RemoveComponent<Velocity>();
+	//e.Destroy();
+	ecs.ForEach<Velocity>([&](auto entity, auto& vel) {
+		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel);
+	});
 	LOG("---------");
 	LOG("e component count: " << e.ComponentCount());
 	LOG("---------");
@@ -86,8 +102,9 @@ int main() {
 	e.AddComponent<OtherThing>(7, 8, 7, 8);
 	LOG("---------");
 	LOG("e component count: " << e.ComponentCount());
-	auto [p, v] = e.GetComponents<Position, Euler>();
-	LOG("e components: " << p << "," << v);
+	//e.RemoveComponent<OtherThing>();
+	auto [p, v, o] = e.GetComponentWrappers<Position, Euler, OtherThing>();
+	LOG("e components: " << p << "," << v << "," << o);
 	LOG("Destroying Entity");
 	e.Destroy();
 	LOG("---------");
