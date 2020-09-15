@@ -1,5 +1,6 @@
-#include "ECS2.h"
-//#include "ECS.h"
+//#include "ECS.h" // 18.5
+//#include "ECS2.h" // 9.3
+#include "ECS3.h" // 7.8
 
 #include <time.h>
 #include <chrono>
@@ -117,6 +118,9 @@ void test3() {
 		e.AddComponent<TPos<2>>();
 		e.AddComponent<TPos<3>>();
 		e.AddComponent<TPos<4>>();
+		if (i == 30000 - 1) {
+			bool test = true;
+		}
 		e.AddComponent<TPos<5>>();
 	}
 	for (auto i = 0; i < 10000; ++i) {
