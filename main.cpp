@@ -1,140 +1,156 @@
-#include "ECS.h"
+#include "ECS2.h"
+//#include "ECS.h"
 
 #include <time.h>
 #include <chrono>
 #include <thread>
+#include <iostream>
 #include <iomanip>
 
 #define LOG(x) { std::cout << x << std::endl; }
 #define LOG_(x) { std::cout << x; }
 
-struct Position { // 8 bytes total
-	Position(std::uint32_t x = 5, std::uint32_t y = 5) : x(x), y(y) {}
-	std::uint32_t x, y;
-	friend std::ostream& operator<<(std::ostream& os, const Position& obj) {
-		os << "(" << obj.x << "," << obj.y << ")";
+template <std::size_t I>
+struct TPos { // 128 bytes total
+	TPos(std::int64_t a = 0) : a{ a } {}
+	friend std::ostream& operator<<(std::ostream& os, const TPos& obj) {
+		os << "(" << obj.a << "," << obj.b << "," << obj.c << "," << obj.d << ")";
 		return os;
 	}
+	std::int64_t a = 0; // 8 bytes
+	std::int64_t b = 0; // 8 bytes
+	std::int64_t c = 0; // 8 bytes
+	std::int64_t d = 0; // 8 bytes
+
+	std::int64_t e = 0; // 8 bytes
+	std::int64_t f = 0; // 8 bytes
+	std::int64_t g = 0; // 8 bytes
+	std::int64_t h = 0; // 8 bytes
 };
 
-struct Velocity { // 16 bytes total
-	Velocity(std::uint64_t x = 4, std::uint64_t y = 4) : x(x), y(y) {}
-	std::uint64_t x, y;
-	friend std::ostream& operator<<(std::ostream& os, const Velocity& obj) {
-		os << "(" << obj.x << "," << obj.y << ")";
-		return os;
-	}
-};
+//void test1() {
+//	ecs::Manager ecs;
+//	ecs::Entity e = ecs.CreateEntity();
+//	LOG("e id: " << e.GetId());
+//	LOG("---------");
+//	LOG("e component count: " << e.ComponentCount());
+//	LOG("---------");
+//	LOG("Adding Position, Velocity, Euler");
+//	e.AddComponent<Position>(1, 1);
+//	e.AddComponent<Velocity>(2, 2);
+//	e.AddComponent<Euler>(3, 4, 5, 6);
+//	auto e2 = ecs.CreateEntity();
+//	e2.AddComponent<Position>(2, 2);
+//	e2.AddComponent<Velocity>(20, 20);
+//	e2.AddComponent<RandomThing>(20);
+//	ecs.ForEachWrapper<Velocity, Position>([&](auto entity, auto vel, auto pos) {
+//		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel.Get());
+//		ecs.ForEachWrapper<Velocity>([&](auto entity2, auto random) {
+//			//entity.RemoveComponent<Velocity>();
+//			//entity2.RemoveComponent<RandomThing>();
+//			//entity2.Destroy();
+//			//ecs.Refresh();
+//			LOG("Inner Entity: " << entity2.GetId() << ", RandomThing: " << random.Get());
+//		});
+//	});
+//	LOG("---------");
+//	LOG("e component count: " << e.ComponentCount());
+//	LOG("---------");
+//	LOG("Removing Velocity");
+//	e.RemoveComponent<Velocity>();
+//	//e.Destroy();
+//	ecs.ForEach<Velocity>([&](auto entity, auto& vel) {
+//		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel);
+//	});
+//	LOG("---------");
+//	LOG("e component count: " << e.ComponentCount());
+//	LOG("---------");
+//	LOG("Adding OtherThing");
+//	e.AddComponent<OtherThing>(7, 8, 7, 8);
+//	LOG("---------");
+//	LOG("e component count: " << e.ComponentCount());
+//	//e.RemoveComponent<OtherThing>();
+//	auto [p, v, o] = e.GetComponentWrappers<Position, Euler, OtherThing>();
+//	LOG("e components: " << p << "," << v << "," << o);
+//	LOG("Destroying Entity");
+//	e.Destroy();
+//	LOG("---------");
+//	LOG("Adding euler");
+//	LOG("---------");
+//}
+//
+//void test2() {
+//	ecs::Manager ecs;
+//	for (auto i = 0; i < 100; ++i) {
+//		auto e = ecs.CreateEntity();
+//		e.AddComponent<Position>(i, i);
+//		e.AddComponent<Velocity>();
+//		e.AddComponent<OtherThing>();
+//		e.AddComponent<RandomThing>();
+//		e.AddComponent<Euler>();
+//	}
+//	auto block = ecs.GetPoolHandlerBlock();
+//	auto e2 = ecs.GetEntity(2);
+//	e2.RemoveComponent<OtherThing>();
+//	ecs.GetEntity(3).Destroy();
+//	ecs.Refresh();
+//	ecs.GetEntity(4).Destroy();
+//	ecs.Refresh();
+//	ecs.GetEntity(5).Destroy();
+//	ecs.Refresh();
+//	ecs.GetEntity(6).Destroy();
+//	ecs.Refresh();
+//	ecs.GetEntity(7).Destroy();
+//	ecs.Refresh();
+//	ecs.GetEntity(8).Destroy();
+//	ecs.Refresh();
+//	ecs.GetEntity(9).Destroy();
+//	ecs.Refresh();
+//}
 
-struct OtherThing { // 32 bytes total
-	OtherThing(std::uint64_t x = 3, std::uint64_t y = 3, std::uint64_t z = 3, std::uint64_t w = 3) : x(x), y(y), z{ z }, w{ w } {}
-	std::uint64_t x, y, z, w;
-	friend std::ostream& operator<<(std::ostream& os, const OtherThing& obj) {
-		os << "(" << obj.x << "," << obj.y << "," << obj.z << "," << obj.w << ")";
-		return os;
-	}
-};
-
-struct Euler { // 32 bytes total
-	Euler(std::uint64_t x = 2, std::uint64_t y = 2, std::uint64_t z = 2, std::uint64_t w = 2) : x(x), y(y), z{ z }, w{w} {}
-	std::uint64_t x, y, z, w;
-	friend std::ostream& operator<<(std::ostream& os, const Euler& obj) {
-		os << "(" << obj.x << "," << obj.y << "," << obj.z << "," << obj.w << ")";
-		return os;
-	}
-};
-
-struct RandomThing {
-	RandomThing(int i = 1) : i{ i } {}
-	int i;
-	friend std::ostream& operator<<(std::ostream& os, const RandomThing& obj) {
-		os << "(" << obj.i << ")";
-		return os;
-	}
-};
-
-void test1() {
+void test3() {
 	ecs::Manager ecs;
-	ecs::Entity e = ecs.CreateEntity();
-	LOG("e id: " << e.GetId());
-	LOG("---------");
-	LOG("e component count: " << e.ComponentCount());
-	LOG("---------");
-	LOG("Adding Position, Velocity, Euler");
-	e.AddComponent<Position>(1, 1);
-	e.AddComponent<Velocity>(2, 2);
-	e.AddComponent<Euler>(3, 4, 5, 6);
-	auto e2 = ecs.CreateEntity();
-	e2.AddComponent<Position>(2, 2);
-	e2.AddComponent<Velocity>(20, 20);
-	e2.AddComponent<RandomThing>(20);
-	ecs.ForEachWrapper<Velocity, Position>([&](auto entity, auto vel, auto pos) {
-		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel.Get());
-		ecs.ForEachWrappers<Velocity>([&](auto entity2, auto random) {
-			//entity.RemoveComponent<Velocity>();
-			//entity2.RemoveComponent<RandomThing>();
-			//entity2.Destroy();
-			//ecs.Refresh();
-			LOG("Inner Entity: " << entity2.GetId() << ", RandomThing: " << random.Get());
-		});
-	});
-	LOG("---------");
-	LOG("e component count: " << e.ComponentCount());
-	LOG("---------");
-	LOG("Removing Velocity");
-	e.RemoveComponent<Velocity>();
-	//e.Destroy();
-	ecs.ForEach<Velocity>([&](auto entity, auto& vel) {
-		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel);
-	});
-	LOG("---------");
-	LOG("e component count: " << e.ComponentCount());
-	LOG("---------");
-	LOG("Adding OtherThing");
-	e.AddComponent<OtherThing>(7, 8, 7, 8);
-	LOG("---------");
-	LOG("e component count: " << e.ComponentCount());
-	//e.RemoveComponent<OtherThing>();
-	auto [p, v, o] = e.GetComponentWrappers<Position, Euler, OtherThing>();
-	LOG("e components: " << p << "," << v << "," << o);
-	LOG("Destroying Entity");
-	e.Destroy();
-	LOG("---------");
-	LOG("Adding euler");
-	LOG("---------");
-}
-
-void test2() {
-	ecs::Manager ecs;
-	for (auto i = 0; i < 100; ++i) {
+	auto start = std::chrono::high_resolution_clock::now();
+	for (auto i = 0; i < 30000; ++i) {
 		auto e = ecs.CreateEntity();
-		e.AddComponent<Position>(i, i);
-		e.AddComponent<Velocity>();
-		e.AddComponent<OtherThing>();
-		e.AddComponent<RandomThing>();
-		e.AddComponent<Euler>();
+		e.AddComponent<TPos<1>>();
+		e.AddComponent<TPos<2>>();
+		e.AddComponent<TPos<3>>();
+		e.AddComponent<TPos<4>>();
+		e.AddComponent<TPos<5>>();
 	}
-	auto block = ecs.GetPoolHandlerBlock();
-	auto e2 = ecs.GetEntity(2);
-	e2.RemoveComponent<OtherThing>();
-	ecs.GetEntity(3).Destroy();
-	ecs.Refresh();
-	ecs.GetEntity(4).Destroy();
-	ecs.Refresh();
-	ecs.GetEntity(5).Destroy();
-	ecs.Refresh();
-	ecs.GetEntity(6).Destroy();
-	ecs.Refresh();
-	ecs.GetEntity(7).Destroy();
-	ecs.Refresh();
-	ecs.GetEntity(8).Destroy();
-	ecs.Refresh();
-	ecs.GetEntity(9).Destroy();
-	ecs.Refresh();
+	for (auto i = 0; i < 10000; ++i) {
+		auto e = ecs.CreateEntity();
+		e.AddComponent<TPos<6>>();
+		e.AddComponent<TPos<7>>();
+		e.AddComponent<TPos<8>>();
+		e.AddComponent<TPos<9>>();
+		e.AddComponent<TPos<10>>();
+	}
+	auto stop_addition = std::chrono::high_resolution_clock::now();
+	auto duration_addition = std::chrono::duration_cast<std::chrono::microseconds>(stop_addition - start);
+	std::cout << "test3 took " << std::fixed << std::setprecision(1) << duration_addition.count() / 1000000.000 << " seconds to add all components" << std::endl;
+	ecs.ForEach<TPos<1>, TPos<5>>([&] (auto& pos, auto& pos2) {
+		pos.a += 1;
+		pos.d += 1;
+		pos2.a += 1;
+		pos2.d += 1;
+		ecs.ForEach<TPos<6>, TPos<10>>([&](auto& pos3, auto& pos4) {
+			pos3.a += 1;
+			pos3.d += 1;
+			pos4.a += 1;
+			pos4.d += 1;
+		}, false);
+	}, false);
+	auto stop = std::chrono::high_resolution_clock::now();
+	auto duration_get = std::chrono::duration_cast<std::chrono::microseconds>(stop - stop_addition);
+	std::cout << "test3 get component loop time = " << std::fixed << std::setprecision(1) << duration_get.count() / 1000000.000 << std::endl;
+	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+	std::cout << "test3 total execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
 }
 
 int main() {
-	test1();
+	test3();
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
