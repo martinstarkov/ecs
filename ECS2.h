@@ -125,12 +125,12 @@ private:
 		assert(pool != nullptr && "Invalid component pool cannot be expanded");
 		assert(pool->size > 0 && "Cannot move from empty pool");
 		assert(pool->capacity > 0 && "Cannot move from pool with capacity 0");
-		auto free_pool = FindAvailablePool(to_size * 2);
+		bool existing_pool = false;
+		auto free_pool = FindAvailablePool(to_size * 2, existing_pool);
 		assert(free_pool.first > pool->capacity && "Capacity of expanded pool must be larger");
 		assert(pool->offset != free_pool.second && "Offset of new pool must be different");
 		// Copy memory block according to the to/from pool offsets
 		std::memcpy(block_ + free_pool.second, block_ + pool->offset, pool->size);
-		// Set from_pool data to 0
 		std::memset(block_ + pool->offset, 0, pool->size);
 		// Find new pool of at least twice the capacity
 		// Add old pool offset to free memory list
@@ -138,14 +138,15 @@ private:
 		pool->capacity = free_pool.first;
 		pool->offset = free_pool.second;
 	}
-	// return <Capacity, Offset> of next available pool that matches the required capacity
-	std::pair<Byte, Byte> FindAvailablePool(Byte needed_capacity) {
+	// return <Capacity, Offset, existing_size> of next available pool that matches the required capacity
+	std::pair<Byte, Byte> FindAvailablePool(Byte needed_capacity, bool& existing_size) {
 		// Fetch offset from free pools
 		for (auto it = std::begin(free_memory_); it != std::end(free_memory_);) {
 			// Consider offset if the given capacity is at least needed capacity and no more than double the needed capacity
 			if (it->first >= needed_capacity && it->first <= needed_capacity * 2) {
 				auto free_pool = *it;
 				it = free_memory_.erase(it);
+				existing_size = true;
 				return free_pool;
 			} else {
 				++it;
@@ -155,10 +156,12 @@ private:
 		auto free_offset = size_;
 		size_ += needed_capacity;
 		GrowBlockIfNeeded(size_);
+		existing_size = false;
 		return { needed_capacity, free_offset };
 	}
 	inline ComponentPool* CreatePool(Byte pool_capacity) {
-		auto new_pool = FindAvailablePool(pool_capacity);
+		bool existing_pool = false;
+		auto new_pool = FindAvailablePool(pool_capacity, existing_pool);
 		return &components_.emplace_back(new_pool.first, new_pool.second);
 	}
 	// Called once in manager constructor
