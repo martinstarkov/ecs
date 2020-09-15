@@ -13,19 +13,16 @@
 
 namespace ecs {
 
-using EntityId = std::int32_t;
-using EntityVersion = std::int32_t;
-using Byte = std::int32_t;
-using PoolIndex = std::int32_t;
-using ComponentId = std::int32_t;
-using AtomicComponentId = std::atomic_int32_t;
+using EntityId = std::uint64_t;
+using EntityVersion = std::uint64_t;
+using Byte = std::int64_t;
+using ComponentId = std::uint64_t;
+using AtomicComponentId = std::atomic_uint64_t;
 
 constexpr EntityId null = 0;
 constexpr EntityId first_valid_entity = null + 1;
 constexpr EntityVersion null_version = 0;
 constexpr Byte INVALID_COMPONENT_OFFSET = -1;
-constexpr PoolIndex INVALID_POOL_INDEX = 0;
-constexpr std::size_t DEFAULT_COMPONENTS_PER_POOL = 1;
 
 extern AtomicComponentId component_counter;
 AtomicComponentId component_counter{ 0 };
@@ -63,7 +60,7 @@ struct ComponentPool {
 		if (id < component_offsets.size() && component_offsets[id] != INVALID_COMPONENT_OFFSET) {
 			return component_offsets[id];
 		}
-		return -1;
+		return INVALID_COMPONENT_OFFSET;
 	}
 	Byte GetComponentOffset(EntityId id) const {
 		assert(HasComponentOffset(id) && "Cannot get component offset which does not exist");
@@ -96,9 +93,9 @@ private:
 	inline void* GetLocation(EntityId id, ComponentId component_id) const {
 		if (component_id < components_.size()) {
 			auto& component_pool = components_[component_id];
-			Byte offset = component_pool.GetOffset(id);
-			if (offset != -1) {
-				static_cast<void*>(block_ + component_pool.offset + offset);
+			auto component_offset = component_pool.GetOffset(id);
+			if (component_offset != INVALID_COMPONENT_OFFSET) {
+				return static_cast<void*>(block_ + component_pool.offset + component_offset);
 			}
 		}
 		return nullptr;
@@ -118,9 +115,10 @@ private:
 			}
 		}
 		assert(component_pool != nullptr && "Cannot add component to invalid pool");
+		Byte component_offset = component_pool->size;
 		component_pool->size += component_size;
-		component_pool->AddComponentOffset(id, component_pool->size); // add component offset at entity id index in pool offsets
-		return static_cast<void*>(block_ + component_pool->offset + component_pool->size);
+		component_pool->AddComponentOffset(id, component_offset); // add component offset at entity id index in pool offsets
+		return static_cast<void*>(block_ + component_pool->offset + component_offset);
 	}
 	// Modifies pool pointer to have larger capacity and a different offset
 	void MovePool(ComponentPool* pool, Byte to_size) {
@@ -172,8 +170,8 @@ private:
 		block_ = static_cast<char*>(memory);
 	}
 	void GrowBlockIfNeeded(Byte new_capacity) {
-		if (new_capacity > capacity_) {
-			capacity_ = new_capacity * 4;
+		if (new_capacity >= capacity_) {
+			capacity_ = new_capacity * 2;
 			assert(block_ != nullptr && "Block has not been allocated, check that the pool handler constructor is called");
 			auto memory = std::realloc(block_, capacity_);
 			assert(memory != nullptr && "Failed to reallocate memory for manager");
@@ -255,6 +253,10 @@ public:
 		return static_cast<T*>(component_pools_.GetLocation(id, component_id));
 	}
 	template <typename T>
+	inline T& GetComponent(EntityId id, ComponentId component_id) const {
+		return *static_cast<T*>(component_pools_.GetLocation(id, component_id));
+	}
+	template <typename T>
 	inline T& GetComponent(EntityId id) const {
 		return *static_cast<T*>(component_pools_.GetLocation(id, GetComponentTypeId<T>()));
 	}
@@ -297,7 +299,7 @@ public:
 	template <typename T, typename ...TArgs>
 	inline T* AddComponent(TArgs&&... args) {
 		assert(IsValid() && "Cannot add component to invalid entity");
-		return manager_->AddComponent<T>(id_, version_, std::forward<TArgs>(args)...);
+		return manager_->AddComponent<T>(id_, std::forward<TArgs>(args)...);
 	}
 private:
 	EntityId id_ = null;
@@ -311,13 +313,25 @@ Entity Manager::CreateEntity() {
 	return Entity{ id, ++entities_[id].version, this };
 }
 
+template <typename ...Ts, typename T, std::size_t... index>
+static void invoke_helper(T&& function, Manager& ecs, EntityId id, std::vector<ComponentId>& vector, std::index_sequence<index...>) {
+	function(ecs.GetComponent<Ts>(id, vector[index])...);
+}
+
+template <typename ...Ts, typename T>
+static void invoke(T&& function, Manager& ecs, EntityId id, std::vector<ComponentId>& vector) {
+	//constexpr auto Size = std::tuple_size<typename std::decay<Tup>::type>::value;
+	invoke_helper<Ts...>(std::forward<T>(function), ecs, id, vector, std::make_index_sequence<sizeof...(Ts)>{});
+}
+
 template <typename ...Ts, typename T>
 void Manager::ForEach(T&& function, bool refresh_after_completion) {
 	// TODO: write some tests for lambda parameters
-	auto ids = std::vector<ComponentId>{ GetComponentTypeId<Ts>()... };
-	for (EntityId i = first_valid_entity; i <= entity_count_; ++i) {
-		if (HasComponents(i, ids)) {
-			function(GetComponent<Ts>(i)...);
+	//auto args = std::make_tuple(GetComponentTypeId<Ts>()...);
+	std::vector<ComponentId> args = { GetComponentTypeId<Ts>()... };
+	for (EntityId id = first_valid_entity; id <= entity_count_; ++id) {
+		if (HasComponents(id, args)) {
+			invoke<Ts...>(std::forward<T>(function), *this, id, args);
 		}
 	}
 	/*if (refresh_after_completion) {
