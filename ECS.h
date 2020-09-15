@@ -94,11 +94,10 @@ class EntityPoolHandler {
 public:
 	EntityPoolHandler() {
 		// Allocate 2 bytes initially in order for capacity doubling to work (since 0 can't be doubled)
-		CreateBlock(2);
+		CreateBlock(2); // TODO: CHANGE BACK TO 2 AFTER TESTS
 	}
 	// Free memory block and call destructors on everything
 	~EntityPoolHandler() = default;
-	// Implement copying / moving of manager later
 	EntityPoolHandler(const EntityPoolHandler&) = delete;
 	EntityPoolHandler& operator=(const EntityPoolHandler&) = delete;
 	EntityPoolHandler(EntityPoolHandler&&) = delete;
@@ -216,9 +215,9 @@ public:
 		capacity_ = new_capacity;
 		block_ = memory;
 	}
-	void GrowBlockIfNeeded(Byte size) {
-		if (size > capacity_) {
-			capacity_ = size * 2;
+	void GrowBlockIfNeeded(Byte new_capacity) {
+		if (new_capacity > capacity_) {
+			capacity_ = new_capacity * 2;
 			auto memory = static_cast<char*>(std::realloc(block_, capacity_));
 			assert(memory && "Failed to reallocate memory for manager");
 			block_ = memory;
@@ -403,17 +402,34 @@ public:
 	friend inline bool operator!=(const Manager& lhs, const Manager& rhs) {
 		return !(lhs == rhs);
 	}
+	inline bool HasComponents(EntityId id, std::vector<ComponentId>& ids) const {
+		for (auto i : ids) {
+			if (!HasComponent(id, i)) return false;
+		}
+		return true;
+	}
+	template <typename ...Ts, typename T, std::size_t... index>
+	void invoke_helper(T&& function, EntityId id, std::vector<ComponentId>& vector, std::index_sequence<index...>) {
+		function(GetComponent<Ts>(id, vector[index])...);
+	}
+
+	template <typename ...Ts, typename T>
+	void invoke(T&& function, EntityId id, std::vector<ComponentId>& vector) {
+		//constexpr auto Size = std::tuple_size<typename std::decay<Tup>::type>::value;
+		invoke_helper<Ts...>(std::forward<T>(function), id, vector, std::make_index_sequence<sizeof...(Ts)>{});
+	}
 	template <typename ...Ts, typename T>
 	void ForEach(T&& function, bool refresh_after_completion = true) {
 		// TODO: write some tests for lambda parameters
-		for (EntityId i = first_valid_entity; i <= entity_count_; ++i) {
-			if (IsAlive(i) && HasComponents<Ts...>(i)) {
-				function(Entity{ i, this }, (GetComponent<Ts>(i))...);
+		std::vector<ComponentId> args = { GetComponentTypeId<Ts>()... };
+		for (EntityId id = first_valid_entity; id <= entity_count_; ++id) {
+			if (HasComponents(id, args)) {
+				invoke<Ts...>(std::forward<T>(function), id, args);
 			}
 		}
-		if (refresh_after_completion) {
+		/*if (refresh_after_completion) {
 			Refresh();
-		}
+		}*/
 	}
 	template <typename ...Ts, typename T>
 	void ForEachWrapper(T&& function, bool refresh_after_completion = true) {
@@ -626,6 +642,13 @@ private:
 		T* component = GetComponentPointer<T>(id);
 		assert(component != nullptr && "Cannot use GetComponent without HasComponent check for nonexistent components");
 		return *component;
+	}
+	template <typename T>
+	inline T& GetComponent(EntityId id, ComponentId component_id) const {
+		assert(HasEntity(id) && "Cannot get component wrapper for nonexistent entity");
+		assert(IsAlive(id) && "Cannot get component wrapper for dead entity");
+		auto& pool_index = entities_[id];
+		return *static_cast<T*>(pool_handler_.GetComponentAddress(pool_index, component_id));
 	}
 	template <typename ...Ts>
 	inline std::tuple<Ts&...> GetComponents(EntityId id) const {
