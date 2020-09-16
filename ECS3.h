@@ -45,32 +45,49 @@ public:
 	ComponentPool() = delete;
 	ComponentPool(std::size_t component_size, Destructor destructor) : component_size_{ component_size }, destructor_{ destructor } {
 		AllocatePool(2);
+		//std::cout << "ComponentPool Constructor" << std::endl;
 	}
 	// Free memory block and call destructors on everything
 	~ComponentPool() {
-		// Destroy all components
-		assert(pool_ != nullptr);
-		assert(destructor_ != nullptr);
-		for (auto offset : component_offsets_) {
-			if (offset != INVALID_OFFSET) {
-				destructor_(static_cast<void*>(pool_ + offset));
+		if (pool_ != nullptr) { // Free memory block if not a move destructor call
+			//std::cout << "ComponentPool Destructor" << std::endl;
+			assert(destructor_ != nullptr && "Cannot call invalid destructor on pool components");
+			for (auto offset : component_offsets_) {
+				if (offset != INVALID_OFFSET) {
+					destructor_(static_cast<void*>(pool_ + offset));
+				}
 			}
+			// Free memory pool
+			try {
+				assert(pool_ != nullptr && "Cannot free invalid pool pointer");
+				std::free(static_cast<void*>(pool_));
+			} catch (std::exception& e) {
+				std::cout << e.what() << std::endl;
+				abort();
+			}
+			pool_ = nullptr;
+			destructor_ = nullptr;
+			capacity_ = 0;
+			size_ = 0;
+			component_size_ = 0;
+			component_offsets_.clear();
+			free_offsets_.clear();
 		}
-		// Free memory pool
-		/*try {
-			std::free(static_cast<void*>(pool_));
-		} catch (std::exception& e) {
-			std::cout << e.what() << std::endl;
-			abort();
-		}*/
-		//pool_ = nullptr;
-		//destructor_ = nullptr;
 	}
 	// Figure these out later
 	ComponentPool(const ComponentPool&) = delete;
 	ComponentPool& operator=(const ComponentPool&) = delete;
-	ComponentPool(ComponentPool&& obj) = default;
-	ComponentPool& operator=(ComponentPool&& obj) = default;
+	ComponentPool& operator=(ComponentPool&& obj) = delete;
+	ComponentPool(ComponentPool&& obj) noexcept : pool_{ obj.pool_ }, destructor_{ obj.destructor_ }, capacity_{ obj.capacity_ }, size_{ obj.size_ }, component_size_{ obj.component_size_ }, component_offsets_{ std::move(obj.component_offsets_) }, free_offsets_{ std::move(free_offsets_) } {
+		//std::cout << "ComponentPool Move" << std::endl;
+		obj.pool_ = nullptr;
+		obj.destructor_ = nullptr;
+		obj.capacity_ = 0;
+		obj.size_ = 0;
+		obj.component_size_ = 0;
+		obj.component_offsets_.clear();
+		obj.free_offsets_.clear();
+	}
 	void* AddComponentAddress(EntityId id) {
 		Offset component = AddToPool(id);
 		AddOffset(id, component);
@@ -212,8 +229,7 @@ public:
 	inline ComponentPool& AddComponentPoolIfNeeded(ComponentId component_id) {
 		assert(component_id <= pools_.size() && "Component addition failed due to pools_ resizing");
 		if (component_id == pools_.size()) {
-			Destructor destructor = &DestroyComponent<T>;
-			return pools_.emplace_back(std::move(ComponentPool{ sizeof(T), destructor }));
+			return pools_.emplace_back(sizeof(T), &DestroyComponent<T>);
 		}
 		return pools_[component_id];
 	}
