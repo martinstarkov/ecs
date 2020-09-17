@@ -1,6 +1,6 @@
-//#include "ECS.h" // 18.5
-//#include "ECS2.h" // 9.3
-#include "ECS3.h" // 7.8
+//#include "ECS.h" // 18.5 // 40
+//#include "ECS2.h" // 9.3 // 19 // - // 10.8
+#include "ECS3.h" // 7.8 // 15 // 6.8 // 10.3 // 7.4
 
 #include <time.h>
 #include <chrono>
@@ -112,39 +112,43 @@ struct TPos { // 128 bytes total
 void test3() {
 	ecs::Manager ecs;
 	auto start = std::chrono::high_resolution_clock::now();
-	for (auto i = 0; i < 30000; ++i) {
+	for (auto i = 0; i < 10000; ++i) {
 		auto e = ecs.CreateEntity();
-		e.AddComponent<TPos<1>>();
-		e.AddComponent<TPos<2>>();
-		e.AddComponent<TPos<3>>();
-		e.AddComponent<TPos<4>>();
-		e.AddComponent<TPos<5>>();
+		e.AddComponent<TPos<1>>(3);
+		e.AddComponent<TPos<2>>(3);
+		e.AddComponent<TPos<3>>(3);
+		e.RemoveComponent<TPos<3>>();
+		e.AddComponent<TPos<4>>(3);
+		e.AddComponent<TPos<5>>(3);
 	}
 	for (auto i = 0; i < 10000; ++i) {
 		auto e = ecs.CreateEntity();
-		e.AddComponent<TPos<6>>();
-		e.AddComponent<TPos<7>>();
-		e.AddComponent<TPos<8>>();
-		e.AddComponent<TPos<9>>();
-		e.AddComponent<TPos<10>>();
+		e.AddComponent<TPos<6>>(4);
+		e.AddComponent<TPos<7>>(4);
+		e.AddComponent<TPos<8>>(4);
+		e.RemoveComponent<TPos<8>>();
+		e.AddComponent<TPos<9>>(4);
+		e.AddComponent<TPos<10>>(4);
 	}
 	auto stop_addition = std::chrono::high_resolution_clock::now();
 	auto duration_addition = std::chrono::duration_cast<std::chrono::microseconds>(stop_addition - start);
 	std::cout << "test3 took " << std::fixed << std::setprecision(1) << duration_addition.count() / 1000000.000 << " seconds to add all components" << std::endl;
-	ecs.ForEach<TPos<1>, TPos<5>>([&] (auto& pos, auto& pos2) {
-		//LOG_(pos.a << " -> ");
-		pos.a += 1;
-		//LOG(pos.a);
-		pos.d += 1;
-		pos2.a += 1;
-		pos2.d += 1;
-		ecs.ForEach<TPos<6>, TPos<10>>([&](auto& pos3, auto& pos4) {
-			pos3.a += 1;
-			pos3.d += 1;
-			pos4.a += 1;
-			pos4.d += 1;
+	for (auto i = 0; i < 1; ++i) {
+		ecs.ForEach<TPos<1>, TPos<5>>([&] (auto& pos, auto& pos2) {
+			//LOG_(pos.a << " -> ");
+			pos.a += 1;
+			//LOG(pos.a);
+			pos.d += 1;
+			pos2.a += 1;
+			pos2.d += 1;
+			ecs.ForEach<TPos<6>, TPos<10>>([&](auto& pos3, auto& pos4) {
+				pos3.a += 1;
+				pos3.d += 1;
+				pos4.a += 1;
+				pos4.d += 1;
+			}, false);
 		}, false);
-	}, false);
+	}
 	auto stop = std::chrono::high_resolution_clock::now();
 	auto duration_get = std::chrono::duration_cast<std::chrono::microseconds>(stop - stop_addition);
 	std::cout << "test3 get component loop time = " << std::fixed << std::setprecision(1) << duration_get.count() / 1000000.000 << std::endl;
