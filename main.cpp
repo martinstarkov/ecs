@@ -1,6 +1,6 @@
-//#include "ECS.h" // 18.5 // 40
-//#include "ECS2.h" // 9.3 // 19 // - // 10.8
-#include "ECS3.h" // 7.8 // 15 // 6.8 // 10.3 // 7.4
+//#include "ECS.h" // 18.5 // 40 // 45
+//#include "ECS2.h" // 9.3 // 19 // - // 10.8 // 16.3
+#include "ECS3.h" // 7.8 // 15 // 6.8 // 10.3 // 7.4 // 17.9 // 14.6 // 14.8 // 15.4
 
 #include <time.h>
 #include <chrono>
@@ -112,36 +112,36 @@ struct TPos { // 128 bytes total
 void test3() {
 	ecs::Manager ecs;
 	auto start = std::chrono::high_resolution_clock::now();
-	for (auto i = 0; i < 10000; ++i) {
+	for (auto i = 0; i < 20000; ++i) {
 		auto e = ecs.CreateEntity();
 		e.AddComponent<TPos<1>>(3);
 		e.AddComponent<TPos<2>>(3);
 		e.AddComponent<TPos<3>>(3);
-		e.RemoveComponent<TPos<3>>();
+		//e.RemoveComponent<TPos<3>>();
 		e.AddComponent<TPos<4>>(3);
 		e.AddComponent<TPos<5>>(3);
 	}
-	for (auto i = 0; i < 10000; ++i) {
+	for (auto i = 0; i < 20000; ++i) {
 		auto e = ecs.CreateEntity();
-		e.AddComponent<TPos<6>>(4);
-		e.AddComponent<TPos<7>>(4);
-		e.AddComponent<TPos<8>>(4);
-		e.RemoveComponent<TPos<8>>();
-		e.AddComponent<TPos<9>>(4);
-		e.AddComponent<TPos<10>>(4);
+		e.AddComponent<TPos<6>>(5);
+		e.AddComponent<TPos<7>>(5);
+		e.AddComponent<TPos<8>>(5);
+		//e.RemoveComponent<TPos<8>>();
+		e.AddComponent<TPos<9>>(5);
+		e.AddComponent<TPos<10>>(5);
 	}
 	auto stop_addition = std::chrono::high_resolution_clock::now();
 	auto duration_addition = std::chrono::duration_cast<std::chrono::microseconds>(stop_addition - start);
 	std::cout << "test3 took " << std::fixed << std::setprecision(1) << duration_addition.count() / 1000000.000 << " seconds to add all components" << std::endl;
-	for (auto i = 0; i < 1; ++i) {
-		ecs.ForEach<TPos<1>, TPos<5>>([&] (auto& pos, auto& pos2) {
+	for (auto i = 0; i < 2; ++i) {
+		ecs.ForEach<TPos<1>, TPos<5>>([&] (auto entity, auto& pos, auto& pos2) {
 			//LOG_(pos.a << " -> ");
 			pos.a += 1;
 			//LOG(pos.a);
 			pos.d += 1;
 			pos2.a += 1;
 			pos2.d += 1;
-			ecs.ForEach<TPos<6>, TPos<10>>([&](auto& pos3, auto& pos4) {
+			ecs.ForEach<TPos<6>, TPos<10>>([&](auto entity, auto& pos3, auto& pos4) {
 				pos3.a += 1;
 				pos3.d += 1;
 				pos4.a += 1;
@@ -159,22 +159,48 @@ void test3() {
 void test4() {
 	ecs::Manager ecs;
 	auto e1 = ecs.CreateEntity();
+	auto e2 = ecs.CreateEntity();
 	e1.AddComponent<TPos<0>>(2);
 	e1.AddComponent<TPos<1>>(3);
+	e2.AddComponent<TPos<1>>(5);
 	assert(e1.HasComponent<TPos<0>>());
 	assert(e1.GetComponent<TPos<0>>().a == 2);
 	//e1.RemoveComponents<TPos<0>, TPos<1>>();
+	//e1.RemoveComponent<TPos<0>>();
+	e2.AddComponent<TPos<0>>(4);
+	//LOG(e1.GetComponent<TPos<0>>().a);
 	//assert(e1.HasComponent<TPos<0>>());
 	//assert(e1.HasComponent<TPos<1>>());
 	assert((e1.HasComponents<TPos<0>, TPos<1>>()));
-	e1.Destroy();
 	ecs.Refresh();
 	auto [one, two] = e1.GetComponents<TPos<0>, TPos<1>>();
 	LOG(one.a << "," << two.a);
 }
 
+void test5() {
+	ecs::Manager ecs;
+	auto e1 = ecs.CreateEntity();
+	auto e2 = ecs.CreateEntity();
+	auto e3 = ecs.CreateEntity();
+	e1.AddComponent<TPos<0>>(1);
+	e2.AddComponent<TPos<0>>(2);
+	e3.AddComponent<TPos<0>>(3);
+	ecs.ForEachEntity([&](ecs::Entity entity) {
+		LOG("entity: " << entity.GetComponent<TPos<0>>().a << ", isalive: " << ecs.IsAlive(entity));
+		entity.Destroy();
+		ecs.ForEachEntity([&](ecs::Entity entity) {
+			LOG("entity: " << entity.GetComponent<TPos<0>>().a << ", isalive: " << ecs.IsAlive(entity));
+		});
+	});
+	LOG("...");
+	auto entities = ecs.GetEntities();
+	for (auto e : entities) {
+		LOG("entity is 3: " << (e == e3));
+	}
+}
+
 int main() {
-	test4();
+	test3();
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
