@@ -156,8 +156,25 @@ void test3() {
 	std::cout << "test3 total execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
 }
 
+void test4() {
+	ecs::Manager ecs;
+	auto e1 = ecs.CreateEntity();
+	e1.AddComponent<TPos<0>>(2);
+	e1.AddComponent<TPos<1>>(3);
+	assert(e1.HasComponent<TPos<0>>());
+	assert(e1.GetComponent<TPos<0>>().a == 2);
+	//e1.RemoveComponents<TPos<0>, TPos<1>>();
+	//assert(e1.HasComponent<TPos<0>>());
+	//assert(e1.HasComponent<TPos<1>>());
+	assert((e1.HasComponents<TPos<0>, TPos<1>>()));
+	e1.Destroy();
+	ecs.Refresh();
+	auto [one, two] = e1.GetComponents<TPos<0>, TPos<1>>();
+	LOG(one.a << "," << two.a);
+}
+
 int main() {
-	test3();
+	test4();
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
