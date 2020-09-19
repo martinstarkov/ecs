@@ -9,7 +9,6 @@
 #include <cassert>
 #include <atomic>
 #include <deque>
-
 #include <iostream>
 
 namespace ecs {
@@ -58,7 +57,6 @@ public:
 	ComponentPool() = delete;
 	ComponentPool(std::size_t component_size, Destructor destructor) : component_size_{ component_size }, destructor_{ destructor } {
 		AllocatePool(component_size);
-		//std::cout << "ComponentPool Constructor" << std::endl;
 	}
 	// Free memory block and call destructors on everything
 	~ComponentPool() {
@@ -74,12 +72,11 @@ public:
 				assert(pool_ != nullptr && "Cannot free invalid pool pointer");
 				std::free(static_cast<void*>(pool_));
 			} catch (std::exception& e) {
-				std::cout << e.what() << std::endl;
+				std::cerr << e.what() << std::endl;
 				abort();
 			}
 			// Invalidate pool state
 			pool_ = nullptr;
-			//std::cout << "ComponentPool Destructor" << std::endl;
 		}
 		// These are called both by regular destructor and move triggered destructor
 		destructor_ = nullptr;
@@ -97,7 +94,6 @@ public:
 	ComponentPool(ComponentPool&& obj) noexcept : pool_{ obj.pool_ }, destructor_{ obj.destructor_ }, capacity_{ obj.capacity_ }, size_{ obj.size_ }, component_size_{ obj.component_size_ }, component_offsets_{ std::move(obj.component_offsets_) }, free_offsets_{ std::move(free_offsets_) } {
 		// This allows the obj destructor to be called without freeing the pool memory
 		obj.pool_ = nullptr;
-		//std::cout << "ComponentPool Move" << std::endl;
 	}
 	void* AddComponentAddress(EntityId id) {
 		Offset component_offset = AddToPool(id);
@@ -228,6 +224,8 @@ public:
 	void RemoveComponents(Entity entity);
 	template <typename T>
 	T& GetComponent(Entity entity) const;
+	template <typename ...Ts>
+	std::tuple<Ts&...> GetComponents(Entity entity) const;
 	template <typename T>
 	bool HasComponent(Entity entity) const;
 	template <typename ...Ts>
@@ -278,7 +276,7 @@ private:
 	template <typename T>
 	T& GetComponent(EntityId id, ComponentId component_id) const {
 		assert(IsValid(id) && "Cannot get component from invalid entity");
-		assert(HasComponent(id, component_id) && "Cannot get component as entity does not have it");
+		assert(HasComponent(id, component_id) && "Cannot get component from entity which does not have it");
 		const auto& pool = pools_[component_id];
 		void* component_location = pool.GetComponentAddress(id);
 		assert(component_location != nullptr && "Cannot get nonexistent component");
@@ -296,13 +294,17 @@ private:
 	void RemoveComponents(EntityId id) {
 		(RemoveComponent<Ts>(id), ...);
 	}
-	template <typename ...Ts>
-	bool HasComponents(EntityId id) const {
-		return (HasComponent<Ts>(id) && ...);
-	}
 	bool HasComponent(EntityId id, ComponentId component_id) const {
 		assert(IsValid(id) && "Cannot check if invalid entity has component");
 		return component_id < pools_.size() && pools_[component_id].GetComponentAddress(id) != nullptr;
+	}
+	template <typename T>
+	bool HasComponent(EntityId id) const {
+		return HasComponent(id, internal::GetComponentId<T>());
+	}
+	template <typename ...Ts>
+	bool HasComponents(EntityId id) const {
+		return (HasComponent<Ts>(id) && ...);
 	}
 	bool HasComponents(EntityId id, std::vector<ComponentId>& component_ids) const {
 		assert(IsValid(id) && "Cannot check if invalid entity has components");
@@ -365,15 +367,55 @@ public:
 	bool IsAlive() const {
 		return manager_ != nullptr && manager_->IsAlive(id_, version_);
 	}
+	bool IsValid() const {
+		return manager_ != nullptr && manager_->IsValid(id_);
+	}
 	template <typename T, typename ...TArgs>
 	T& AddComponent(TArgs&&... args) {
+		assert(IsValid() && "Cannot add component to null entity");
 		assert(IsAlive() && "Cannot add component to dead entity");
 		return manager_->AddComponent<T>(id_, std::forward<TArgs>(args)...);
 	}
 	template <typename T>
 	void RemoveComponent() {
+		assert(IsValid() && "Cannot remove component from null entity");
 		assert(IsAlive() && "Cannot remove component from dead entity");
 		return manager_->RemoveComponent<T>(id_);
+	}
+	template <typename ...Ts>
+	void RemoveComponents() {
+		assert(IsValid() && "Cannot remove components from null entity");
+		assert(IsAlive() && "Cannot remove components from dead entity");
+		return manager_->RemoveComponents<Ts...>(id_);
+	}
+	template <typename T>
+	bool HasComponent() {
+		assert(IsValid() && "Cannot check if null entity has a component");
+		assert(IsAlive() && "Cannot check if dead entity has a component");
+		return manager_->HasComponent<T>(id_);
+	}
+	template <typename ...Ts>
+	bool HasComponents() {
+		assert(IsValid() && "Cannot check if null entity has components");
+		assert(IsAlive() && "Cannot check if dead entity has components");
+		return manager_->HasComponents<Ts...>(id_);
+	}
+	template <typename T>
+	T& GetComponent() {
+		assert(IsValid() && "Cannot get component from null entity");
+		assert(IsAlive() && "Cannot get component from dead entity");
+		return manager_->GetComponent<T>(id_);
+	}
+	template <typename ...Ts>
+	std::tuple<Ts&...> GetComponents() {
+		assert(IsValid() && "Cannot get components from null entity");
+		assert(IsAlive() && "Cannot get components from dead entity");
+		return manager_->GetComponents<Ts...>(id_);
+	}
+	void Destroy() {
+		if (IsAlive()) {
+			manager_->DestroyEntity(id_, version_);
+		}
 	}
 private:
 	EntityId id_ = null;
@@ -383,7 +425,7 @@ private:
 
 Entity Manager::CreateEntity() {
 	EntityId id = null;
-	if (free_entity_ids.size() > 0) { // pick id from free list before incrementing counter
+	if (free_entity_ids.size() > 0) { // pick id from free list before trying to increment counter
 		id = free_entity_ids.front();
 		free_entity_ids.pop_front();
 	} else {
@@ -428,6 +470,11 @@ template <typename T>
 T& Manager::GetComponent(Entity entity) const {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot get component from dead entity");
 	return GetComponent<T>(entity.id_, internal::GetComponentId<T>());
+}
+template <typename ...Ts>
+std::tuple<Ts&...> Manager::GetComponents(Entity entity) const {
+	assert(IsAlive(entity.id_, entity.version_) && "Cannot get components from dead entity");
+	return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(entity.id_, internal::GetComponentId<Ts>())...);
 }
 template <typename T>
 bool Manager::HasComponent(Entity entity) const {
