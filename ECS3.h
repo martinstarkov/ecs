@@ -118,14 +118,17 @@ public:
 		}
 	}
 	void* GetComponentAddress(EntityId id) const {
-		if (id < component_offsets_.size()) { // Id exists in component offsets
+		if (id < component_offsets_.size()) { // Entity id exists in component offsets
 			auto component_offset = component_offsets_[id];
-			if (component_offset != INVALID_OFFSET) { // Component exists
-				assert(pool_ != nullptr && "Could not get component address from null pool");
+			if (component_offset != INVALID_OFFSET) { // Component exists in pool
+				assert(pool_ != nullptr && "Cannot get a component address from a null pool");
 				return static_cast<void*>(pool_ + component_offset);
 			}
 		}
 		return nullptr;
+	}
+	bool HasComponentAddress(EntityId id) const {
+		return id < component_offsets_.size() && component_offsets_[id] != INVALID_OFFSET;
 	}
 private:
 	// Initial pool memory allocation, only called once in constructor
@@ -184,11 +187,13 @@ struct EntityData {
 	~EntityData() = default;
 	EntityData& operator=(const EntityData&) = delete;
 	EntityData& operator=(EntityData&&) = delete;
-	EntityData(const EntityData& copy) noexcept : version{ copy.version } {}
-	EntityData(EntityData&& obj) noexcept : version{ obj.version } {
+	EntityData(const EntityData& copy) noexcept : version{ copy.version }, alive{ copy.alive } {}
+	EntityData(EntityData&& obj) noexcept : version{ obj.version }, alive{ obj.alive } {
 		obj.version = null_version;
+		obj.alive = false;
 	}
 	EntityVersion version = null_version;
+	bool alive = false;
 };
 
 } // namespace internal
@@ -214,8 +219,12 @@ public:
 	friend class Entity;
 	Entity CreateEntity();
 	void DestroyEntity(Entity entity);
+	template <typename T>
+	void ForEachEntity(T&& function, bool refresh_manager_after_completion = true);
+		// Populates a lambda's parameter list with references to components in its type list
 	template <typename ...Ts, typename T>
-	void ForEach(T&& function, bool refresh_after_completion = true); 
+	void ForEach(T&& function, bool refresh_manager_after_completion = true);
+	std::vector<Entity> GetEntities();
 	template <typename T, typename ...TArgs>
 	T& AddComponent(Entity entity, TArgs&&... args);
 	template <typename T>
@@ -238,7 +247,9 @@ public:
 				pool.RemoveComponentAddress(dead_id);
 			}
 			// Increment entity version, this will invalidate all entity handles with the previous version
+			assert(dead_id < entities_.size() && "Could not find dead entity id when refreshing manager");
 			++entities_[dead_id].version;
+			entities_[dead_id].alive = false;
 			free_entity_ids.emplace_back(dead_id);
 		}
 		dead_entities_.clear();
@@ -251,9 +262,7 @@ private:
 		}
 	}
 	template <typename ...Ts, typename T, std::size_t... component_id>
-	void ForEachHelper(T&& function, EntityId id, std::vector<ComponentId>& component_ids, std::index_sequence<component_id...>) {
-		function(GetComponent<Ts>(id, component_ids[component_id])...);
-	}
+	void ForEachHelper(T&& function, EntityId id, std::vector<ComponentId>& component_ids, std::index_sequence<component_id...>);
 	template <typename ...Ts, typename T>
 	void ForEachInvoke(T&& function, EntityId id, std::vector<ComponentId>& component_ids) {
 		ForEachHelper<Ts...>(std::forward<T>(function), id, component_ids, std::make_index_sequence<sizeof...(Ts)>{});
@@ -271,15 +280,17 @@ private:
 		return id != null && id < entities_.size() && entities_[id].version != null_version;
 	}
 	bool IsAlive(EntityId id, EntityVersion version) const {
-		return IsValid(id) && entities_[id].version == version;
+		return IsValid(id) && entities_[id].alive && entities_[id].version == version;
+	}
+	bool IsFree(EntityId id) const {
+		return std::find(free_entity_ids.begin(), free_entity_ids.end(), id) != free_entity_ids.end();
 	}
 	template <typename T>
 	T& GetComponent(EntityId id, ComponentId component_id) const {
 		assert(IsValid(id) && "Cannot get component from invalid entity");
-		assert(HasComponent(id, component_id) && "Cannot get component from entity which does not have it");
 		const auto& pool = pools_[component_id];
 		void* component_location = pool.GetComponentAddress(id);
-		assert(component_location != nullptr && "Cannot get nonexistent component");
+		assert(component_location != nullptr && "Cannot get component which does not exist");
 		return *static_cast<T*>(component_location);
 	}
 	template <typename T>
@@ -296,7 +307,7 @@ private:
 	}
 	bool HasComponent(EntityId id, ComponentId component_id) const {
 		assert(IsValid(id) && "Cannot check if invalid entity has component");
-		return component_id < pools_.size() && pools_[component_id].GetComponentAddress(id) != nullptr;
+		return component_id < pools_.size() && pools_[component_id].HasComponentAddress(id);
 	}
 	template <typename T>
 	bool HasComponent(EntityId id) const {
@@ -309,7 +320,7 @@ private:
 	bool HasComponents(EntityId id, std::vector<ComponentId>& component_ids) const {
 		assert(IsValid(id) && "Cannot check if invalid entity has components");
 		for (auto component_id : component_ids) {
-			if (component_id >= pools_.size() || pools_[component_id].GetComponentAddress(id) == nullptr) return false;
+			if (!HasComponent(id, component_id)) return false;
 		}
 		return true;
 	}
@@ -319,9 +330,8 @@ private:
 		auto component_id = internal::GetComponentId<T>();
 		void* component_location = nullptr;
 		auto& pool = AddOrGetPool<T>(component_id);
-		if (HasComponent(id, component_id)) {
-			component_location = pool.GetComponentAddress(id);
-		} else {
+		component_location = pool.GetComponentAddress(id);
+		if (!component_location) { // if component address doesn't exist, add it
 			component_location = pool.AddComponentAddress(id);
 		}
 		assert(component_location != nullptr && "Could not add component address");
@@ -364,6 +374,15 @@ public:
 	Entity(Entity&&) = default;
 	Entity& operator=(Entity&&) = default;
 	friend class Manager;
+	EntityId GetId() const {
+		return id_;
+	}
+	EntityVersion GetVersion() const {
+		return version_;
+	}
+	Manager* GetManager() const {
+		return manager_;
+	}
 	bool IsAlive() const {
 		return manager_ != nullptr && manager_->IsAlive(id_, version_);
 	}
@@ -412,10 +431,19 @@ public:
 		assert(IsAlive() && "Cannot get components from dead entity");
 		return manager_->GetComponents<Ts...>(id_);
 	}
-	void Destroy() {
+	void Destroy(bool refresh_after = true) {
 		if (IsAlive()) {
 			manager_->DestroyEntity(id_, version_);
+			if (refresh_after) {
+				manager_->Refresh();
+			}
 		}
+	}
+	friend inline bool operator==(const Entity& lhs, const Entity& rhs) {
+		return lhs.manager_ == rhs.manager_ && lhs.id_ == rhs.id_ && lhs.version_ == rhs.version_;
+	}
+	friend inline bool operator!=(const Entity& lhs, const Entity& rhs) {
+		return !(lhs == rhs);
 	}
 private:
 	EntityId id_ = null;
@@ -433,21 +461,51 @@ Entity Manager::CreateEntity() {
 	}
 	assert(id != null && "Could not create entity due to lack of free entity ids");
 	GrowEntitiesIfNeeded(id);
+	entities_[id].alive = true;
 	return Entity{ id, ++entities_[id].version, this };
 }
 void Manager::DestroyEntity(Entity entity) {
 	DestroyEntity(entity.id_, entity.version_);
 }
+std::vector<Entity> Manager::GetEntities() {
+	std::vector<Entity> entities;
+	entities.reserve(entity_count_);
+	for (EntityId id = first_valid_entity_id; id <= entity_count_; ++id) {
+		auto& entity_data = entities_[id];
+		if (entity_data.alive) {
+			entities.emplace_back(id, entity_data.version, this);
+		}
+	}
+	entities.shrink_to_fit();
+	return entities; 
+}
+template <typename ...Ts, typename T, std::size_t... component_id>
+void Manager::ForEachHelper(T&& function, EntityId id, std::vector<ComponentId>& component_ids, std::index_sequence<component_id...>) {
+	function(Entity{ id, entities_[id].version, this }, GetComponent<Ts>(id, component_ids[component_id])...);
+}
 template <typename ...Ts, typename T>
-void Manager::ForEach(T&& function, bool refresh_after_completion) {
+void Manager::ForEach(T&& function, bool refresh_manager_after_completion) {
 	// TODO: write some tests for lambda function parameters
 	std::vector<ComponentId> component_ids = { internal::GetComponentId<Ts>()... };
 	for (EntityId id = first_valid_entity_id; id <= entity_count_; ++id) {
-		if (HasComponents(id, component_ids)) {
+		if (HasComponents(id, component_ids) && entities_[id].alive) {
 			ForEachInvoke<Ts...>(std::forward<T>(function), id, component_ids);
 		}
 	}
-	if (refresh_after_completion) {
+	if (refresh_manager_after_completion) {
+		Refresh();
+	}
+}
+template <typename T>
+void Manager::ForEachEntity(T&& function, bool refresh_manager_after_completion) {
+	// TODO: write some tests for lambda function parameters
+	for (EntityId id = first_valid_entity_id; id <= entity_count_; ++id) {
+		auto& entity_data = entities_[id];
+		if (entity_data.alive) {
+			function(Entity{ id, entity_data.version, this });
+		}
+	}
+	if (refresh_manager_after_completion) {
 		Refresh();
 	}
 }
