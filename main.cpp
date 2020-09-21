@@ -327,8 +327,48 @@ void test8() {
 	LOG("Completed");
 }
 
+void test9() {
+	ecs::Manager ecs;
+	auto e1 = ecs.CreateEntity();
+	auto e2 = ecs.CreateEntity();
+	auto e3 = ecs.CreateEntity();
+	auto e4 = ecs.CreateEntity();
+	e1.AddComponent<TPos<0>>(69);
+
+	e2.AddComponent<TPos<0>>(70);
+	e2.AddComponent<TPos<1>>(71);
+
+	e3.AddComponent<TPos<0>>(72);
+	e3.AddComponent<TPos<1>>(73);
+	e3.AddComponent<TPos<2>>(74);
+
+	e4.AddComponent<TPos<1>>(75);
+	e4.AddComponent<TPos<2>>(76);
+	assert((ecs.GetEntities().size()) == 4);
+	assert((ecs.GetEntitiesWith<TPos<1>>().size()) == 3);
+	//assert((ecs.GetComponentTuple<TPos<1>, TPos<2>>().size()) == 2);
+	auto [one, two] = e3.GetComponents<TPos<1>, TPos<2>>();
+	ecs.ForEach<TPos<1>>([](auto entity, auto& pos_one) {
+		LOG_(pos_one.a << " -> ");
+		pos_one.a += 1;
+		LOG(pos_one.a);
+	});
+	ecs.ForEachEntity([](auto entity) {
+		entity.AddComponent<TPos<0>>(5);
+		if (entity.HasComponent<TPos<0>>()) {
+			LOG("Entity " << entity.GetId() << " has TPos<0>");
+		}
+		if (entity.GetId() > 2) {
+			entity.RemoveComponent<TPos<0>>();
+		}
+	});
+	ecs.ForEach<TPos<0>>([](auto entity, auto& pos_zero) {
+		LOG("Entity " << entity.GetId() << " TPos<0> after: " << pos_zero.a);
+	});
+}
+
 int main() {
-	test7();
+	test9();
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
