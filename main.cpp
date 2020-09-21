@@ -29,6 +29,28 @@ struct TPos { // 128 bytes total
 	std::int64_t h = 0; // 8 bytes
 };
 
+struct ExampleSystem : public ecs::System<TPos<0>, TPos<1>> {
+	void Update() {
+		for (auto [entity, pos, vel] : entities) {
+			entity.RemoveComponent<TPos<0>>();
+			for (auto [entity2, pos2, vel2] : entities) {
+				LOG("inner: " << pos2.a << "," << vel2.a);
+			}
+			LOG(pos.a << "," << vel.a);
+		}
+	}
+};
+
+struct MySystem : public ecs::System<TPos<6>, TPos<7>> {
+	void Update() {
+		for (auto [entity, one, two] : entities) {
+			one.a += 1;
+			two.a += 1;
+			LOG(one.a << ", " << two.a);
+		}
+	}
+};
+
 //void test1() {
 //	ecs::Manager ecs;
 //	ecs::Entity e = ecs.CreateEntity();
@@ -199,8 +221,114 @@ void test5() {
 	}
 }
 
+void test6() {
+	ecs::Manager ecs;
+	ecs.AddSystem<MySystem>();
+	auto e1 = ecs.CreateEntity();
+	auto e2 = ecs.CreateEntity();
+	auto e3 = ecs.CreateEntity();
+	auto e4 = ecs.CreateEntity();
+	auto e5 = ecs.CreateEntity();
+	e2.AddComponent<TPos<0>>(1);
+	e3.AddComponent<TPos<0>>(2);
+	e3.AddComponent<TPos<1>>(3);
+	e4.AddComponent<TPos<0>>(4);
+	ecs.AddSystem<ExampleSystem>();
+	e4.AddComponent<TPos<1>>(5);
+	e4.AddComponent<TPos<6>>(6);
+	e5.AddComponent<TPos<6>>(69);
+	e5.AddComponent<TPos<7>>(699);
+	LOG("First update:");
+	ecs.Update<ExampleSystem>();
+	LOG("Second update:");
+	ecs.Update<ExampleSystem>();
+	LOG("e4 has Tpos<0>: " << e4.HasComponent<TPos<0>>());
+	//e4.GetComponent<TPos<0>>();
+	e4.AddComponent<TPos<0>>(99);
+	LOG("Third update:");
+	ecs.Update<ExampleSystem>();
+	LOG("My system update:");
+	ecs.Update<MySystem>();
+}
+
+struct Test7System : public ecs::System<TPos<6>, TPos<7>> {
+	void Update() {
+		for (auto [entity, one, two] : entities) {
+			bool first = entity.GetId() == 1;
+			if (first) {
+				//LOG_("TPos<6> : " << one.a << " -> ");
+			}
+			one.a += 1;
+			if (first) {
+				//LOG(one.a);
+			}
+			two.a += 1;
+		}
+	}
+};
+
+void test7() {
+	ecs::Manager ecs;
+	ecs.AddSystem<Test7System>();
+	auto start = std::chrono::high_resolution_clock::now();
+	for (auto i = 0; i < 100; ++i) {
+		auto e = ecs.CreateEntity();
+		e.AddComponent<TPos<1>>(3);
+		e.AddComponent<TPos<2>>(3);
+		e.AddComponent<TPos<6>>(3);
+		e.AddComponent<TPos<7>>(3);
+		e.AddComponent<TPos<5>>(3);
+		e.RemoveComponent<TPos<2>>();
+	}
+	auto stop_addition = std::chrono::high_resolution_clock::now();
+	auto duration_addition = std::chrono::duration_cast<std::chrono::microseconds>(stop_addition - start);
+	std::cout << "test7 took " << std::fixed << std::setprecision(1) << duration_addition.count() / 1000000.000 << " seconds to add all components" << std::endl;
+	for (auto i = 0; i < 10000000; ++i) {
+		ecs.Update<Test7System>();
+	}
+	auto stop = std::chrono::high_resolution_clock::now();
+	auto duration_get = std::chrono::duration_cast<std::chrono::microseconds>(stop - stop_addition);
+	std::cout << "test7 get component loop time = " << std::fixed << std::setprecision(1) << duration_get.count() / 1000000.000 << std::endl;
+	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+	std::cout << "test7 total execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
+}
+
+struct Test8System : public ecs::System<TPos<0>, TPos<1>> {
+	void Update() {
+		for (auto [entity, zero, one] : entities) {
+			LOG("Entity " << entity.GetId() << " has a zero and a one : [" << zero.a << ", " << one.a << "]");
+		}
+	}
+};
+
+void test8() {
+	ecs::Manager ecs;
+	ecs.AddSystem<Test8System>();
+	auto e1 = ecs.CreateEntity();
+	auto e2 = ecs.CreateEntity();
+	auto e3 = ecs.CreateEntity();
+	auto e4 = ecs.CreateEntity();
+	e1.AddComponent<TPos<0>>(69);
+
+	e2.AddComponent<TPos<0>>(70);
+	e2.AddComponent<TPos<1>>(71);
+
+	e3.AddComponent<TPos<0>>(72);
+	e3.AddComponent<TPos<1>>(73);
+	e3.AddComponent<TPos<2>>(74);
+
+	e4.AddComponent<TPos<1>>(75);
+	e4.AddComponent<TPos<2>>(76);
+	LOG("Update before removal: ");
+	ecs.Update<Test8System>();
+	e2.RemoveComponent<TPos<0>>();
+	LOG("Update after removal: ");
+	ecs.Update<Test8System>();
+	LOG("Completed");
+}
+
 int main() {
-	test3();
+	test7();
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
