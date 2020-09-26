@@ -51,86 +51,6 @@ struct MySystem : public ecs::System<TPos<6>, TPos<7>> {
 	}
 };
 
-//void test1() {
-//	ecs::Manager ecs;
-//	ecs::Entity e = ecs.CreateEntity();
-//	LOG("e id: " << e.GetId());
-//	LOG("---------");
-//	LOG("e component count: " << e.ComponentCount());
-//	LOG("---------");
-//	LOG("Adding Position, Velocity, Euler");
-//	e.AddComponent<Position>(1, 1);
-//	e.AddComponent<Velocity>(2, 2);
-//	e.AddComponent<Euler>(3, 4, 5, 6);
-//	auto e2 = ecs.CreateEntity();
-//	e2.AddComponent<Position>(2, 2);
-//	e2.AddComponent<Velocity>(20, 20);
-//	e2.AddComponent<RandomThing>(20);
-//	ecs.ForEachWrapper<Velocity, Position>([&](auto entity, auto vel, auto pos) {
-//		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel.Get());
-//		ecs.ForEachWrapper<Velocity>([&](auto entity2, auto random) {
-//			//entity.RemoveComponent<Velocity>();
-//			//entity2.RemoveComponent<RandomThing>();
-//			//entity2.Destroy();
-//			//ecs.Refresh();
-//			LOG("Inner Entity: " << entity2.GetId() << ", RandomThing: " << random.Get());
-//		});
-//	});
-//	LOG("---------");
-//	LOG("e component count: " << e.ComponentCount());
-//	LOG("---------");
-//	LOG("Removing Velocity");
-//	e.RemoveComponent<Velocity>();
-//	//e.Destroy();
-//	ecs.ForEach<Velocity>([&](auto entity, auto& vel) {
-//		LOG("Entity: " << entity.GetId() << ", Velocity: " << vel);
-//	});
-//	LOG("---------");
-//	LOG("e component count: " << e.ComponentCount());
-//	LOG("---------");
-//	LOG("Adding OtherThing");
-//	e.AddComponent<OtherThing>(7, 8, 7, 8);
-//	LOG("---------");
-//	LOG("e component count: " << e.ComponentCount());
-//	//e.RemoveComponent<OtherThing>();
-//	auto [p, v, o] = e.GetComponentWrappers<Position, Euler, OtherThing>();
-//	LOG("e components: " << p << "," << v << "," << o);
-//	LOG("Destroying Entity");
-//	e.Destroy();
-//	LOG("---------");
-//	LOG("Adding euler");
-//	LOG("---------");
-//}
-//
-//void test2() {
-//	ecs::Manager ecs;
-//	for (auto i = 0; i < 100; ++i) {
-//		auto e = ecs.CreateEntity();
-//		e.AddComponent<Position>(i, i);
-//		e.AddComponent<Velocity>();
-//		e.AddComponent<OtherThing>();
-//		e.AddComponent<RandomThing>();
-//		e.AddComponent<Euler>();
-//	}
-//	auto block = ecs.GetPoolHandlerBlock();
-//	auto e2 = ecs.GetEntity(2);
-//	e2.RemoveComponent<OtherThing>();
-//	ecs.GetEntity(3).Destroy();
-//	ecs.Refresh();
-//	ecs.GetEntity(4).Destroy();
-//	ecs.Refresh();
-//	ecs.GetEntity(5).Destroy();
-//	ecs.Refresh();
-//	ecs.GetEntity(6).Destroy();
-//	ecs.Refresh();
-//	ecs.GetEntity(7).Destroy();
-//	ecs.Refresh();
-//	ecs.GetEntity(8).Destroy();
-//	ecs.Refresh();
-//	ecs.GetEntity(9).Destroy();
-//	ecs.Refresh();
-//}
-
 void test3() {
 	ecs::Manager ecs;
 	auto start = std::chrono::high_resolution_clock::now();
@@ -139,9 +59,9 @@ void test3() {
 		e.AddComponent<TPos<1>>(3);
 		e.AddComponent<TPos<2>>(3);
 		e.AddComponent<TPos<3>>(3);
-		//e.RemoveComponent<TPos<3>>();
 		e.AddComponent<TPos<4>>(3);
 		e.AddComponent<TPos<5>>(3);
+		//e.RemoveComponent<TPos<3>>();
 	}
 	for (auto i = 0; i < 20000; ++i) {
 		auto e = ecs.CreateEntity();
@@ -254,14 +174,7 @@ void test6() {
 struct Test7System : public ecs::System<TPos<6>, TPos<7>> {
 	void Update() {
 		for (auto [entity, one, two] : entities) {
-			bool first = entity.GetId() == 1;
-			if (first) {
-				//LOG_("TPos<6> : " << one.a << " -> ");
-			}
 			one.a += 1;
-			if (first) {
-				//LOG(one.a);
-			}
 			two.a += 1;
 		}
 	}
@@ -283,6 +196,7 @@ void test7() {
 	auto stop_addition = std::chrono::high_resolution_clock::now();
 	auto duration_addition = std::chrono::duration_cast<std::chrono::microseconds>(stop_addition - start);
 	std::cout << "test7 took " << std::fixed << std::setprecision(1) << duration_addition.count() / 1000000.000 << " seconds to add all components" << std::endl;
+	// 10 million update cycles
 	for (auto i = 0; i < 10000000; ++i) {
 		ecs.Update<Test7System>();
 	}
@@ -334,14 +248,15 @@ void test9() {
 	auto e3 = ecs.CreateEntity();
 	auto e4 = ecs.CreateEntity();
 	e1.AddComponent<TPos<0>>(69);
-
+	ecs::Entity test = ecs::null;
+	bool hi = test == ecs::null;
+	LOG(hi);
 	e2.AddComponent<TPos<0>>(70);
 	e2.AddComponent<TPos<1>>(71);
 
 	e3.AddComponent<TPos<0>>(72);
 	e3.AddComponent<TPos<1>>(73);
 	e3.AddComponent<TPos<2>>(74);
-
 	e4.AddComponent<TPos<1>>(75);
 	e4.AddComponent<TPos<2>>(76);
 	assert((ecs.GetEntities().size()) == 4);
@@ -368,7 +283,7 @@ void test9() {
 }
 
 int main() {
-	test9();
+	test7();
 	//if (true) {
 	//	ecs::EntityId entities = 30000;
 	//	ecs::Manager manager(entities, 20);
