@@ -1,6 +1,4 @@
-//#include "ECS.h" // 18.5 // 40 // 45
-//#include "ECS2.h" // 9.3 // 19 // - // 10.8 // 16.3
-#include "ECS3.h" // 7.8 // 15 // 6.8 // 10.3 // 7.4 // 17.9 // 14.6 // 14.8 // 15.4
+#include "ECS.h"
 
 #include <time.h>
 #include <chrono>
@@ -12,21 +10,21 @@
 #define LOG_(x) { std::cout << x; }
 
 template <std::size_t I>
-struct TPos { // 128 bytes total
+struct TPos {
 	TPos(std::int64_t a = 0) : a{ a } {}
 	friend std::ostream& operator<<(std::ostream& os, const TPos& obj) {
 		os << "(" << obj.a << "," << obj.b << "," << obj.c << "," << obj.d << ")";
 		return os;
 	}
-	std::int64_t a = 0; // 8 bytes
-	std::int64_t b = 0; // 8 bytes
-	std::int64_t c = 0; // 8 bytes
-	std::int64_t d = 0; // 8 bytes
+	std::int64_t a = 0;
+	std::int64_t b = 0;
+	std::int64_t c = 0;
+	std::int64_t d = 0;
 
-	std::int64_t e = 0; // 8 bytes
-	std::int64_t f = 0; // 8 bytes
-	std::int64_t g = 0; // 8 bytes
-	std::int64_t h = 0; // 8 bytes
+	std::int64_t e = 0;
+	std::int64_t f = 0;
+	std::int64_t g = 0;
+	std::int64_t h = 0;
 };
 
 struct ExampleSystem : public ecs::System<TPos<0>, TPos<1>> {
@@ -51,24 +49,39 @@ struct MySystem : public ecs::System<TPos<6>, TPos<7>> {
 	}
 };
 
+struct Test7System : public ecs::System<TPos<6>, TPos<7>> {
+	void Update() {
+		for (auto [entity, one, two] : entities) {
+			one.a += 1;
+			two.a += 1;
+		}
+	}
+};
+
+struct Test8System : public ecs::System<TPos<0>, TPos<1>> {
+	void Update() {
+		for (auto [entity, zero, one] : entities) {
+			LOG("Entity " << entity.GetId() << " has a zero and a one : [" << zero.a << ", " << one.a << "]");
+		}
+	}
+};
+
 void test3() {
 	ecs::Manager ecs;
 	auto start = std::chrono::high_resolution_clock::now();
-	for (auto i = 0; i < 20000; ++i) {
+	for (auto i = 0; i < 200; ++i) {
 		auto e = ecs.CreateEntity();
 		e.AddComponent<TPos<1>>(3);
 		e.AddComponent<TPos<2>>(3);
 		e.AddComponent<TPos<3>>(3);
 		e.AddComponent<TPos<4>>(3);
 		e.AddComponent<TPos<5>>(3);
-		//e.RemoveComponent<TPos<3>>();
 	}
-	for (auto i = 0; i < 20000; ++i) {
+	for (auto i = 0; i < 200; ++i) {
 		auto e = ecs.CreateEntity();
 		e.AddComponent<TPos<6>>(5);
 		e.AddComponent<TPos<7>>(5);
 		e.AddComponent<TPos<8>>(5);
-		//e.RemoveComponent<TPos<8>>();
 		e.AddComponent<TPos<9>>(5);
 		e.AddComponent<TPos<10>>(5);
 	}
@@ -88,8 +101,8 @@ void test3() {
 				pos3.d += 1;
 				pos4.a += 1;
 				pos4.d += 1;
-			}, false);
-		}, false);
+			});
+		});
 	}
 	auto stop = std::chrono::high_resolution_clock::now();
 	auto duration_get = std::chrono::duration_cast<std::chrono::microseconds>(stop - stop_addition);
@@ -114,7 +127,6 @@ void test4() {
 	//assert(e1.HasComponent<TPos<0>>());
 	//assert(e1.HasComponent<TPos<1>>());
 	assert((e1.HasComponents<TPos<0>, TPos<1>>()));
-	ecs.Refresh();
 	auto [one, two] = e1.GetComponents<TPos<0>, TPos<1>>();
 	LOG(one.a << "," << two.a);
 }
@@ -171,15 +183,6 @@ void test6() {
 	ecs.Update<MySystem>();
 }
 
-struct Test7System : public ecs::System<TPos<6>, TPos<7>> {
-	void Update() {
-		for (auto [entity, one, two] : entities) {
-			one.a += 1;
-			two.a += 1;
-		}
-	}
-};
-
 void test7() {
 	ecs::Manager ecs;
 	ecs.AddSystem<Test7System>();
@@ -196,8 +199,8 @@ void test7() {
 	auto stop_addition = std::chrono::high_resolution_clock::now();
 	auto duration_addition = std::chrono::duration_cast<std::chrono::microseconds>(stop_addition - start);
 	std::cout << "test7 took " << std::fixed << std::setprecision(1) << duration_addition.count() / 1000000.000 << " seconds to add all components" << std::endl;
-	// 10 million update cycles
-	for (auto i = 0; i < 10000000; ++i) {
+	// 10 update cycles
+	for (auto i = 0; i < 10; ++i) {
 		ecs.Update<Test7System>();
 	}
 	auto stop = std::chrono::high_resolution_clock::now();
@@ -206,14 +209,6 @@ void test7() {
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
 	std::cout << "test7 total execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
 }
-
-struct Test8System : public ecs::System<TPos<0>, TPos<1>> {
-	void Update() {
-		for (auto [entity, zero, one] : entities) {
-			LOG("Entity " << entity.GetId() << " has a zero and a one : [" << zero.a << ", " << one.a << "]");
-		}
-	}
-};
 
 void test8() {
 	ecs::Manager ecs;
@@ -282,96 +277,52 @@ void test9() {
 	});
 }
 
+void test10() {
+	ecs::Manager ecs1;
+	ecs::Manager ecs2;
+	auto e11 = ecs1.CreateEntity();
+	e11.AddComponent<TPos<0>>(1);
+	auto e12 = ecs1.CreateEntity();
+	auto e21 = ecs2.CreateEntity();
+	e12.AddComponent<TPos<0>>(2);
+	auto e22 = ecs2.CreateEntity();
+	e21.AddComponent<TPos<1>>(11);
+	e22.AddComponent<TPos<1>>(10);
+	e21.AddComponent<TPos<0>>(3);
+	e22.AddComponent<TPos<0>>(4);
+	LOG(e11.GetComponent<TPos<0>>().a);
+	LOG(e12.GetComponent<TPos<0>>().a);
+	LOG(e21.GetComponent<TPos<0>>().a);
+	LOG(e22.GetComponent<TPos<0>>().a);
+	e22.RemoveComponent<TPos<0>>();
+	e21.RemoveComponent<TPos<1>>();
+	assert(!e22.HasComponent<TPos<0>>());
+	assert(!e21.HasComponent<TPos<1>>());
+	e11.AddComponent<TPos<1>>(13);
+	e12.AddComponent<TPos<1>>(12);
+	e21.AddComponent<TPos<1>>(11);
+	LOG(e11.GetComponent<TPos<1>>().a);
+	LOG(e12.GetComponent<TPos<1>>().a);
+	LOG(e21.GetComponent<TPos<1>>().a);
+	LOG(e22.GetComponent<TPos<1>>().a);
+	assert(e11.HasComponent<TPos<1>>());
+	assert(e12.HasComponent<TPos<1>>());
+	assert(e21.HasComponent<TPos<1>>());
+	assert(e22.HasComponent<TPos<1>>());
+	assert(e11.HasComponent<TPos<0>>());
+	assert(e12.HasComponent<TPos<0>>());
+	assert(e21.HasComponent<TPos<0>>());
+}
+
 int main() {
+	test3();
+	test4();
+	test5();
+	test6();
 	test7();
-	//if (true) {
-	//	ecs::EntityId entities = 30000;
-	//	ecs::Manager manager(entities, 20);
-	//	std::size_t loops = 20;
-	//	LOG("ASSIGNING POSITIONS AND VELOCITIES TO " << entities << " ENTITIES...");
-	//	assign(manager, entities);
-	//	LOG("ASSIGNEMT COMPLETED!");
-	//	LOG("TIMING LOOPS!");
-	//	auto start = std::chrono::high_resolution_clock::now();
-	//	/*for (std::size_t i = 0; i < loops; ++i) {
-	//		update(manager);
-	//	}*/
-	//	LOG("LOOPS COMPLETED!");
-	//	using namespace std::chrono;
-	//	unsigned frame_count_per_second = 0;
-	//	auto prev_time_in_seconds = time_point_cast<seconds>(system_clock::now());
-	//	size_t counter = 0;
-	//	while (counter <= 10) {
-	//		for (std::size_t i = 0; i < loops; ++i) {
-	//			update(manager);
-	//		}
-	//		auto time_in_seconds = time_point_cast<seconds>(system_clock::now());
-	//		++frame_count_per_second;
-	//		if (time_in_seconds > prev_time_in_seconds) {
-	//			std::cerr << frame_count_per_second << " frames per second\n";
-	//			frame_count_per_second = 0;
-	//			prev_time_in_seconds = time_in_seconds;
-	//			++counter;
-	//		}
-	//	}
-	//	auto stop = std::chrono::high_resolution_clock::now();
-	//	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-	//	std::cout << "execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
-	//}
-	// 10000, 1 mil loops, 611, 643s, Manager 3
-	// 10000, 1 mil loops, 591, 592s, Manager 5
-
-	// 100, 10 mil loops, 61, 61, 61s, Manager 3
-	// 100, 10 mil loops, 56, 59, 61s, Manager 5
-
-	// 1 mil, 1k loops, 78.6s, Manager 5
-	// 1 mil, 1k loops, 75.7s, Manager 3
-
-	// 1 mil, 10 loops, 96s, Manager 4 custom allocator adding and removing components
-	// 1 mil, 10 loops, 77s, Manager 3 vector pairs adding and removing components
-
-	// 1 mil, 100 loops, 8.6s, Manager 5
-	// 1 mil, 100 loops, 8.2s, Manager 3
-
-	// 1 mil, 110 loops, 11.9s, Manager 5
-	// 1 mil, 100 loops, 12s, Manager 3
-
-	// 1 mil, 1k loops, 72s, Manager 5 custom allocator
-	// 1 mil, 1k loops, 102s, Manager 4 custom allocator
-	// 1 mil, 1k loops, 82s, Manager 3 vector pairs
-
-	// 1 mil, 100 loops, 7.1s, Manager 5 custom allocator
-	// 1 mil, 100 loops, 10.3s, Manager 4 custom allocator
-	// 1 mil, 100 loops, 8.1s, Manager 3 vector pairs
-
-	// 1 mil, 1k loops, 87, 92, 92s, Manager 4 custom allocator
-	// 1 mil, 1k loops, 75, 76s, Manager 3 vector pairs
-
-	// 1k, 1 mil loops, 43s, Manager 4 custom allocator 
-	// 1k, 1 mil loops, 45s, Manager 3 vector pairs
-
-	// 1 mil, 1k loops, 501mb, 88s, Manager 4 custom allocator
-	// 1 mil, 1k loops, 382mb, 105s, Manager 3 vector pairs
-	// 1 mil, 1k loops, 662mb, 176s, Manager 3 regular map
-
-	// 1 mil, 1k loops, 88s, Manager 4 custom allocator
-	// 1 mil, 1k loops, 104s, Manager 3 vector pairs
-
-	// 100k, 10k loops, 89s, Manager 4 custom allocator 
-	// 100k, 10k loops, 105s, Manager 3 vector pairs
-	// 100k, 10k loops, 176s, Manager 3 regular map
-
-	// 10k, 100k loops, 81s, Manager 4 custom allocator 
-	// 10k, 100k loops, 82s, Manager 3 vector pairs
-	// 10k, 100k loops, 169s, Manager 3 regular map
-
-	// 10k, 10k loops, 8.7s, Manager 4 custom allocator 
-	// 10k, 10k loops, 8.9s, Manager 3 vector pairs
-	// 10k, 10k loops, 17s, Manager 3 regular map
-
-	// 100k, 1k loops, 8.7s, Manager 4 custom allocator 
-	// 100k, 1k loops, 9.0s, Manager 3 vector pairs
-
-	//std::cin.get();
+	test8();
+	test9();
+	test10();
+	LOG("Tests completed!");
 	return 0;
 }
