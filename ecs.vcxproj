@@ -146,10 +146,7 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ComponentPool.h" />
     <ClInclude Include="ECS.h" />
-    <ClInclude Include="ECS2.h" />
-    <ClInclude Include="ECS3.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
