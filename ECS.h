@@ -8,14 +8,10 @@
 #include <atomic> // std::atomic_int
 #include <cassert> // assert
 
-//#define NDEBUG
-
 //#if __cplusplus < 201703L
 //#endif
 
 #include <type_traits> // future template checks
-
-// TODO: Add license at top of file when you get there
 
 // Do not use internal functions outside API
 namespace internal {
