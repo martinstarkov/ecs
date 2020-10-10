@@ -1,7 +1,5 @@
 #pragma once
 
-#pragma once
-
 #include <vector> // dynamic storage container for components / entities
 #include <array> // fixed size container for component id caching during processes which call HasComponent and GetComponent
 #include <cassert> // debug assertions
@@ -12,7 +10,7 @@
 
 namespace ecs {
 
-using EntityId = std::uint64_t;
+using EntityId = std::uint32_t;
 using EntityVersion = std::uint32_t;
 using ComponentId = std::uint32_t;
 using AtomicComponentId = std::atomic_uint32_t;
@@ -38,8 +36,9 @@ constexpr ManagerId null_manager_id = -1;
 constexpr Offset INVALID_OFFSET = -1;
 
 // Important design decision: Component ids shared among all created managers, i.e. struct Position has id '3' in all manager instances, as opposed to the order in which a component is first added to each manager.
-extern AtomicComponentId component_counter;
-AtomicComponentId component_counter{ 0 };
+static ComponentId component_counter{ 0 };
+// Similarly to component ids, system ids are shared for all managers.
+static SystemId system_counter{ 0 };
 
 // Create / retrieve a unique id for each component class.
 template <typename T>
@@ -47,10 +46,6 @@ static ComponentId GetComponentId() {
 	static ComponentId id = component_counter++;
 	return id;
 }
-
-// Similarly to component ids, system ids are shared for all managers.
-extern AtomicSystemId system_counter;
-AtomicSystemId system_counter{ 0 };
 
 // Create / retrieve a unique id for each system class.
 template <typename T>
@@ -61,7 +56,7 @@ static SystemId GetSystemId() {
 
 // Store component destructor pointers for freeing pool memory.
 template <typename T>
-void DestroyComponent(void* component_address) {
+static void DestroyComponent(void* component_address) {
 	static_cast<T*>(component_address)->~T();
 }
 // Destructor pointer alias
@@ -296,7 +291,7 @@ public:
 class Manager {
 public:
 	// Important: Initialize an invalid 0th index pool index in entities_ (null entity's index).
-	Manager() : entities_{ internal::EntityData{} }, id_{ ++manager_count_ } {}
+	Manager() : entities_{ internal::EntityData{} }, id_{ ++ManagerCount() } {}
 	~Manager() {
 		id_ = internal::null_manager_id;
 		entity_count_ = 0;
@@ -385,7 +380,7 @@ private:
 	// Add entity id to deletion list but do not invalidate any handles.
 	void DestroyEntity(const EntityId id, const EntityVersion version, bool loop_entity) {
 		if (IsAlive(id, version)) {
-			for (auto i = 0; i < pools_.size(); ++i) {
+			for (std::size_t i = 0; i < pools_.size(); ++i) {
 				auto& pool = GetPool(i);
 				if (pool.IsValid()) {
 					pool.RemoveComponentAddress(id);
@@ -413,7 +408,7 @@ private:
 	void GetComponentTupleInvoke(std::vector<std::tuple<Entity, Ts&...>>& vector, const EntityId id, const EntityVersion version, const std::array<ComponentId, COMPONENT_COUNT>& component_ids, std::index_sequence<Is...>) {
 		std::array<void*, COMPONENT_COUNT> component_locations;
 		// Check if an entity has each component and if so, populate the component locations array.
-		for (auto i = 0; i < component_ids.size(); ++i) {
+		for (std::size_t i = 0; i < component_ids.size(); ++i) {
 			void* component_location = GetComponentLocation(id, component_ids[i]);
 			if (!component_location) return; // Component does not exist, do not add entity / components to tuple, return.
 			component_locations[i] = component_location;
@@ -442,21 +437,21 @@ private:
 	}
 
 	// Check if a system id exists in the manager.
-	bool IsValid(const SystemId id) const {
+	bool IsValidSystem(const SystemId id) const {
 		return id < systems_.size() && systems_[id] != nullptr;
 	}
 	// Check if an entity id exists in the manager.
-	bool IsValid(const EntityId id) const {
+	bool IsValidEntity(const EntityId id) const {
 		return id != null && id < entities_.size() && entities_[id].version != internal::null_version;
 	}
 	// Check if a given entity id is considered alive.
 	bool IsAlive(const EntityId id, const EntityVersion version) const {
-		return IsValid(id) && entities_[id].alive && entities_[id].version == version;
+		return IsValidEntity(id) && entities_[id].alive && entities_[id].version == version;
 	}
 	// GetComponent implementation.
 	template <typename T>
 	T& GetComponent(const EntityId id, const ComponentId component_id) const {
-		assert(IsValid(id) && "Cannot get component from an invalid entity");
+		assert(IsValidEntity(id) && "Cannot get component from an invalid entity");
 		const auto& pool = GetPool(component_id);
 		void* component_location = pool.GetComponentAddress(id);
 		assert(component_location != nullptr && "Cannot get component which does not exist");
@@ -464,7 +459,7 @@ private:
 	}
 	// Used for faster internal checking of HasComponent and then GetComponent (For example, in ForEach loops, check if component pointer is valid, if it is, use it).
 	void* GetComponentLocation(EntityId id, ComponentId component_id) const {
-		assert(IsValid(id) && "Cannot get component from invalid entity");
+		assert(IsValidEntity(id) && "Cannot get component from invalid entity");
 		const auto& pool = GetPool(component_id);
 		return pool.GetComponentAddress(id);
 	}
@@ -485,7 +480,7 @@ private:
 	}
 	// HasComponent implementation.
 	bool HasComponent(const EntityId id, const ComponentId component_id) const {
-		assert(IsValid(id) && "Cannot check if invalid entity has component");
+		assert(IsValidEntity(id) && "Cannot check if invalid entity has component");
 		return component_id < pools_.size() && GetPool(component_id).HasComponentAddress(id);
 	}
 	// HasComponent without passing a component id. 
@@ -501,7 +496,7 @@ private:
 	// HasComponents implementation.
 	template <std::size_t I>
 	bool HasComponents(const EntityId id, const std::array<ComponentId, I>& component_ids) const {
-		assert(IsValid(id) && "Cannot check if invalid entity has components");
+		assert(IsValidEntity(id) && "Cannot check if invalid entity has components");
 		for (const auto component_id : component_ids) {
 			if (!HasComponent(id, component_id)) return false;
 		}
@@ -510,7 +505,7 @@ private:
 	// AddComponent implementation.
 	template <typename T, typename ...TArgs>
 	T& AddComponent(const EntityId id, bool loop_entity, TArgs&&... args) {
-		assert(IsValid(id) && "Cannot add component to invalid entity");
+		assert(IsValidEntity(id) && "Cannot add component to invalid entity");
 		auto component_id = internal::GetComponentId<T>();
 		void* component_location = nullptr;
 		auto& component_pool = AddPool<T>(component_id);
@@ -534,14 +529,14 @@ private:
 	// ReplaceComponent implementation.
 	template <typename T, typename ...TArgs>
 	T& ReplaceComponent(const EntityId id, TArgs&&... args) {
-		assert(IsValid(id) && "Cannot replace component of an invalid entity");
+		assert(IsValidEntity(id) && "Cannot replace component of an invalid entity");
 		assert(HasComponent<T>(id) && "Cannot replace a nonexistent component");
 		return AddComponent<T>(id, false, std::forward<TArgs>(args)...);
 	}
 	// RemoveComponent implementation.
 	template <typename T>
 	void RemoveComponent(const EntityId id, bool loop_entity) {
-		assert(IsValid(id) && "Cannot remove component from invalid entity");
+		assert(IsValidEntity(id) && "Cannot remove component from invalid entity");
 		auto component_id = internal::GetComponentId<T>();
 		if (HasComponent(id, component_id)) {
 			auto& pool = GetPool(component_id);
@@ -568,10 +563,9 @@ private:
 	// Sparse vector of system pointers.
 	std::vector<std::unique_ptr<BaseSystem>> systems_;
 	// Used for generating unique manager ids.
-	static ManagerId manager_count_;
-};
+	static ManagerId& ManagerCount() { static ManagerId id{ internal::null_manager_id }; return id; }
 
-ManagerId Manager::manager_count_ = internal::null_manager_id;
+};
 
 // Template class for ECS systems, template arguments are components which the system requires of its entities.
 // Each system has access to a protected 'entities' variable.
@@ -667,7 +661,7 @@ public:
 	}
 	// Returns whether or not the entity is valid (not null)
 	bool IsValid() const {
-		return manager_ != nullptr && manager_->IsValid(id_);
+		return manager_ != nullptr && manager_->IsValidEntity(id_);
 	}
 	// Add a component to the entity, returns a reference to the new component.
 	template <typename T, typename ...TArgs>
@@ -761,7 +755,7 @@ private:
 	bool loop_entity_;
 };
 
-Entity Manager::CreateEntity() {
+inline Entity Manager::CreateEntity() {
 	EntityId id = null;
 	if (free_entity_ids.size() > 0) { // Pick id from free list before trying to increment entity counter.
 		id = free_entity_ids.front();
@@ -774,14 +768,14 @@ Entity Manager::CreateEntity() {
 	entities_[id].alive = true;
 	return Entity{ id, ++entities_[id].version, this };
 }
-void Manager::DestroyEntity(Entity entity) {
+inline void Manager::DestroyEntity(Entity entity) {
 	DestroyEntity(entity.id_, entity.version_, entity.loop_entity_);
 }
-std::vector<Entity> Manager::GetEntities() {
-	return GetEntitiesWith();
+inline std::vector<Entity> Manager::GetEntities() {
+	return GetEntitiesWith<>();
 }
 template <typename ...Ts>
-std::vector<Entity> Manager::GetEntitiesWith() {
+inline std::vector<Entity> Manager::GetEntitiesWith() {
 	std::vector<Entity> entities;
 	entities.reserve(entity_count_);
 	// Store all the component ids in an array so they don't have to be fetched in every loop cycle.
@@ -798,7 +792,7 @@ std::vector<Entity> Manager::GetEntitiesWith() {
 	return entities;
 }
 template <typename ...Ts>
-std::vector<std::tuple<Entity, Ts&...>> Manager::GetComponentTuple() {
+inline std::vector<std::tuple<Entity, Ts&...>> Manager::GetComponentTuple() {
 	std::vector<std::tuple<Entity, Ts&...>> vector_of_tuples;
 	vector_of_tuples.reserve(entity_count_);
 	constexpr std::size_t COMPONENT_COUNT = sizeof...(Ts);
@@ -817,11 +811,11 @@ std::vector<std::tuple<Entity, Ts&...>> Manager::GetComponentTuple() {
 	return vector_of_tuples;
 }
 template <typename ...Ts, typename T, std::size_t... component_id>
-void Manager::ForEachHelper(T&& function, const EntityId id, std::array<ComponentId, sizeof...(Ts)>& component_ids, std::index_sequence<component_id...>) {
+inline void Manager::ForEachHelper(T&& function, const EntityId id, std::array<ComponentId, sizeof...(Ts)>& component_ids, std::index_sequence<component_id...>) {
 	function(Entity{ id, entities_[id].version, this, true }, GetComponent<Ts>(id, component_ids[component_id])...);
 }
 template <typename ...Ts, typename T>
-void Manager::ForEach(T&& function) {
+inline void Manager::ForEach(T&& function) {
 	// TODO: Write some tests for lambda function parameters.
 	std::vector<std::tuple<Entity, Ts&...>> entities = GetComponentTuple<Ts...>();
 	for (std::tuple<Entity, Ts&...> tuple : entities) {
@@ -830,7 +824,7 @@ void Manager::ForEach(T&& function) {
 	}
 }
 template <typename T>
-void Manager::ForEachEntity(T&& function) {
+inline void Manager::ForEachEntity(T&& function) {
 	// TODO: Write some tests for lambda function parameters.
 	auto entities = GetEntities();
 	for (auto entity : entities) {
@@ -839,54 +833,54 @@ void Manager::ForEachEntity(T&& function) {
 	}
 }
 template <typename T, typename ...TArgs>
-T& Manager::AddComponent(Entity entity, TArgs&&... constructor_args) {
+inline T& Manager::AddComponent(Entity entity, TArgs&&... constructor_args) {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot add component to dead entity");
 	return AddComponent<T>(entity.id_, entity.loop_entity_, std::forward<TArgs>(constructor_args)...);
 }
 template <typename T, typename ...TArgs>
-T& Manager::ReplaceComponent(Entity entity, TArgs&&... constructor_args) {
+inline T& Manager::ReplaceComponent(Entity entity, TArgs&&... constructor_args) {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot replace component of dead entity");
 	return ReplaceComponent<T>(entity.id_, std::forward<TArgs>(constructor_args)...);
 }
 template <typename T>
-void Manager::RemoveComponent(Entity entity) {
+inline void Manager::RemoveComponent(Entity entity) {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot remove component from dead entity");
 	RemoveComponent<T>(entity.id_, entity.loop_entity_);
 }
 template <typename ...Ts>
-void Manager::RemoveComponents(Entity entity) {
+inline void Manager::RemoveComponents(Entity entity) {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot remove components from dead entity");
 	(RemoveComponent<Ts>(entity.id_, entity.loop_entity_), ...);
 }
 template <typename T>
-T& Manager::GetComponent(Entity entity) const {
+inline T& Manager::GetComponent(Entity entity) const {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot get component from dead entity");
 	return GetComponent<T>(entity.id_, internal::GetComponentId<T>());
 }
 template <typename ...Ts>
-std::tuple<Ts&...> Manager::GetComponents(Entity entity) const {
+inline std::tuple<Ts&...> Manager::GetComponents(Entity entity) const {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot get components from dead entity");
 	return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(entity.id_, internal::GetComponentId<Ts>())...);
 }
 template <typename T>
-bool Manager::HasComponent(Entity entity) const {
+inline bool Manager::HasComponent(Entity entity) const {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot check if dead entity has a component");
 	return HasComponent(entity.id_, internal::GetComponentId<T>());
 }
 template <typename ...Ts>
-bool Manager::HasComponents(Entity entity) const {
+inline bool Manager::HasComponents(Entity entity) const {
 	assert(IsAlive(entity.id_, entity.version_) && "Cannot check if dead entity has components");
 	return (HasComponent<Ts>(entity.id_) && ...);
 }
-bool Manager::IsAlive(Entity entity) const {
+inline bool Manager::IsAlive(Entity entity) const {
 	return IsAlive(entity.id_, entity.version_);
 }
-void Manager::ComponentChange(const EntityId id, const ComponentId component_id, bool loop_entity) {
+inline void Manager::ComponentChange(const EntityId id, const ComponentId component_id, bool loop_entity) {
 	// Cycle through each system
 	for (auto& system : systems_) {
 		if (system) {
 			if (system->DependsOn(component_id)) {
-				assert(IsValid(id) && "Cannot trigger component change event for invalid entity");
+				assert(IsValidEntity(id) && "Cannot trigger component change event for invalid entity");
 				// If an entity is a loop entity (from system 'entites') do not invalidate the cache as the range-based for-loop iterators will be invalidated and this will lead to undefined behavior.
 				if (loop_entity) {
 					system->SetCacheRefreshRequired(true);
@@ -899,7 +893,7 @@ void Manager::ComponentChange(const EntityId id, const ComponentId component_id,
 	}
 }
 template <typename T>
-void Manager::AddSystem() {
+inline void Manager::AddSystem() {
 	static_assert(std::is_base_of_v<BaseSystem, T>, "Cannot add a system to the manager which does not derive from ecs::System");
 	SystemId system_id = internal::GetSystemId<T>();
 	if (system_id >= systems_.size()) {
@@ -910,11 +904,12 @@ void Manager::AddSystem() {
 	system->Init(this);
 }
 template <typename T>
-void Manager::Update() {
+inline void Manager::Update() {
 	static_assert(std::is_base_of_v<BaseSystem, T>, "Cannot update a system which does not derive from ecs::System");
 	SystemId system_id = internal::GetSystemId<T>();
-	assert(IsValid(system_id) && "Cannot update a system which does not exist in manager");
+	assert(IsValidSystem(system_id) && "Cannot update a system which does not exist in manager");
 	auto& system = systems_[system_id];
+	assert(system && "Invalid system pointer, check system creation");
 	if (system->GetCacheRefreshRequired()) {
 		system->ResetCache();
 	}
@@ -924,7 +919,7 @@ void Manager::Update() {
 	}
 }
 template <typename ...Cs>
-void System<Cs...>::ResetCache() {
+inline void System<Cs...>::ResetCache() {
 	entities = manager_->GetComponentTuple<Cs...>();
 	SetCacheRefreshRequired(false);
 	/*
