@@ -46,7 +46,8 @@ my_manager.ForEachEntity([] (auto entity_handle) {
 ```
 Or if specific components are required, by populating the template parameter list of ForEach.
 ```c++
-// The lambda parameters go as follows, first the entity handle (ecs::Entity) passed by value as explained above, and all the remaining parameters should be references to the components in the order of the template parameter list. 
+// The lambda parameters go as follows, first the entity handle (ecs::Entity) passed by value as explained above,
+// then all the remaining parameters should be references to the components in the order of the template parameter list. 
 my_manager.ForEach<HumanComponent, OtherComponent>([] (auto entity_handle, auto& human_component, auto& other_component) {
     // ... Do stuff with entity handles / components here ...
 });
