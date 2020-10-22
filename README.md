@@ -2,7 +2,7 @@
 
 ## Introduction
 This library aims to be as cache-friendly as possible while also supporting runtime addition of new component types. This is achieved by storing all components contiguously in memory in the form of void pointers which are then cast to specific components when required. As far as this approach goes, while it is not type safe, the implementation gets around this by maintaining an indexing table of components with unique type ids for each entity which prevents retrieval / access of invalid component types. 
-From a few non-scientific tests for cached looping of components I have managed to achieve a comparative speed of 95% of skypjack's extremely impressive [enTT](https://github.com/skypjack/entt) library, used in Minecraft. I'll catch up eventually ;), after all this is my first library.
+From a few head-to-head tests for cached looping of components I have managed to achieve a comparative speed of 95% of skypjack's extremely impressive [enTT](https://github.com/skypjack/entt) library, used in Minecraft. I'll catch up eventually ;), after all this is my first library.
 
 
 ## Manager
@@ -140,7 +140,8 @@ ecs::System contains a cached variable called 'entities' which is a vector of tu
 ```c++
 struct MySystem : public ecs::System<HumanComponent, OtherComponent> {
     void Update() {
-        // Names of the structured binding variables can be anything, but the order always matches the template parameter list with an entity handle always as the first element.
+        // Names of the structured binding variables can be anything.
+        // The order must always start with an entity handle, followed by template parameters in the same order.
         for (auto [entity_handle, human_component, other_component] : entities) {
         
             // ... System logic here ....
@@ -159,7 +160,7 @@ If components are removed from an entity within the loop, the cache will be upda
 
 Systems can be registered with the manager as follows.
 ```c++
-struct MySystem : public ecs::System<HumanComponent, OtherComponent> { ... } 
+struct MySystem : public ecs::System<HumanComponent, OtherComponent> { ... };
 
 ecs::Manager my_manager;
 
@@ -211,7 +212,9 @@ my_manager.DestroyEntities();
 my_manager.DestroyEntitiesWith<HumanComponent, OtherComponent>();
 my_manager.DestroyEntitiesWithout<HumanComponent, OtherComponent>();
 
-// This returns a vector of tuples where the first tuple element is the entity handle and the rest are references to the components in the order of the template parameter list. This is equivalent to to how 'entities' is used in Systems.
+// GetComponentTuple returns a vector of tuples where the first tuple element is the entity handle.
+// The rest are references to the components in the order of the template parameter list.
+// This is equivalent to to how 'entities' is used in Systems.
 auto vector_of_tuples = my_manager.GetComponentTuple<HumanComponent, OtherComponent>();
 // And can be cycled through easily using a structured binding as before.
 for (auto [entity_handle, human_component, other_component] : vectors_of_tuples) {
