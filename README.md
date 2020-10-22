@@ -1,9 +1,7 @@
 # C++ Single-Header Entity Component System Library
 
 ## Introduction
-This library aims to be as cache-friendly as possible while also supporting runtime addition of new component types. This is achieved by storing all components contiguously in memory in the form of void pointers which are then cast to specific components when required. As far as this approach goes, while it is not type safe, the implementation gets around this by maintaining an indexing table of components with unique type ids for each entity which prevents retrieval / access of invalid component types. 
-From a few head-to-head tests for cached looping of components I have managed to achieve a comparative speed of 95% of skypjack's extremely impressive [enTT](https://github.com/skypjack/entt) library, used in Minecraft. I'll catch up eventually ;), after all this is my first library.
-
+This library aims to be as cache-friendly as possible while also supporting runtime addition of new component types. This is achieved by storing all components contiguously in memory in the form of void pointers which are then cast to specific components when required. As far as this approach goes, while it is not type safe, the implementation gets around this by maintaining an indexing table of components with unique type ids for each entity which prevents retrieval / access of invalid component types.
 
 ## Manager
 
