@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib> // std::size_t
 #include <vector> // dynamic storage container for components / entities
 #include <array> // fixed size container for component id caching during processes which call HasComponent and GetComponent
 #include <cassert> // debug assertions
@@ -7,6 +8,7 @@
 #include <deque> // fast pop_front for free entity list
 #include <iostream> // std::err for exception handling
 #include <tuple> // tuples for storing different types of components in cached entity vectors
+#include <functional> // std::hash for hashing
 
 namespace ecs {
 
@@ -84,7 +86,7 @@ public:
 			// Free component pool memory block
 			try {
 				assert(pool_ != nullptr && "Cannot free invalid component pool pointer");
-				std::free(static_cast<void*>(pool_));
+				free(static_cast<void*>(pool_));
 			} catch (std::exception& e) {
 				// Throw exception if component pool memory could not be freed. For example, if the component pool destructor is entered for a pool in an invalid state, such as after vector emplace induced move operations).
 				std::cerr << "Cannot free memory for a component pool in an invalid state: " << e.what() << std::endl;
@@ -185,7 +187,7 @@ private:
 		capacity_ = starting_capacity;
 		void* memory = nullptr;
 		try {
-			memory = std::malloc(capacity_);
+			memory = malloc(capacity_);
 		} catch (std::exception& e) {
 			// Could not allocate enough memory for component pool (malloc failed).
 			std::cerr << e.what() << std::endl;
@@ -201,7 +203,7 @@ private:
 			capacity_ = new_capacity * 2; // Double the capacity.
 			void* memory = nullptr;
 			try {
-				memory = std::realloc(pool_, capacity_);
+				memory = realloc(pool_, capacity_);
 			} catch (std::exception& e) {
 				// Could not reallocate enough memory for component pool (realloc failed).
 				std::cerr << e.what() << std::endl;
@@ -292,13 +294,31 @@ class Manager {
 public:
 	// Important: Initialize an invalid 0th index pool index in entities_ (null entity's index).
 	Manager() : entities_{ internal::EntityData{} }, id_{ ++ManagerCount() } {}
+	// Invalidate manager id, reset entity count, and call destructors on everything.
 	~Manager() {
 		id_ = internal::null_manager_id;
 		entity_count_ = 0;
-		entities_.clear();
-		// Free component pools and call destructors on everything
-		pools_.clear();
-		systems_.clear();
+		entities_.~vector();
+		pools_.~vector();
+		systems_.~vector();
+		free_entity_ids.~deque();
+	}
+	// Destroy all entities in the manager.
+	void Clear() {
+		entity_count_ = 0;
+		// Keep the first 'null' entity.
+		entities_.resize(1);
+		entities_.shrink_to_fit();
+		pools_.resize(0);
+		pools_.shrink_to_fit();
+		free_entity_ids.resize(0);
+		free_entity_ids.shrink_to_fit();
+		// Let systems know their caches are invalid.
+		for (auto& system : systems_) {
+			if (system) {
+				system->SetCacheRefreshRequired(true);
+			}
+		}
 	}
 	// Managers should not be copied.
 	Manager(const Manager&) = delete;
@@ -336,11 +356,36 @@ public:
 	// Populates the lambda function's parameter list with a handle to the current entity and a reference to each component (in order of template argument types).
 	template <typename ...Ts, typename T>
 	void ForEach(T&& function);
+	// Return the number of entities which are currently alive in the manager.
+	std::size_t GetEntityCount();
 	// Retrieve a vector of handles to each entity in the manager.
 	std::vector<Entity> GetEntities();
 	// Retrieve a vector of handles to each entity in the manager which has all of the given components.
 	template <typename ...Ts>
 	std::vector<Entity> GetEntitiesWith();
+	// Retrieve a vector of handles to each entity in the manager which does not have all of the given components.
+	template <typename ...Ts>
+	std::vector<Entity> GetEntitiesWithout();
+	// Destroy all entities in the manager.
+	void DestroyEntities() {
+		Clear();
+	}
+	// Destroy entities which have all of the given components.
+	template <typename ...Ts>
+	void DestroyEntitiesWith() {
+		auto entities = GetEntitiesWith<Ts...>();
+		for (auto entity : entities) {
+			entity.Destroy();
+		}
+	}
+	// Destroy entities which do not have all of the given components.
+	template <typename ...Ts>
+	void DestroyEntitiesWithout() {
+		auto entities = GetEntitiesWithout<Ts...>();
+		for (auto entity : entities) {
+			entity.Destroy();
+		}
+	}
 	// Returns a vector of tuples where the first element is an entity and the rest are the requested components, only retrieves entities which have each component
 	template <typename ...Ts>
 	std::vector<std::tuple<Entity, Ts&...>> GetComponentTuple();
@@ -435,7 +480,6 @@ private:
 		assert(pool.IsValid() && "Could not find or create a valid component pool for the component");
 		return pool;
 	}
-
 	// Check if a system id exists in the manager.
 	bool IsValidSystem(const SystemId id) const {
 		return id < systems_.size() && systems_[id] != nullptr;
@@ -547,7 +591,9 @@ private:
 	// Double the entity id vector if capacity is reached.
 	void GrowEntitiesIfNeeded(const EntityId id) {
 		if (id >= entities_.size()) {
-			entities_.resize(entities_.capacity() * 2);
+			auto capacity = entities_.capacity() * 2;
+			assert(capacity != 0 && "Capacity is 0, cannot double size of entities_ vector");
+			entities_.resize(capacity);
 		}
 	}
 	// Total entity count (dead / invalid and alive).
@@ -730,8 +776,8 @@ public:
 
 	// Entity comparison operators, the duplication allows avoiding implicit conversion of ecs::null into an entity
 
-	friend inline bool operator==(const Entity& lhs, const Entity& rhs) {
-		return lhs.manager_ == rhs.manager_ && lhs.id_ == rhs.id_ && lhs.version_ == rhs.version_;
+	inline bool operator==(const Entity& other) const {
+		return manager_ == other.manager_ && id_ == other.id_ && version_ == other.version_;
 	}
 	friend inline bool operator==(const Entity& lhs, const EntityId& rhs) {
 		return lhs.id_ == rhs;
@@ -755,6 +801,12 @@ private:
 	bool loop_entity_;
 };
 
+struct EntityComparator {
+	bool operator()(const Entity& a, const Entity& b) const {
+		return a.GetId() < b.GetId();
+	}
+};
+
 inline Entity Manager::CreateEntity() {
 	EntityId id = null;
 	if (free_entity_ids.size() > 0) { // Pick id from free list before trying to increment entity counter.
@@ -765,11 +817,22 @@ inline Entity Manager::CreateEntity() {
 	}
 	assert(id != null && "Could not create entity due to lack of free entity ids");
 	GrowEntitiesIfNeeded(id);
+	assert(id < entities_.size() && "Entity id outside of range of entities vector");
 	entities_[id].alive = true;
 	return Entity{ id, ++entities_[id].version, this };
 }
 inline void Manager::DestroyEntity(Entity entity) {
 	DestroyEntity(entity.id_, entity.version_, entity.loop_entity_);
+}
+inline std::size_t Manager::GetEntityCount() {
+	std::size_t entities = 0;
+	for (EntityId id = internal::first_valid_entity_id; id <= entity_count_; ++id) {
+		auto& entity_data = entities_[id];
+		if (entity_data.alive) {
+			entities += 1;
+		}
+	}
+	return entities;
 }
 inline std::vector<Entity> Manager::GetEntities() {
 	return GetEntitiesWith<>();
@@ -785,6 +848,23 @@ inline std::vector<Entity> Manager::GetEntitiesWith() {
 		auto& entity_data = entities_[id];
 		if (HasComponents(id, component_ids) && entity_data.alive) {
 			// If entity's components match the required ones and it is alive, add its handle to the vector.
+			entities.emplace_back(id, entity_data.version, this);
+		}
+	}
+	entities.shrink_to_fit();
+	return entities;
+}
+template <typename ...Ts>
+inline std::vector<Entity> Manager::GetEntitiesWithout() {
+	std::vector<Entity> entities;
+	entities.reserve(entity_count_);
+	// Store all the component ids in an array so they don't have to be fetched in every loop cycle.
+	std::array<ComponentId, sizeof...(Ts)> component_ids = { internal::GetComponentId<Ts>()... };
+	// Cycle through all manager entities.
+	for (EntityId id = internal::first_valid_entity_id; id <= entity_count_; ++id) {
+		auto& entity_data = entities_[id];
+		if (!HasComponents(id, component_ids) && entity_data.alive) {
+			// If entity's components DO NOT MATCH the required ones and it is alive, add its handle to the vector.
 			entities.emplace_back(id, entity_data.version, this);
 		}
 	}
@@ -876,18 +956,12 @@ inline bool Manager::IsAlive(Entity entity) const {
 	return IsAlive(entity.id_, entity.version_);
 }
 inline void Manager::ComponentChange(const EntityId id, const ComponentId component_id, bool loop_entity) {
-	// Cycle through each system
 	for (auto& system : systems_) {
 		if (system) {
 			if (system->DependsOn(component_id)) {
 				assert(IsValidEntity(id) && "Cannot trigger component change event for invalid entity");
-				// If an entity is a loop entity (from system 'entites') do not invalidate the cache as the range-based for-loop iterators will be invalidated and this will lead to undefined behavior.
-				if (loop_entity) {
-					system->SetCacheRefreshRequired(true);
-				} else {
-					system->ResetCache();
-				}
-				// If a system requires the given component, call its entity changed method ('event')
+				// Apparently ignore this comment... // If an entity is a loop entity (from system 'entites') do not invalidate the cache as the range-based for-loop iterators will be invalidated and this will lead to undefined behavior.
+				system->SetCacheRefreshRequired(true);
 			}
 		}
 	}
@@ -909,7 +983,7 @@ inline void Manager::Update() {
 	SystemId system_id = internal::GetSystemId<T>();
 	assert(IsValidSystem(system_id) && "Cannot update a system which does not exist in manager");
 	auto& system = systems_[system_id];
-	assert(system && "Invalid system pointer, check system creation");
+	assert(system && system.get() != nullptr && "Invalid system pointer, check system creation");
 	if (system->GetCacheRefreshRequired()) {
 		system->ResetCache();
 	}
@@ -934,3 +1008,24 @@ inline void System<Cs...>::ResetCache() {
 }
 
 } // namespace ecs
+
+namespace std {
+
+// Custom hashing function for ecs::Entity class allows for use of unordered maps with entities as keys
+template <>
+struct hash<ecs::Entity> {
+	std::size_t operator()(const ecs::Entity& k) const {
+		using std::size_t;
+		using std::hash;
+
+		// Compute individual hash values for first,
+		// second and third and combine them using XOR
+		// and bit shifting:
+
+		return ((hash<ecs::EntityId>()(k.GetId())
+				 ^ (hash<ecs::EntityVersion>()(k.GetVersion()) << 1)) >> 1)
+			^ (hash<ecs::Manager*>()(k.GetManager()) << 1);
+	}
+};
+
+} // namespace std
