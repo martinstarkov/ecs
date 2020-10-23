@@ -182,6 +182,12 @@ my_manager.RemoveSystem<MySystem>();
 
 my_manager.Update<MySystem>(); // debug assertion called, system has not been added to the manager.
 ```
+In order to get around this one may use `HasSystem<>()`.
+```c++
+if (my_manager.HasSystem<MySystem>()) {
+    my_manager.Update<MySystem>();
+}
+```
 
 Additionally, one may be interested in accessing the parent manager from within the system class (perhaps to create additional entities). This can be done via the inherited `GetManager()` function which returns a reference to the parent manager.
 ```c++
