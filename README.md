@@ -41,13 +41,13 @@ auto my_invalid_entity = ecs::null;
 Entity validity is elaborated upon in the end of this subsection.
 
 Cycling through multiple entities without the use of systems can be done via the `ForEachEntity(lambda)` manager method, passing it a lambda function.
-The lambda parameter should be an entity handle (`ecs::Entity`) passed by value as it is created directly into the parameter list.
+The lambda's parameter should be an entity handle (`ecs::Entity`) passed by value as it is created directly into the parameter list.
 ```c++
 my_manager.ForEachEntity([] (auto entity_handle) {
     // ... Do stuff with entities here ...
 });
 ```
-Or if specific components are required, by populating the template parameter list of `ForEach<>(lambda)`. The lambda parameters should start with the entity handle as explained above and followed by references to the components in the same order as the template parameter list.
+Or if specific components are required, by populating the template parameter list of `ForEach<>(lambda)`. The lambda's parameters should start with the entity handle as explained above and followed by references to the components in the same order as the template parameter list.
 ```c++
 my_manager.ForEach<HumanComponent, OtherComponent>([] (auto entity_handle, auto& human_component, auto& other_component) {
     // ... Do stuff with entities / components here ...
@@ -60,12 +60,12 @@ Additionally, entity handles contain some properties / functions which may be us
 - `GetId()` returns the unique entity id. Importantly, the id should not be used for mapping of any kind as ids are reused upon destruction and creation of new entities.
 - `GetVersion()` returns the version number of the entity, i.e. how many times the entity id has been reused after destruction.
 - `GetManager()` returns a pointer to the parent manager, or nullptr if the entity is `ecs::null`.
-- `IsAlive()` and `IsValid()` return bools indicating whether or not the entity is alive (or destroyed) and valid (not null), respectively. 
+- `IsAlive()` and `IsValid()` return bools indicating whether or not the entity is alive (or destroyed) and valid (or ecs::null), respectively. 
 
 
 ## Components
 
-Components can be defined without inheriting from a base class. Due to runtime addition support, the manager does not have to be notified of new component additions in compile time.
+Components can be defined without inheriting from a base class. Due to runtime addition support, the manager does not need to be notified of new component additions in compile time.
 Every component requires a valid constructor.
 ```c++
 struct HumanComponent {
@@ -76,7 +76,9 @@ struct HumanComponent {
 ```
 
 The user can interact with an entity's components through the entity handle.
-`AddComponent<>(constructor_args...)` requires you to pass the component type as a template parameter and the constructor arguments as parameters. If the entity already contains the component type, it will be replaced. A reference to the newly created component is returned.
+
+`AddComponent<>(constructor_args...)` requires you to pass the component type as a template parameter and the constructor arguments as parameters. If the entity already contains the component type, it will be replaced.
+A reference to the newly created component is returned.
 ```c++
 auto entity1 = my_manager.CreateEntity();
 
@@ -134,7 +136,8 @@ auto& human_component = entity1.ReplaceComponent<HumanComponent>(23, 176.3);
 ## Systems
 
 Systems cache entities with matching components. When declaring a system, one must inherit from the templated `ecs::System<>` base class and pass the components which each entity in the system must contain.
-The system class provides a virtual `Update()` function which can be overloaded and called later via the manager.
+The system class provides a virtual `Update()` function which can be overridden and called later via the manager.
+
 `ecs::System` contains a cached variable called `entities` which is a vector of tuples containing an entity handle followed by references to the required components.
 The `entities` vector can be looped through using structured bindings and automatically adds / removes relevant entities when their component makeup changes.
 ```c++
@@ -155,7 +158,8 @@ struct MySystem : public ecs::System<HumanComponent, OtherComponent> {
     }
 }
 ```
-If components are removed from an entity during the for-loop, the cache will be update accordingly after the `Update()` function has finished. This means that entities changed during the loop might still exist in the `entities` vector until the end of the `Update()` call. As mentioned previously, the component references in the `entities` tuples will remain valid and point to the component memory until that memory is overriden by a component addition. This is a design choice.
+If components are removed from an entity during the for-loop, the cache will be update accordingly after the `Update()` function has finished. This means that entities changed during the loop might still exist in the `entities` vector until the end of the `Update()` call.
+As mentioned previously, the component references in the `entities` vector will remain valid and point to the component memory (even after a component is removed) until that memory is overriden by a new component addition. This is a design choice.
 
 Systems can be registered with the manager as follows.
 ```c++
@@ -186,7 +190,7 @@ struct MySystem : public ecs::System<HumanComponent, OtherComponent> {
 
 ## Useful manager utility functions
 
-The manager supports a host of useful functions for retrieving specific entities.
+The manager supports a host of useful functions for manipulating specific entities.
 
 One may wish to access all live entities in the manager.
 ```c++
@@ -212,7 +216,7 @@ Or identically.
 ```c++
 my_manager.DestroyEntities();
 ```
-For more specific destruction, similar to retrieval the below functions are provided.
+For more specific destruction, use.
 ```c++
 my_manager.DestroyEntitiesWith<HumanComponent, OtherComponent>();
 my_manager.DestroyEntitiesWithout<HumanComponent, OtherComponent>();
