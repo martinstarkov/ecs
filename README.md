@@ -60,7 +60,7 @@ Additionally, entity handles contain some properties / functions which may be us
 - `GetId()` returns the unique entity id. Importantly, the id should not be used for mapping of any kind as ids are reused upon destruction and creation of new entities.
 - `GetVersion()` returns the version number of the entity, i.e. how many times the entity id has been reused after destruction.
 - `GetManager()` returns a pointer to the parent manager, or nullptr if the entity is `ecs::null`.
-- `IsAlive()` and `IsValid()` return bools indicating whether or not the entity is alive (or destroyed) and valid (or ecs::null), respectively. 
+- `IsAlive()` and `IsValid()` return bools indicating whether or not the entity is alive (or destroyed) and valid (or `ecs::null`), respectively. 
 
 
 ## Components
