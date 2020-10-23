@@ -9,6 +9,9 @@
 #include <iostream> // std::err for exception handling
 #include <tuple> // tuples for storing different types of components in cached entity vectors
 #include <functional> // std::hash for hashing
+#include <type_traits> // std::is_base_of_v for system type checks
+
+// TODO: Add RemoveSystem function to manager.
 
 namespace ecs {
 
@@ -79,7 +82,7 @@ public:
 		if (pool_ != nullptr) { // Free memory block if destructor was not called by move operation (which sets pool_ to nullptr).
 			assert(destructor_ != nullptr && "Cannot call invalid destructor on the components in a component pool");
 			for (auto offset : component_offsets_) {
-				if (offset != INVALID_OFFSET) { // Ignore nonexistent components.
+				if (offset != INVALID_OFFSET && destructor_) { // Ignore nonexistent components.
 					destructor_(static_cast<void*>(pool_ + offset)); // Call destructor on the component's memory offset from the beginning of the pool.
 				}
 			}
@@ -342,9 +345,15 @@ public:
 	Entity CreateEntity();
 	// Remove an entity from the manager.
 	void DestroyEntity(Entity entity);
-	// Add a system to the manager.
+	// Add a system to the manager, it is exists it will be replaced.
 	template <typename T>
 	void AddSystem();
+	// Remove a system from the manager.
+	template <typename T>
+	void RemoveSystem();
+	// Returns whether or not the manager has a specific system.
+	template <typename T>
+	bool HasSystem();
 	// Update a specific system in the manager.
 	template <typename T>
 	void Update();
@@ -482,7 +491,7 @@ private:
 	}
 	// Check if a system id exists in the manager.
 	bool IsValidSystem(const SystemId id) const {
-		return id < systems_.size() && systems_[id] != nullptr;
+		return id < systems_.size() && systems_[id];
 	}
 	// Check if an entity id exists in the manager.
 	bool IsValidEntity(const EntityId id) const {
@@ -639,7 +648,12 @@ protected:
 		assert(manager_ != nullptr && "Cannot get manager as system has not been properly initialized");
 		return *manager_;
 	}
-	virtual ~System() override {}
+	// Make sure to also call this destructor when potentially overriding it.
+	virtual ~System() override {
+		entities.~vector();
+		component_bitset_.~vector();
+		manager_ = nullptr;
+	}
 private:
 	// Add manager and call initial cache reset.
 	virtual void Init(Manager* manager) override final {
@@ -973,9 +987,24 @@ inline void Manager::AddSystem() {
 	if (system_id >= systems_.size()) {
 		systems_.resize(system_id + 1);
 	}
+	RemoveSystem<T>();
 	auto& system = systems_[system_id];
 	system = std::make_unique<T>();
 	system->Init(this);
+}
+template <typename T>
+inline bool Manager::HasSystem() {
+	return std::is_base_of_v<BaseSystem, T> && IsValidSystem(internal::GetSystemId<T>());
+}
+template <typename T>
+inline void Manager::RemoveSystem() {
+	if (HasSystem<T>()) {
+		SystemId system_id = internal::GetSystemId<T>();
+		auto& system = systems_[system_id];
+		// Call system destructor and set the system's unique pointer to nullptr.
+		system.reset();
+		system = nullptr;
+	}
 }
 template <typename T>
 inline void Manager::Update() {
