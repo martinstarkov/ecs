@@ -66,6 +66,7 @@ Additionally, entity handles contain some properties / functions which may be us
 ## Components
 
 Components can be defined without inheriting from a base class. Due to runtime addition support, the manager does not need to be notified of new component additions in compile time.
+
 Every component requires a valid constructor.
 ```c++
 struct HumanComponent {
@@ -175,7 +176,12 @@ my_manager.Update<MySystem>();
 ```
 inside your game loop / wherever the manager exists.
 
-[WIP] TODO: In the future a RemoveSystem function should be added for a system to become invalid.
+Systems can be removed from the manager using `RemoveSystem<>()` which will prevent their `Update<>()` call from passing.
+```c++
+my_manager.RemoveSystem<MySystem>();
+
+my_manager.Update<MySystem>(); // debug assertion called, system has not been added to the manager.
+```
 
 Additionally, one may be interested in accessing the parent manager from within the system class (perhaps to create additional entities). This can be done via the inherited `GetManager()` function which returns a reference to the parent manager.
 ```c++
