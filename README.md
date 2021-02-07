@@ -36,7 +36,8 @@ Important note: Destroying an entity effectively invalidates all handles to that
 
 A null entity can be created using `ecs::null`, this may be useful if attempting to find an entity which matches a specific condition and returning an invalid entity if no such entity is found.
 ```c++
-auto my_invalid_entity = ecs::null;
+// Note: that ecs::null is technically an id, therefore the auto keyword cannot be used if you wish to set your null entity to something else later.
+ecs::Entity my_invalid_entity = ecs::null;
 ```
 Entity validity is elaborated upon in the end of this subsection.
 
