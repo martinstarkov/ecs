@@ -143,10 +143,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
+    <ClInclude Include="ECS.h" />
+    <ClInclude Include="tests\common.h" />
+    <ClInclude Include="tests\ManagerConstructors.h" />
+    <ClInclude Include="tests\OldTests.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ECS.h" />
+    <ClCompile Include="tests\run_tests.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
