@@ -36,6 +36,8 @@ SOFTWARE.
 #include <tuple> // tuples for storing different types of components in cached entity vectors
 #include <functional> // std::hash for hashing
 #include <type_traits> // std::is_base_of_v, std::enable_if, etc
+#include <utility> // std::move, std::exchange, etc
+#include <algorithm> // std::iter_swap, etc
 
 // TODO: Check that GetDeadEntityCount and GetEntityCount functions work as intended.
 // TODO: Check that RemoveComponents functions work as intended.
@@ -44,6 +46,7 @@ SOFTWARE.
 // TODO: Write tests for is_constructible.
 // TODO: Write tests for ForEach.
 // TODO: Write tests for DestroyEntities.
+// TODO: Add const& version of GetComponents and express non-const version in terms of this.
 
 // BIG TODO: Consider switching to mandatory refresh with deleted entities existing until end of update loop.
 
@@ -63,6 +66,25 @@ using Offset = std::int64_t;
 // Null entity for comparison operations
 constexpr EntityId null = 0;
 
+namespace utility {
+
+template <typename Component>
+inline void Destroy(void* component_address) {
+	static_cast<Component*>(component_address)->~T();
+}
+
+template <typename Component>
+inline Component Copy(void* component_address) {
+	return *static_cast<Component*>(component_address);
+}
+
+template <typename Component>
+inline Component&& Move(void* component_address) {
+	return std::move(*static_cast<Component*>(component_address));
+}
+
+}
+
 namespace internal {
 
 // First valid entity for internal for-loops.
@@ -72,225 +94,111 @@ constexpr EntityId first_valid_entity_id = null + 1;
 constexpr EntityVersion null_version = 0;
 // Invalid manager id.
 constexpr ManagerId null_manager_id = -1;
-// Indicates a nonexistent component in a pool.
-constexpr Offset INVALID_OFFSET = -1;
 
-// Store component destructor pointers for freeing pool memory.
-template <typename T>
-static void DestroyComponent(void* component_address) {
-	static_cast<T*>(component_address)->~T();
-}
+using ComponentIndex = std::int64_t;
+
+constexpr ComponentIndex INVALID_INDEX = -1;
+
 // Destructor pointer alias.
-using Destructor = void (*)(void*);
+using ComponentFunction = void (*)(void*);
 
-// Useful type traits.
+// Address, destructor, copy, move.
+using GeneralComponent = std::tuple<void*, ComponentFunction, ComponentFunction, ComponentFunction>;
 
-template <typename Class, typename ...Arguments>
-using is_constructible = std::enable_if_t<std::is_constructible_v<Class, Arguments...>, bool>;
+class BasePool {
+public:
+	virtual void Destroy() = 0;
+	virtual BasePool* Clone() = 0;
+private:
+};
 
 // Object which allows for contiguous storage of components of a single type (with runtime addition!).
-class ComponentPool {
+template <typename Component>
+class Pool : public BasePool {
 public:
-	// Since the manager stores component pools by their component's id (for fast random access), a null component pool must exist to fill gaps inside the sparse vector. This, because one manager could have a component pool added which is out of range due to it existing in another manager (component ids are shared among managers).
-	ComponentPool() = default;
-	// Non-empty pool constructor.
-	ComponentPool(std::size_t component_size, Destructor destructor) : component_size_{ component_size }, destructor_{ destructor } {
-		// Allocate enough memory for one component to begin with (not two because some components such as 'Player' might only ever appear once).
-		AllocatePool(component_size);
+
+	Pool() = default;
+	Pool(const std::vector<ComponentIndex>& sparse_set, const std::vector<Component>& dense_set) : sparse_set_{ sparse_set }, dense_set_{ dense_set } {}
+	~Pool() = default;
+	Pool(const Pool&) = default;
+	Pool& operator=(const Pool&) = default;
+	Pool(Pool&&) = default;
+	Pool& operator=(Pool&&) = default;
+
+	virtual void Destroy() override final {
+		dense_set_.clear();
+		sparse_set_.clear();
 	}
-	// Free memory block and call destructors on every component.
-	~ComponentPool() {
-		if (pool_ != nullptr) { // Free memory block if destructor was not called by move operation (which sets pool_ to nullptr).
-			assert(destructor_ != nullptr && "Cannot call invalid destructor on the components in a component pool");
-			for (auto offset : component_offsets_) {
-				if (offset != INVALID_OFFSET && destructor_) { // Ignore nonexistent components.
-					destructor_(static_cast<void*>(pool_ + offset)); // Call destructor on the component's memory offset from the beginning of the pool.
+
+	virtual BasePool* Clone() override final {
+		return new Pool<Component>(sparse_set_, dense_set_);
+	}
+
+	template <typename ...TArgs>
+	Component& Add(const EntityId id, TArgs&&... args) {
+		if (id < sparse_set_.size()) {
+			auto dense_index = sparse_set_[id];
+			if (static_cast<std::size_t>(dense_index) < dense_set_.size()) {
+				auto& component = dense_set_[dense_index];
+				component = Component(std::forward<TArgs>(args)...);
+				return component;
+			}
+		} else {
+			sparse_set_.resize(id + 1, INVALID_INDEX);
+		}
+		sparse_set_[id] = dense_set_.size();
+		return dense_set_.emplace_back(std::forward<TArgs>(args)...);
+	}
+
+	bool Remove(const EntityId id) {
+		if (id < sparse_set_.size()) {
+			auto& dense_index = sparse_set_[id];
+			if (static_cast<std::size_t>(dense_index) < dense_set_.size() && dense_index != INVALID_INDEX) {
+				if (dense_set_.size() > 1) {
+					std::iter_swap(dense_set_.begin() + dense_index, dense_set_.end() - 1);
+					dense_set_.pop_back();
+				} else {
+					dense_set_.clear();
 				}
-			}
-			// Free component pool memory block
-			try {
-				assert(pool_ != nullptr && "Cannot free invalid component pool pointer");
-				free(static_cast<void*>(pool_));
-			} catch (std::exception& e) {
-				// Throw exception if component pool memory could not be freed. For example, if the component pool destructor is entered for a pool in an invalid state, such as after vector emplace induced move operations).
-				std::cerr << "Cannot free memory for a component pool in an invalid state: " << e.what() << std::endl;
-				abort();
-			}
-			// Invalidate pool state so destructor.
-			pool_ = nullptr;
-		}
-		// State invalidation (setting everything to 0) happens for both regular destructor usage and when a component pool is moved.
-		destructor_ = nullptr;
-		capacity_ = 0;
-		size_ = 0;
-		component_size_ = 0;
-		component_offsets_.clear();
-		free_offsets_.clear();
-	}
-	// Component pools should never be copied or reassigned.
-	ComponentPool(const ComponentPool&) = delete;
-	ComponentPool& operator=(const ComponentPool&) = delete;
-	// Move operator used for resizing a vector of component pools (in the manager class).
-	ComponentPool(ComponentPool&& obj) noexcept : pool_{ obj.pool_ }, destructor_{ obj.destructor_ }, capacity_{ obj.capacity_ }, size_{ obj.size_ }, component_size_{ obj.component_size_ }, component_offsets_{ std::move(obj.component_offsets_) }, free_offsets_{ std::move(free_offsets_) } {
-		// This allows the component pool destructor to be called without freeing or reallocating pool memory.
-		obj.pool_ = nullptr;
-	}
-	// Component pool move assignment is used when null pools are assigned a valid pool (upon addition of the first component of a unique type).
-	ComponentPool& operator=(ComponentPool&& obj) noexcept {
-		pool_ = obj.pool_;
-		destructor_ = obj.destructor_;
-		capacity_ = obj.capacity_;
-		size_ = obj.size_;
-		component_size_ = obj.component_size_;
-		component_offsets_ = std::move(obj.component_offsets_);
-		free_offsets_ = std::move(free_offsets_);
-		obj.pool_ = nullptr;
-		obj.destructor_ = nullptr;
-		obj.capacity_ = 0;
-		obj.size_ = 0;
-		obj.component_size_ = 0;
-		obj.component_offsets_.clear();
-		obj.free_offsets_.clear();
-		return *this;
-	}
-	// Add a new component address to the pool and return a void pointer to its location.
-	void* AddComponentAddress(const EntityId id) {
-		assert(IsValid() && "Cannot add component address to null pool");
-		assert(!HasComponentAddress(id) && "Cannot add new component address when it already exists in the component pool");
-		Offset component_offset = GetAvailableComponentOffset();
-		AddComponentOffset(id, component_offset);
-		assert(pool_ != nullptr && "Could not add component address to a null pool");
-		return static_cast<void*>(pool_ + component_offset);
-	}
-	// Call the component's destructor and remove its address from the component pool.
-	void RemoveComponentAddress(const EntityId id) {
-		if (IsValid() && id < component_offsets_.size()) { // Pools exists and entity id exists in indexing table.
-			auto& component_offset = component_offsets_[id];
-			if (component_offset != INVALID_OFFSET) { // The component exists in the pool.
-				assert(pool_ != nullptr && "Could not remove component address from a null pool");
-				void* component_address = static_cast<void*>(pool_ + component_offset);
-				// Destroy component at address.
-				destructor_(component_address);
-				// CONSIDER / TODO: Consider the implications of setting memory to zero in nested for loops, where component references could be invalidated after being set.
-				// Set removed component's memory address to 0 (freed later, in the component pool's destructor as the offset can be reused).
-				//std::memset(component_address, 0, component_size_);
-				// Recycle the component's memory address offset.
-				free_offsets_.emplace_back(component_offset);
-				// Invalidate component offset in the indexing table (entity no longer has the component).
-				component_offset = INVALID_OFFSET;
+				dense_index = INVALID_INDEX;
+				return true;
 			}
 		}
+		return false;
 	}
-	// Retrieve the memory location of a component, or nullptr if it does not exist
-	void* GetComponentAddress(const EntityId id) const {
-		if (IsValid() && id < component_offsets_.size()) { // Pool is valid and entity id exists in indexing table.
-			auto component_offset = component_offsets_[id];
-			if (component_offset != INVALID_OFFSET) { // The component exists in the pool.
-				assert(pool_ != nullptr && "Cannot get a component address from a null component pool");
-				return static_cast<void*>(pool_ + component_offset);
-			}
-		}
-		return nullptr;
+
+	inline const Component& Get(const EntityId id) const {
+		assert(id < sparse_set_.size());
+		auto dense_index = sparse_set_[id];
+		assert(dense_index != INVALID_INDEX);
+		assert(static_cast<std::size_t>(dense_index) < dense_set_.size());
+		return dense_set_[dense_index];
 	}
-	// Check if the component pool contains a valid component offset for a given entity id.
-	bool HasComponentAddress(const EntityId id) const {
-		return IsValid() && id < component_offsets_.size() && component_offsets_[id] != INVALID_OFFSET;
+
+	inline Component& Get(const EntityId id) {
+		return const_cast<Component&>(static_cast<const Pool&>(*this).Get(id));
 	}
-	// Determine whether or not the component pool is a null pool (used for non-existent components to maintain the sparse component pool holes).
-	bool IsValid() const {
-		return pool_ != nullptr;
-	}
-	// Returns a destructor to the pool's components, used for replacing components
-	Destructor GetDestructor() const {
-		return destructor_;
+
+	inline bool Has(const EntityId id) const {
+		return id < sparse_set_.size() && sparse_set_[id] != INVALID_INDEX;
 	}
 private:
-	// Initial pool memory allocation, should only called once in non-empty pool constructors.
-	void AllocatePool(const std::size_t starting_capacity) {
-		assert(size_ == 0 && capacity_ == 0 && pool_ == nullptr && "Cannot call initial memory allocation for occupied component pool");
-		capacity_ = starting_capacity;
-		void* memory = nullptr;
-		try {
-			memory = malloc(capacity_);
-		} catch (std::exception& e) {
-			// Could not allocate enough memory for component pool (malloc failed).
-			std::cerr << e.what() << std::endl;
-			throw;
-		}
-		assert(memory != nullptr && "Failed to allocate initial memory for component pool");
-		pool_ = static_cast<char*>(memory);
-	}
-	// Double the size of a pool if the given capacity exceeds the previous capacity.
-	void ReallocatePoolIfNeeded(const std::size_t new_capacity) {
-		if (new_capacity >= capacity_) {
-			assert(pool_ != nullptr && "Pool memory must be allocated before reallocation");
-			capacity_ = new_capacity * 2; // Double the capacity.
-			void* memory = nullptr;
-			try {
-				memory = realloc(pool_, capacity_);
-			} catch (std::exception& e) {
-				// Could not reallocate enough memory for component pool (realloc failed).
-				std::cerr << e.what() << std::endl;
-				throw;
-			}
-			assert(memory != nullptr && "Failed to reallocate memory for pool");
-			pool_ = static_cast<char*>(memory);
-		}
-	}
-	// Returns the first available component offset in the component pool.
-	Offset GetAvailableComponentOffset() {
-		auto next_free_offset = INVALID_OFFSET;
-		if (free_offsets_.size() > 0) {
-			// Use first free offset found in the pool.
-			next_free_offset = free_offsets_.front();
-			// Remove the offset from free offsets.
-			free_offsets_.pop_front();
-		} else {
-			// Use the end of the pool.
-			next_free_offset = size_;
-			size_ += component_size_;
-			// Expand the pool if necessary.
-			ReallocatePoolIfNeeded(size_);
-		}
-		assert(next_free_offset != INVALID_OFFSET && "Could not find a valid component offset from component pool");
-		return next_free_offset;
-	}
-	// Add an indexing table entry of the component's offset from the beginning of the component pool, indexed by entity id.
-	void AddComponentOffset(const EntityId id, const Offset component_offset) {
-		if (id >= component_offsets_.size()) { // if the entity id exceeds the indexing table's size, expand the indexing table
-			const std::size_t new_size = static_cast<std::size_t>(id) + 1;
-			component_offsets_.resize(new_size, INVALID_OFFSET);
-		}
-		component_offsets_[id] = component_offset;
-	}
-	// Pointer to the beginning of the component pool's memory block.
-	char* pool_{ nullptr };
-	// Pointer to a wrapper around a component's destructor function call (destructor pointers don't exist in c++).
-	Destructor destructor_{ nullptr };
-	// Byte capacity of the pool.
-	std::size_t capacity_{ 0 };
-	// Byte size of the pool.
-	std::size_t size_{ 0 };
-	// The size each component stored in the component pool.
-	std::size_t component_size_{ 0 };
-	// Indexing table where the index is an entity id, the corresponding offset is the entity's component's offset from the beginning of the pool memory block.
-	std::vector<Offset> component_offsets_;
-	// Deque because pop_front is available and iteration / random access are not required (since the first free offset is always used).
-	std::deque<Offset> free_offsets_;
+	std::vector<ComponentIndex> sparse_set_;
+	std::vector<Component> dense_set_;
 };
 
 // Holds the state of an entity id
 struct EntityData {
 	EntityData() = default;
 	~EntityData() = default;
-	EntityData& operator=(const EntityData&) = delete;
-	EntityData& operator=(EntityData&&) = delete;
-	EntityData(const EntityData& copy) noexcept : version{ copy.version }, alive{ copy.alive } {}
-	EntityData(EntityData&& obj) noexcept : version{ obj.version }, alive{ obj.alive } {
-		obj.version = null_version;
-		obj.alive = false;
-	}
+	EntityData(const EntityData&) = default;
+	EntityData& operator=(const EntityData&) = default;
+	EntityData(EntityData&&) = default;
+	EntityData& operator=(EntityData&&) = default;
 	// Internal 'version' counter which invalidates all previous handles to an entity when it is destroyed
+	friend inline bool operator==(const EntityData& lhs, const EntityData& rhs) {
+		return lhs.version == rhs.version && lhs.alive == rhs.alive;
+	}
 	EntityVersion version = null_version;
 	// Determines if the entity id is currently in use (or invalidated / free)
 	bool alive = false;
@@ -318,46 +226,85 @@ public:
 class Manager {
 public:
 	// Important: Initialize an invalid 0th index pool index in entities_ (null entity's index).
-	Manager() : entities_{ internal::EntityData{} }, id_{ ++ManagerCount() } {}
+	Manager() : id_{ ++ManagerCount() }, entities_{ {} } {}
 	// Invalidate manager id, reset entity count, and call destructors on everything.
-	~Manager() {
-		id_ = internal::null_manager_id;
-		entity_count_ = 0;
-		entities_.~vector();
-		pools_.~vector();
-		systems_.~vector();
-		free_entity_ids.~deque();
-	}
+	~Manager() = default;
 	// Clear the manager, this will destroy all entities and components in the memory of the manager.
 	void Clear() {
 		entity_count_ = 0;
-		// Keep the first 'null' entity.
+		// Keep the null entity.
 		entities_.resize(1);
 		entities_.shrink_to_fit();
-		pools_.resize(0);
+		pools_.clear();
 		pools_.shrink_to_fit();
-		free_entity_ids.resize(0);
-		free_entity_ids.shrink_to_fit();
+		free_entity_ids_.clear();
+		free_entity_ids_.shrink_to_fit();
 		// Let systems know their caches are invalid.
 		for (auto& system : systems_) {
-			if (system) {
+			if (system != nullptr) {
 				system->SetCacheRefreshRequired(true);
 			}
 		}
 	}
-	// Managers should not be copied.
+	// Manager copying disabled. Use Clone() if you wish to generate a manager with the same entity/component composition.
+
+	/**
+	 * @brief Manager copying disabled. Use Clone() instead if you wish to generate a manager with the same entity and component composition. 
+	 */
 	Manager(const Manager&) = delete;
 	Manager& operator=(const Manager&) = delete;
-	Manager(Manager&& obj) noexcept : id_{ obj.id_ }, entity_count_{ obj.entity_count_ }, entities_{ std::move(obj.entities_) }, pools_{ std::move(obj.pools_) } {}
-	Manager& operator=(Manager&& obj) = delete;
+	Manager(Manager&& move) noexcept : entity_count_{ move.entity_count_ }, id_{ move.id_ }, entities_{ std::exchange(move.entities_, {}) }, pools_{ std::exchange(move.pools_, {}) }, free_entity_ids_{ std::exchange(move.free_entity_ids_, {}) }, systems_{ std::exchange(move.systems_, {}) } {
+		move.entity_count_ = 0;
+		move.id_ = internal::null_manager_id;
+	}
+	Manager& operator=(Manager&& move) noexcept {
+		entities_.clear();
+		pools_.clear();
+		free_entity_ids_.clear();
+		systems_.clear();
 
-	// Manager comparison operators
+		entity_count_ = move.entity_count_;
+		id_ = move.id_;
+		entities_ = std::exchange(move.entities_, {});
+		pools_ = std::exchange(move.pools_, {});
+		free_entity_ids_ = std::exchange(move.free_entity_ids_, {});
+		systems_ = std::exchange(move.systems_, {});
 
+		move.entity_count_ = 0;
+		move.id_ = internal::null_manager_id;
+	}
+
+	Manager Clone() const {
+		ecs::Manager clone; 
+		// id_ already set to next available one inside default constructor.
+		clone.entity_count_ = entity_count_;
+		clone.entities_ = entities_;
+		clone.pools_ = pools_;
+		return clone;
+	}
+
+	/**
+	* @note Composition equivalence is not enough for equality.
+	*
+	* @return True if manager ids match, false otherwise.
+	*/
 	friend inline bool operator==(const Manager& lhs, const Manager& rhs) {
 		return lhs.id_ == rhs.id_;
 	}
+	/**
+	* @note Composition difference is not enough for inequality.
+	*
+	* @return True if manager ids do not match, false otherwise.
+	*/
 	friend inline bool operator!=(const Manager& lhs, const Manager& rhs) {
-		return lhs.id_ == rhs.id_;
+		return !operator==(lhs, rhs);
+	}
+
+	/**
+	* @return True if the other manager is composed of identical entities, false otherwise.
+	*/
+	inline bool Equivalent(const Manager& other) {
+		return entity_count_ == other.entity_count_ && entities_ == other.entities_ && pools_ == other.pools_;
 	}
 
 	friend class Entity;
@@ -365,8 +312,6 @@ public:
 	friend class System;
 	// Add a new entity to the manager and return a handle to it.
 	Entity CreateEntity();
-	// Remove an entity from the manager.
-	void DestroyEntity(Entity entity);
 	// Add a system to the manager, it is exists it will be replaced.
 	// Arguments are optional and are passed into system constructor.
 	template <typename T, typename ...TArgs>
@@ -382,16 +327,16 @@ public:
 	void Update();
 	// Cycle through every single entity in the manager.
 	// Populates the lambda function's parameter list with a handle to the current entity.
-	template <typename T>
-	void ForEachEntity(T&& function);
-	// Cycle through each entity in the manager which has all of the given components.
-	// Populates the lambda function's parameter list with a handle to the current entity and a reference to each component (in order of template argument types).
-	template <typename ...Ts, typename T>
-	void ForEach(T&& function);
+	//template <typename T>
+	//void ForEachEntity(T&& function);
+	//// Cycle through each entity in the manager which has all of the given components.
+	//// Populates the lambda function's parameter list with a handle to the current entity and a reference to each component (in order of template argument types).
+	//template <typename ...Ts, typename T>
+	//void ForEach(T&& function);
 	// Return the number of entities which are currently alive in the manager.
-	std::size_t GetEntityCount();
+	std::size_t GetEntityCount() const;
 	// Return the number of entities which are currently not alive in the manager.
-	std::size_t GetDeadEntityCount();
+	std::size_t GetDeadEntityCount() const;
 	// Retrieve a vector of handles to each entity in the manager.
 	std::vector<Entity> GetEntities();
 	// Retrieve a vector of handles to each entity in the manager which has all of the given components.
@@ -423,36 +368,6 @@ public:
 	// Returns a vector of tuples where the first element is an entity and the rest are the requested components, only retrieves entities which have each component
 	template <typename ...Ts>
 	std::vector<std::tuple<Entity, Ts&...>> GetComponentTuple();
-	// Add a component to an entity, returns a reference to the new component.
-	template <typename T, typename ...TArgs>
-	T& AddComponent(Entity entity, TArgs&&... constructor_args);
-	// Replace a component of an entity, returns a reference to the new component.
-	template <typename T, typename ...TArgs>
-	T& ReplaceComponent(Entity entity, TArgs&&... constructor_args);
-	// Remove a component from an entity.
-	template <typename T>
-	void RemoveComponent(Entity entity);
-	// Remove all components from an entity.
-	void RemoveComponents(Entity entity);
-	// Remove multiple components from an entity.
-	template <typename ...Ts>
-	void RemoveComponents(Entity entity);
-	// Returns a reference to a component.
-	// Will throw if retrieving a nonexistent component (surround with HasComponent if uncertain).
-	template <typename T>
-	T& GetComponent(const Entity entity) const;
-	// Returns a tuple of references to components.
-	// Will throw if retrieving a nonexistent component (surround with HasComponents if uncertain).
-	template <typename ...Ts>
-	std::tuple<Ts&...> GetComponents(const Entity entity) const;
-	// Returns whether or not entity has a specific component.
-	template <typename T>
-	bool HasComponent(const Entity entity) const;
-	// Returns whether or not entity has all listed components.
-	template <typename ...Ts>
-	bool HasComponents(const Entity entity) const;
-	// Returns whether an entity is alive.
-	bool IsAlive(const Entity entity) const;
 	// Return the manager's unique id. Can be useful for comparison purposes.
 	ManagerId GetId() const { return id_; }
 private:
@@ -463,56 +378,53 @@ private:
 	// Add entity id to deletion list but do not invalidate any handles.
 	void DestroyEntity(const EntityId id, const EntityVersion version, bool loop_entity) {
 		if (IsAlive(id, version)) {
-			RemoveComponents(id, loop_entity);
+			/*RemoveComponents(id, loop_entity);*/
+
+			// TODO: Remove components.
+
 			// Increment entity version, this will invalidate all entity handles with the previous version
 			assert(id < entities_.size() && "Could not increment dead entity id");
 			++entities_[id].version;
 			entities_[id].alive = false;
-			free_entity_ids.emplace_back(id);
+			free_entity_ids_.emplace_back(id);
 		}
 	}
-	// Call a lambda function and populate its parameter list with a reference to each requested component.
-	template <typename ...Ts, typename T, std::size_t... component_id>
-	void ForEachHelper(T&& function, const EntityId id, std::array<ComponentId, sizeof...(Ts)>& component_ids, std::index_sequence<component_id...>);
-	// Wrapper for creating an index sequence in order to access each element of the array of component ids.
-	template <typename ...Ts, typename T>
-	void ForEachInvoke(T&& function, const EntityId id, std::array<ComponentId, sizeof...(Ts)>& component_ids) {
-		ForEachHelper<Ts...>(std::forward<T>(function), id, component_ids, std::make_index_sequence<sizeof...(Ts)>{});
-	}
-	// Implementation of GetComponentTuple.
-	template <std::size_t COMPONENT_COUNT, typename ...Ts, std::size_t... Is>
-	void GetComponentTupleInvoke(std::vector<std::tuple<Entity, Ts&...>>& vector, const EntityId id, const EntityVersion version, const std::array<ComponentId, COMPONENT_COUNT>& component_ids, std::index_sequence<Is...>) {
-		std::array<void*, COMPONENT_COUNT> component_locations;
-		// Check if an entity has each component and if so, populate the component locations array.
-		for (std::size_t i = 0; i < component_ids.size(); ++i) {
-			auto component_location = GetComponentLocation(id, component_ids[i]);
-			if (component_location == nullptr) {
-				// Component does not exist, do not add entity / components to tuple, return.
-				return;
-			}
-			component_locations[i] = component_location;
-		}
-		// Expand and format the component locations array into a tuple and add it to the vector of tuples.
-		vector.emplace_back(Entity{ id, version, this, true }, (*static_cast<Ts*>(component_locations[Is]))...);
-	}
+	//// Call a lambda function and populate its parameter list with a reference to each requested component.
+	//template <typename ...Ts, typename T, std::size_t... component_id>
+	//void ForEachHelper(T&& function, const EntityId id, const std::array<ComponentId, sizeof...(Ts)>& component_ids, std::index_sequence<component_id...>);
+	//// Wrapper for creating an index sequence in order to access each element of the array of component ids.
+	//template <typename ...Ts, typename T>
+	//void ForEachInvoke(T&& function, const EntityId id, const std::array<ComponentId, sizeof...(Ts)>& component_ids) {
+	//	ForEachHelper<Ts...>(std::forward<T>(function), id, component_ids, std::make_index_sequence<sizeof...(Ts)>{});
+	//}
+	//// Implementation of GetComponentTuple.
+	//template <std::size_t COMPONENT_COUNT, typename ...Ts, std::size_t... Is>
+	//void GetComponentTupleInvoke(std::vector<std::tuple<Entity, Ts&...>>& vector, const EntityId id, const EntityVersion version, const std::array<ComponentId, COMPONENT_COUNT>& component_ids, std::index_sequence<Is...>) {
+	//	std::array<void*, COMPONENT_COUNT> component_locations;
+	//	// Check if an entity has each component and if so, populate the component locations array.
+	//	for (std::size_t i = 0; i < component_ids.size(); ++i) {
+	//		auto component_location = GetComponentLocation(id, component_ids[i]);
+	//		if (component_location == nullptr) {
+	//			// Component does not exist, do not add entity / components to tuple, return.
+	//			return;
+	//		}
+	//		component_locations[i] = component_location;
+	//	}
+	//	// Expand and format the component locations array into a tuple and add it to the vector of tuples.
+	//	vector.emplace_back(Entity{ id, version, this, true }, (*static_cast<Ts*>(component_locations[Is]))...);
+	//}
 	// Retrieve a reference to the component pool that matches the component id, expand is necessary.
-	internal::ComponentPool& GetPool(const ComponentId component_id) const {
-		if (component_id >= pools_.size()) { // Expand pool vector if component id cannot be used (sparse vector).
-			std::size_t new_size = static_cast<std::size_t>(component_id) + 1;
-			pools_.resize(new_size); // Resize calls null component pool constructor.
+	template <typename Component>
+	internal::Pool<Component>* GetPool(ComponentId component_id) const {
+		if (component_id < pools_.size()) {
+			return static_cast<internal::Pool<Component>*>(pools_[component_id]);
 		}
-		return pools_[component_id];
+		return nullptr;
 	}
-	// Create a component pool for the given component id if it does not exist yet in the manger.
-	template <typename T>
-	internal::ComponentPool& AddPool(const ComponentId component_id) {
-		auto& pool = GetPool(component_id);
-		if (!pool.IsValid()) {
-			// Add the component pool to the manager.
-			pool = std::move(internal::ComponentPool{ sizeof(T), &internal::DestroyComponent<T> });
-		}
-		assert(pool.IsValid() && "Could not find or create a valid component pool for the component");
-		return pool;
+	// GetComponents without passing a component id.
+	template <typename ...Ts>
+	std::tuple<Ts&...> GetComponents(const EntityId id) {
+		return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(id)...);
 	}
 	// Check if a system id exists in the manager.
 	bool IsValidSystem(const SystemId id) const {
@@ -527,126 +439,84 @@ private:
 		return IsValidEntity(id) && entities_[id].alive && entities_[id].version == version;
 	}
 	// GetComponent implementation.
-	template <typename T>
-	T& GetComponent(const EntityId id, const ComponentId component_id) const {
+	template <typename Component>
+	const Component& GetComponent(const EntityId id) const {
 		assert(IsValidEntity(id) && "Cannot get component from an invalid entity");
-		const auto& pool = GetPool(component_id);
-		void* component_location = pool.GetComponentAddress(id);
-		assert(component_location != nullptr && "Cannot get component which does not exist");
-		return *static_cast<T*>(component_location);
+		auto pool = GetPool<Component>(GetComponentId<Component>());
+		assert(pool != nullptr);
+		return pool->Get(id);
 	}
-	// Used for faster internal checking of HasComponent and then GetComponent (For example, in ForEach loops, check if component pointer is valid, if it is, use it).
-	void* GetComponentLocation(EntityId id, ComponentId component_id) const {
-		assert(IsValidEntity(id) && "Cannot get component from invalid entity");
-		const auto& pool = GetPool(component_id);
-		return pool.GetComponentAddress(id);
-	}
-	// GetComponent without passing a component id.
-	template <typename T>
-	T& GetComponent(const EntityId id) {
-		return GetComponent<T>(id, GetComponentId<T>());
-	}
-	// Const version of the above.
-	template <typename T>
-	const T& GetComponent(const EntityId id) const {
-		return GetComponent<T>(id, GetComponentId<T>());
-	}
-	// GetComponents without passing a component id.
-	template <typename ...Ts>
-	std::tuple<Ts&...> GetComponents(const EntityId id) const {
-		return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(id)...);
+	template <typename Component>
+	Component& GetComponent(const EntityId id) {
+		return const_cast<Component&>(static_cast<const Manager&>(*this).GetComponent<Component>(id));
 	}
 	// RemoveComponents for all components implementation.
-	void RemoveComponents(const EntityId id, bool loop_entity) {
-		auto pool_count = static_cast<ComponentId>(pools_.size());
-		for (ComponentId i = 0; i < pool_count; ++i) {
-			auto& pool = GetPool(i);
-			if (pool.IsValid()) {
-				pool.RemoveComponentAddress(id);
-				// Pool index i in pools_ vector is the corresponding component's id.
-				ComponentChange(id, i, loop_entity);
-			}
-		}
-	}
-	// RemoveComponents implementation.
-	template <typename ...Ts>
-	void RemoveComponents(const EntityId id, bool loop_entity) {
-		(RemoveComponent<Ts>(id, loop_entity), ...);
-	}
+	//void RemoveComponents(const EntityId id, bool loop_entity) {
+	//	auto pool_count = static_cast<ComponentId>(pools_.size());
+	//	for (ComponentId i = 0; i < pool_count; ++i) {
+	//		auto& pool = GetPool(i);
+	//		if (pool.IsValid()) {
+	//			pool.RemoveComponentAddress(id);
+	//			// Pool index i in pools_ vector is the corresponding component's id.
+	//			ComponentChange(id, i, loop_entity);
+	//		}
+	//	}
+	//}
+	//// RemoveComponents implementation.
+	//template <typename ...Ts>
+	//void RemoveComponents(const EntityId id, bool loop_entity) {
+	//	(RemoveComponent<Ts>(id, loop_entity), ...);
+	//}
 	// HasComponent implementation.
-	bool HasComponent(const EntityId id, const ComponentId component_id) const {
-		assert(IsValidEntity(id) && "Cannot check if invalid entity has component");
-		return component_id < pools_.size() && GetPool(component_id).HasComponentAddress(id);
-	}
-	// HasComponent without passing a component id. 
-	template <typename T>
+
+	template <typename Component>
 	bool HasComponent(const EntityId id) const {
-		return HasComponent(id, GetComponentId<T>());
+		assert(IsValidEntity(id) && "Cannot check if invalid entity has component");
+		auto pool = GetPool<Component>(GetComponentId<Component>());
+		return pool != nullptr && pool->Has(id);
 	}
-	// HasComponents without passing component ids.
-	template <typename ...Ts>
+	template <typename ...Components>
 	bool HasComponents(const EntityId id) const {
-		return (HasComponent<Ts>(id) && ...);
-	}
-	// HasComponents implementation.
-	template <std::size_t I>
-	bool HasComponents(const EntityId id, const std::array<ComponentId, I>& component_ids) const {
-		assert(IsValidEntity(id) && "Cannot check if invalid entity has components");
-		for (const auto component_id : component_ids) {
-			if (!HasComponent(id, component_id)) return false;
-		}
-		return true;
+		return { (HasComponent<Components>(id) && ...) };
 	}
 	// AddComponent implementation.
-	template <typename T, typename ...TArgs>
-	T& AddComponent(const EntityId id, bool loop_entity, TArgs&&... args) {
-		static_assert(std::is_constructible_v<T, TArgs...>, "Cannot add component with given constructor argument list");
-		static_assert(std::is_destructible_v<T>, "Cannot add component without valid destructor");
+	template <typename Component, typename ...TArgs>
+	Component& AddComponent(const EntityId id, bool loop_entity, TArgs&&... args) {
+		static_assert(std::is_constructible_v<Component, TArgs...>, "Cannot add component with given constructor argument list");
+		static_assert(std::is_destructible_v<Component>, "Cannot add component without valid destructor");
 		assert(IsValidEntity(id) && "Cannot add component to invalid entity");
-		auto component_id = GetComponentId<T>();
-		void* component_location = nullptr;
-		auto& component_pool = AddPool<T>(component_id);
-		component_location = component_pool.GetComponentAddress(id);
-		bool new_component = false;
-		if (!component_location) { // If component doesn't exist, add it.
-			component_location = component_pool.AddComponentAddress(id);
-			new_component = true;
-		} else { // If component exists, replace it.
-			internal::Destructor destructor = component_pool.GetDestructor();
-			// Destroy the previous component.
-			destructor(component_location);
+		auto component_id = GetComponentId<Component>();
+		auto pool = GetPool<Component>(component_id);
+		bool new_component = pool == nullptr;
+		if (new_component) {
+			if (component_id >= pools_.size()) {
+				auto new_size = component_id + 1;
+				pools_.resize(new_size);
+			}
+			pool = new internal::Pool<Component>();
+			pools_[component_id] = pool;
 		}
-
-		assert(component_location != nullptr && "Could not add component address");
-		// Pass constructor arguments to component constructor.
-		// If error, matching valid constructor does not exist.
-		new(component_location) T(std::forward<TArgs>(args)...);
+		assert(pool != nullptr);
+		auto& component = pool->Add(id, std::forward<TArgs>(args)...);
 
 		if (new_component) {
 			// Small design decision: Don't trigger ComponentChange event when a component is replaced.
 			// As this does not invalidate any references, system caches don't have to be refreshed.
 			ComponentChange(id, component_id, loop_entity);
 		}
-		return *static_cast<T*>(component_location);
-	}
-	// ReplaceComponent implementation.
-	template <typename T, typename ...TArgs>
-	T& ReplaceComponent(const EntityId id, TArgs&&... args) {
-		static_assert(std::is_constructible_v<T, TArgs...>, "Cannot replace component with given constructor argument list");
-		static_assert(std::is_destructible_v<T>, "Cannot replace component without valid destructor");
-		assert(IsValidEntity(id) && "Cannot replace component of an invalid entity");
-		assert(HasComponent<T>(id) && "Cannot replace a nonexistent component");
-		return AddComponent<T>(id, false, std::forward<TArgs>(args)...);
+		return component;
 	}
 	// RemoveComponent implementation.
-	template <typename T>
+	template <typename Component>
 	void RemoveComponent(const EntityId id, bool loop_entity) {
 		assert(IsValidEntity(id) && "Cannot remove component from invalid entity");
-		auto component_id = GetComponentId<T>();
-		if (HasComponent(id, component_id)) {
-			auto& pool = GetPool(component_id);
-			pool.RemoveComponentAddress(id);
-			ComponentChange(id, component_id, loop_entity);
+		auto component_id = GetComponentId<Component>();
+		auto pool = GetPool<Component>(component_id);
+		if (pool != nullptr) {
+			bool removed = pool->Remove(id);
+			if (removed) {
+				ComponentChange(id, component_id, loop_entity);
+			}
 		}
 	}
 	// Double the entity id vector if capacity is reached.
@@ -676,9 +546,9 @@ private:
 	// Dense vector of entity ids that map to specific metadata (version and dead/alive).
 	std::vector<internal::EntityData> entities_;
 	// Sparse vector of component pools.
-	mutable std::vector<internal::ComponentPool> pools_;
+	mutable std::vector<internal::BasePool*> pools_;
 	// Free list of entity ids to be used before incrementing count.
-	std::deque<EntityId> free_entity_ids;
+	std::deque<EntityId> free_entity_ids_;
 	// Sparse vector of system pointers.
 	std::vector<std::unique_ptr<BaseSystem>> systems_;
 	// Used for generating unique manager ids.
@@ -792,22 +662,13 @@ public:
 		return manager_ != nullptr && manager_->IsValidEntity(id_);
 	}
 	// Add a component to the entity, returns a reference to the new component.
-	template <typename T, typename ...TArgs>
-	T& AddComponent(TArgs&&... constructor_args) {
-		static_assert(std::is_constructible_v<T, TArgs...>, "Cannot add component with given constructor argument list");
-		static_assert(std::is_destructible_v<T>, "Cannot add component without valid destructor");
+	template <typename Component, typename ...Args>
+	Component& AddComponent(Args&&... constructor_args) {
+		static_assert(std::is_constructible_v<Component, Args...>, "Cannot add component with given constructor argument list");
+		static_assert(std::is_destructible_v<Component>, "Cannot add component without valid destructor");
 		assert(IsValid() && "Cannot add component to null entity");
 		assert(IsAlive() && "Cannot add component to dead entity");
-		return manager_->AddComponent<T>(id_, loop_entity_, std::forward<TArgs>(constructor_args)...);
-	}
-	// Replace a component of the entity, returns a reference to the new component.
-	template <typename T, typename ...TArgs>
-	T& ReplaceComponent(TArgs&&... constructor_args) {
-		static_assert(std::is_constructible_v<T, TArgs...>, "Cannot replace component with given constructor argument list");
-		static_assert(std::is_destructible_v<T>, "Cannot replace component without valid destructor");
-		assert(IsValid() && "Cannot replace component of null entity");
-		assert(IsAlive() && "Cannot replace component of dead entity");
-		return manager_->ReplaceComponent<T>(id_, std::forward<TArgs>(constructor_args)...);
+		return manager_->AddComponent<Component>(id_, loop_entity_, std::forward<Args>(constructor_args)...);
 	}
 	// Remove a component from the entity.
 	template <typename T>
@@ -816,19 +677,19 @@ public:
 		assert(IsAlive() && "Cannot remove component from dead entity");
 		return manager_->RemoveComponent<T>(id_, loop_entity_);
 	}
-	// Remove all components from the entity.
-	void RemoveComponents() {
-		assert(IsValid() && "Cannot remove all components from null entity");
-		assert(IsAlive() && "Cannot remove all components from dead entity");
-		return manager_->RemoveComponents(id_, loop_entity_);
-	}
-	// Remove multiple components from the entity.
-	template <typename ...Ts>
-	void RemoveComponents() {
-		assert(IsValid() && "Cannot remove components from null entity");
-		assert(IsAlive() && "Cannot remove components from dead entity");
-		return manager_->RemoveComponents<Ts...>(id_, loop_entity_);
-	}
+	//// Remove all components from the entity.
+	//void RemoveComponents() {
+	//	assert(IsValid() && "Cannot remove all components from null entity");
+	//	assert(IsAlive() && "Cannot remove all components from dead entity");
+	//	return manager_->RemoveComponents(id_, loop_entity_);
+	//}
+	//// Remove multiple components from the entity.
+	//template <typename ...Ts>
+	//void RemoveComponents() {
+	//	assert(IsValid() && "Cannot remove components from null entity");
+	//	assert(IsAlive() && "Cannot remove components from dead entity");
+	//	return manager_->RemoveComponents<Ts...>(id_, loop_entity_);
+	//}
 	// Check if the entity has a component.
 	template <typename T>
 	bool HasComponent() const {
@@ -847,9 +708,7 @@ public:
 	// Will throw if retrieving a nonexistent component (surround with HasComponent if uncertain).
 	template <typename T>
 	T& GetComponent() {
-		assert(IsValid() && "Cannot get component from null entity");
-		assert(IsAlive() && "Cannot get component from dead entity");
-		return manager_->GetComponent<T>(id_);
+		return const_cast<T&>(static_cast<const Entity&>(*this).GetComponent<T>());
 	}
 	// Returns a const reference to a component.
 	// Will throw if retrieving a nonexistent component (surround with HasComponent if uncertain).
@@ -914,9 +773,9 @@ struct EntityComparator {
 
 inline Entity Manager::CreateEntity() {
 	EntityId id = null;
-	if (free_entity_ids.size() > 0) { // Pick id from free list before trying to increment entity counter.
-		id = free_entity_ids.front();
-		free_entity_ids.pop_front();
+	if (free_entity_ids_.size() > 0) { // Pick id from free list before trying to increment entity counter.
+		id = free_entity_ids_.front();
+		free_entity_ids_.pop_front();
 	} else {
 		id = ++entity_count_;
 	}
@@ -926,10 +785,7 @@ inline Entity Manager::CreateEntity() {
 	entities_[id].alive = true;
 	return Entity{ id, ++entities_[id].version, this };
 }
-inline void Manager::DestroyEntity(Entity entity) {
-	DestroyEntity(entity.id_, entity.version_, entity.loop_entity_);
-}
-inline std::size_t Manager::GetEntityCount() {
+inline std::size_t Manager::GetEntityCount() const {
 	return entity_count_ - GetDeadEntityCount();
 	/*
 	// TODO: Remove after checking the above works.
@@ -943,22 +799,20 @@ inline std::size_t Manager::GetEntityCount() {
 	return entities;
 	*/
 }
-inline std::size_t Manager::GetDeadEntityCount() {
-	return free_entity_ids.size();
+inline std::size_t Manager::GetDeadEntityCount() const {
+	return free_entity_ids_.size();
 }
 inline std::vector<Entity> Manager::GetEntities() {
 	return GetEntitiesWith<>();
 }
-template <typename ...Ts>
+template <typename ...Components>
 inline std::vector<Entity> Manager::GetEntitiesWith() {
 	std::vector<Entity> entities;
 	entities.reserve(entity_count_);
-	// Store all the component ids in an array so they don't have to be fetched in every loop cycle.
-	std::array<ComponentId, sizeof...(Ts)> component_ids = { GetComponentId<Ts>()... };
 	// Cycle through all manager entities.
 	for (EntityId id = internal::first_valid_entity_id; id <= entity_count_; ++id) {
 		auto& entity_data = entities_[id];
-		if (HasComponents(id, component_ids) && entity_data.alive) {
+		if (HasComponents<Components...>(id) && entity_data.alive) {
 			// If entity's components match the required ones and it is alive, add its handle to the vector.
 			entities.emplace_back(id, entity_data.version, this);
 		}
@@ -966,16 +820,14 @@ inline std::vector<Entity> Manager::GetEntitiesWith() {
 	entities.shrink_to_fit();
 	return entities;
 }
-template <typename ...Ts>
+template <typename ...Components>
 inline std::vector<Entity> Manager::GetEntitiesWithout() {
 	std::vector<Entity> entities;
 	entities.reserve(entity_count_);
-	// Store all the component ids in an array so they don't have to be fetched in every loop cycle.
-	std::array<ComponentId, sizeof...(Ts)> component_ids = { GetComponentId<Ts>()... };
 	// Cycle through all manager entities.
 	for (EntityId id = internal::first_valid_entity_id; id <= entity_count_; ++id) {
 		auto& entity_data = entities_[id];
-		if (!HasComponents(id, component_ids) && entity_data.alive) {
+		if (!HasComponents<Components...>(id) && entity_data.alive) {
 			// If entity's components DO NOT MATCH the required ones and it is alive, add its handle to the vector.
 			entities.emplace_back(id, entity_data.version, this);
 		}
@@ -983,94 +835,52 @@ inline std::vector<Entity> Manager::GetEntitiesWithout() {
 	entities.shrink_to_fit();
 	return entities;
 }
-template <typename ...Ts>
-inline std::vector<std::tuple<Entity, Ts&...>> Manager::GetComponentTuple() {
-	std::vector<std::tuple<Entity, Ts&...>> vector_of_tuples;
+template <typename ...Components>
+inline std::vector<std::tuple<Entity, Components&...>> Manager::GetComponentTuple() {
+	std::vector<std::tuple<Entity, Components&...>> vector_of_tuples;
 	vector_of_tuples.reserve(entity_count_);
-	constexpr std::size_t COMPONENT_COUNT = sizeof...(Ts);
+	constexpr std::size_t COMPONENT_COUNT = sizeof...(Components);
 	// Store all the component ids in an array so they don't have to be fetched in every loop cycle.
-	std::array<ComponentId, COMPONENT_COUNT> component_ids = { GetComponentId<Ts>()... };
+	const std::array<ComponentId, COMPONENT_COUNT> component_ids = { GetComponentId<Components>()... };
 	// Cycle through all manager entities.
 	for (EntityId id = internal::first_valid_entity_id; id <= entity_count_; ++id) {
 		assert(id < entities_.size() && "Entity id out of range");
 		auto& entity_data = entities_[id];
 		if (entity_data.alive) {
 			// If entity is alive, attempt to retrieve a tuple of components for it.
-			GetComponentTupleInvoke<COMPONENT_COUNT, Ts...>(vector_of_tuples, id, entity_data.version, component_ids, std::make_index_sequence<sizeof...(Ts)>());
+
+
+			// TODO: Fix this:
+
+
+			//GetComponentTupleInvoke<COMPONENT_COUNT, Components...>(vector_of_tuples, id, entity_data.version, component_ids, std::make_index_sequence<COMPONENT_COUNT>());
 		}
 	}
 	vector_of_tuples.shrink_to_fit();
 	return vector_of_tuples;
 }
-template <typename ...Ts, typename T, std::size_t... component_id>
-inline void Manager::ForEachHelper(T&& function, const EntityId id, std::array<ComponentId, sizeof...(Ts)>& component_ids, std::index_sequence<component_id...>) {
-	function(Entity{ id, entities_[id].version, this, true }, GetComponent<Ts>(id, component_ids[component_id])...);
-}
-template <typename ...Ts, typename T>
-inline void Manager::ForEach(T&& function) {
-	// TODO: Write some tests for lambda function parameters.
-	std::vector<std::tuple<Entity, Ts&...>> entities = GetComponentTuple<Ts...>();
-	for (std::tuple<Entity, Ts&...> tuple : entities) {
-		// Call the lambda for each entity with its tuple
-		std::apply(function, tuple);
-	}
-}
-template <typename T>
-inline void Manager::ForEachEntity(T&& function) {
-	// TODO: Write some tests for lambda function parameters.
-	auto entities = GetEntities();
-	for (auto entity : entities) {
-		// Call the lambda for each entity in the manager
-		function(entity);
-	}
-}
-template <typename T, typename ...TArgs>
-inline T& Manager::AddComponent(Entity entity, TArgs&&... constructor_args) {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot add component to dead entity");
-	return AddComponent<T>(entity.id_, entity.loop_entity_, std::forward<TArgs>(constructor_args)...);
-}
-template <typename T, typename ...TArgs>
-inline T& Manager::ReplaceComponent(Entity entity, TArgs&&... constructor_args) {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot replace component of dead entity");
-	return ReplaceComponent<T>(entity.id_, std::forward<TArgs>(constructor_args)...);
-}
-template <typename T>
-inline void Manager::RemoveComponent(Entity entity) {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot remove component from dead entity");
-	RemoveComponent<T>(entity.id_, entity.loop_entity_);
-}
-inline void Manager::RemoveComponents(Entity entity) {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot remove all components from dead entity");
-	RemoveComponents(entity.id_, entity.loop_entity_);
-}
-template <typename ...Ts>
-inline void Manager::RemoveComponents(Entity entity) {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot remove components from dead entity");
-	(RemoveComponent<Ts>(entity.id_, entity.loop_entity_), ...);
-}
-template <typename T>
-inline T& Manager::GetComponent(Entity entity) const {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot get component from dead entity");
-	return GetComponent<T>(entity.id_, GetComponentId<T>());
-}
-template <typename ...Ts>
-inline std::tuple<Ts&...> Manager::GetComponents(Entity entity) const {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot get components from dead entity");
-	return std::forward_as_tuple<Ts&...>(GetComponent<Ts>(entity.id_, GetComponentId<Ts>())...);
-}
-template <typename T>
-inline bool Manager::HasComponent(Entity entity) const {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot check if dead entity has a component");
-	return HasComponent(entity.id_, GetComponentId<T>());
-}
-template <typename ...Ts>
-inline bool Manager::HasComponents(Entity entity) const {
-	assert(IsAlive(entity.id_, entity.version_) && "Cannot check if dead entity has components");
-	return (HasComponent<Ts>(entity.id_) && ...);
-}
-inline bool Manager::IsAlive(Entity entity) const {
-	return IsAlive(entity.id_, entity.version_);
-}
+//template <typename ...Ts, typename T, std::size_t... component_id>
+//inline void Manager::ForEachHelper(T&& function, const EntityId id, const std::array<ComponentId, sizeof...(Ts)>& component_ids, std::index_sequence<component_id...>) {
+//	function(Entity{ id, entities_[id].version, this, true }, GetComponent<Ts>(id, component_ids[component_id])...);
+//}
+//template <typename ...Ts, typename T>
+//inline void Manager::ForEach(T&& function) {
+//	// TODO: Write some tests for lambda function parameters.
+//	std::vector<std::tuple<Entity, Ts&...>> entities = GetComponentTuple<Ts...>();
+//	for (std::tuple<Entity, Ts&...> tuple : entities) {
+//		// Call the lambda for each entity with its tuple
+//		std::apply(function, tuple);
+//	}
+//}
+//template <typename T>
+//inline void Manager::ForEachEntity(T&& function) {
+//	// TODO: Write some tests for lambda function parameters.
+//	auto entities = GetEntities();
+//	for (auto entity : entities) {
+//		// Call the lambda for each entity in the manager
+//		function(entity);
+//	}
+//}
 inline void Manager::DestroyEntities() {
 	auto entities = GetEntities();
 	for (auto& entity : entities) {
