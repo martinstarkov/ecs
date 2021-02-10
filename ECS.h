@@ -404,21 +404,21 @@ private:
 	//	ForEachHelper<Ts...>(std::forward<T>(function), id, component_ids, std::make_index_sequence<sizeof...(Ts)>{});
 	//}
 	template <typename Component>
-	internal::Pool<Component>* GetPool(const ComponentId component_id) {
+	internal::Pool<Component>* GetPool(const ComponentId component_id) const {
 		assert(component_id < pools_.size());
 		return static_cast<internal::Pool<Component>*>(pools_[component_id].get());
 	}
 	template <typename Component>
-	const Component& GetComponent(const EntityId id) const {
-		assert(EntityIsAlive() && "Cannot get component from dead entity");
+	const Component& GetComponent(const EntityId id, const EntityVersion version) const {
+		assert(EntityIsAlive(id, version) && "Cannot get component from dead entity");
 		auto component_id = GetComponentId<Component>();
 		auto pool = GetPool<Component>(component_id);
 		assert(pool != nullptr);
 		return pool->Get(id);
 	}
 	template <typename Component>
-	Component& GetComponent(const EntityId id) {
-		return const_cast<Component&>(static_cast<const Manager&>(*this).GetComponent<Component>(id));
+	Component& GetComponent(const EntityId id, const EntityVersion version) {
+		return const_cast<Component&>(static_cast<const Manager&>(*this).GetComponent<Component>(id, version));
 	}
 	template <typename Component>
 	bool HasComponent(const EntityId id) const {
@@ -433,10 +433,10 @@ private:
 	}
 	// AddComponent implementation.
 	template <typename Component, typename ...TArgs>
-	Component& AddComponent(const EntityId id, bool loop_entity, TArgs&&... args) {
+	Component& AddComponent(const EntityId id, const EntityVersion version, bool loop_entity, TArgs&&... args) {
 		static_assert(std::is_constructible_v<Component, TArgs...>, "Cannot add component with given constructor argument list");
 		static_assert(std::is_destructible_v<Component>, "Cannot add component without valid destructor");
-		assert(EntityIsAlive(id) && "Cannot add component to invalid entity");
+		assert(EntityIsAlive(id, version) && "Cannot add component to invalid entity");
 		auto component_id = GetComponentId<Component>();
 		if (component_id >= pools_.size()) {
 			pools_.resize(component_id + 1);
@@ -631,7 +631,7 @@ public:
 	template <typename Component, typename ...Args>
 	Component& AddComponent(Args&&... constructor_args) {
 		assert(manager_ != nullptr);
-		return manager_->AddComponent<Component>(id_, loop_entity_, std::forward<Args>(constructor_args)...);
+		return manager_->AddComponent<Component>(id_, version_, loop_entity_, std::forward<Args>(constructor_args)...);
 	}
 	// Remove a component from the entity.
 	template <typename Component>
@@ -654,7 +654,7 @@ public:
 	template <typename Component>
 	const Component& GetComponent() const {
 		assert(manager_ != nullptr);
-		return manager_->GetComponent<Component>(id_);
+		return manager_->GetComponent<Component>(id_, version_);
 	}
 	// Returns a reference to a component.
 	// Will throw if retrieving a nonexistent component (surround with HasComponent if uncertain).
