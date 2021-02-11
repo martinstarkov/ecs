@@ -144,8 +144,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="ECS.h" />
+    <ClInclude Include="ECS_new.h" />
     <ClInclude Include="tests\common.h" />
-    <ClInclude Include="tests\ManagerConstructors.h" />
+    <ClInclude Include="tests\EntityBasics.h" />
+    <ClInclude Include="tests\ManagerBasics.h" />
     <ClInclude Include="tests\OldTests.h" />
   </ItemGroup>
   <ItemGroup>

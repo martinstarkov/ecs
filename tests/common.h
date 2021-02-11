@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ECS.h"
+#include "../ECS_new.h"
 
 #include <type_traits>
 #include <cassert>

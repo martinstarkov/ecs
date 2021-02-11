@@ -1,22 +1,13 @@
 
-#include "ManagerConstructors.h"
+#include "ManagerBasics.h"
+#include "EntityBasics.h"
 
 #include "OldTests.h"
 
 int main() {
 
-	test3();
-	test4();
-	test5();
-	test6();
-	test7();
-	test8();
-	test9();
-	test10();
-
-	LOG("Old tests passed");
-
-	ManagerConstructors();
+	ManagerBasics managerBasics;
+	EntityBasics entityBasics;
 
 	LOG("All tests passed");
 
