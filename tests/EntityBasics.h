@@ -27,18 +27,18 @@ public:
 		*/
 		ecs::Manager manager;
 		assert(manager.GetEntityCount() == 0);
-		auto e1 = manager.CreateEntity();
+		auto e0 = manager.CreateEntity();
 		assert(manager.GetEntityCount() == 0);
 		manager.Refresh();
 		assert(manager.GetEntityCount() == 1);
+		auto e1 = manager.CreateEntity();
 		auto e2 = manager.CreateEntity();
-		auto e3 = manager.CreateEntity();
 		assert(manager.GetEntityCount() == 1);
 		manager.Refresh();
 		assert(manager.GetEntityCount() == 3);
+		auto e3 = manager.CreateEntity();
 		auto e4 = manager.CreateEntity();
 		auto e5 = manager.CreateEntity();
-		auto e6 = manager.CreateEntity();
 		assert(manager.GetEntityCount() == 3);
 		manager.Refresh();
 		assert(manager.GetEntityCount() == 6);
@@ -48,6 +48,15 @@ public:
 		assert(manager.GetEntityCount() == 6);
 		manager.Refresh();
 		assert(manager.GetEntityCount() == 3);
+		auto e3_new = manager.CreateEntity();
+		assert(manager.GetEntityCount() == 3);
+		manager.Refresh();
+		assert(manager.GetEntityCount() == 4);
+		auto e1_new = manager.CreateEntity();
+		auto e5_new = manager.CreateEntity();
+		assert(manager.GetEntityCount() == 4);
+		manager.Refresh();
+		assert(manager.GetEntityCount() == 6);
 
 		// TODO: Fix entity deletion.
 

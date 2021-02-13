@@ -15,7 +15,7 @@ public:
 		// auto new_manager = manager; // does not compile as manager copying is not allowed.
 
 		// Entity difference equality test.
-		manager2.entities_.resize(2);
+		manager2.entities_.resize(1);
 		assert(manager != manager2);
 		assert(manager2 != manager);
 		manager2.entities_.pop_back();
