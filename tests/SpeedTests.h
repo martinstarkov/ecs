@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Timer.h"
-#include "../ECS_old.h"
+#include "../ECS.h"
 
 #include <iostream>
 #define LOG(x) { std::cout << x << std::endl; }
@@ -10,6 +10,17 @@
 struct Test {
 	Test(int a) : a{a} {}
 	int a;
+	int b = 0;
+	int c = 1;
+	int d = 2;
+};
+
+struct Test2 {
+	Test2(int z) : z{ z } {}
+	int z;
+	int x = 0;
+	int y = 1;
+	int w = 2;
 };
 
 class SpeedTests {
@@ -25,7 +36,7 @@ public:
 
 		ecs::Manager manager;
 
-		int e = 100000000;
+		int e = 10;
 
 		creation.Start();
 		for (auto i = 0; i < e; ++i) {
@@ -40,14 +51,16 @@ public:
 		LOG("Group entity retrieval (" << e << ") took " << entity_retrieval.ElapsedSeconds() << "s");
 
 		addition.Start();
-		for (auto& entity : entities) {
-			entity.AddComponent<Test>(5);
+		for (std::size_t i = 0; i < entities.size(); ++i) {
+			auto& entity = entities[i];
+			entity.AddComponent<Test>(i);
+			entity.AddComponent<Test2>(i);
 		}
 		LOG("Component addition (" << e << ") took " << addition.ElapsedSeconds() << "s");
 
 		has.Start();
 		for (auto& entity : entities) {
-			if (!entity.HasComponent<Test>()) {
+			if (!entity.HasComponent<Test>() && !entity.HasComponent<Test2>()) {
 				int i = 0;
 				i += 1;
 			}
@@ -57,16 +70,19 @@ public:
 		get_retrieval.Start();
 		for (auto& entity : entities) {
 			auto& comp = entity.GetComponent<Test>();
-			comp.a += 1;
+			auto& comp2 = entity.GetComponent<Test2>();
+			comp.d += 1;
+			comp2.w += 3;
 		}
 		LOG("Component retrieval (" << e << ") took " << get_retrieval.ElapsedSeconds() << "s");
 
 		removal.Start();
 		for (auto& entity : entities) {
-			if (entity.GetId() == 5000 || entity.GetId() == 5001 || entity.GetId() == 5002) {
+			if (entity.GetId() == 4) {
 				bool test = true;
 			}
 			entity.RemoveComponent<Test>();
+			entity.RemoveComponent<Test2>();
 		}
 		LOG("Component removal (" << e << ") took " << removal.ElapsedSeconds() << "s");
 

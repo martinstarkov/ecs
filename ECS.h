@@ -64,13 +64,10 @@ using Offset = std::int64_t;
 
 // Constants
 
-// Null entity for comparison operations
-constexpr EntityId null = 0;
-
 namespace internal {
 
 // First valid entity for internal for-loops.
-constexpr EntityId first_valid_entity_id = null + 1;
+constexpr EntityId first_valid_entity_id = 0;
 
 // Invalid version.
 constexpr EntityVersion null_version = 0;
@@ -114,7 +111,7 @@ public:
 	Component& Add(const EntityId id, TArgs&&... args) {
 		if (id < sparse_set_.size()) {
 			auto dense_index = sparse_set_[id];
-			if (static_cast<std::size_t>(dense_index) < dense_set_.size()) {
+			if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
 				auto& component = dense_set_[dense_index];
 				component = Component(std::forward<TArgs>(args)...);
 				return component;
@@ -127,34 +124,36 @@ public:
 	}
 
 	bool Remove(const EntityId id) {
-		if (id < sparse_set_.size()) {
-			auto& dense_index = sparse_set_[id];
-			// Figure out why dense_index = 5005 but dense_set size is 5000. This should not happen in.
-			// Check the "component removal" speed test loop.
-			if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
-				if (dense_set_.size() > 1) {
-					if (id == sparse_set_.size() - 1) {
-						dense_index = INVALID_INDEX;
-						auto result = std::find_if(sparse_set_.rbegin(), sparse_set_.rend(),[](ComponentIndex index) { return index != INVALID_INDEX; });
-						sparse_set_.erase(result.base() + 1, sparse_set_.end());
-					} else {
-						std::iter_swap(dense_set_.begin() + dense_index, dense_set_.end() - 1);
-						sparse_set_.back() = dense_index;//INVALID_INDEX;
-						dense_index = INVALID_INDEX;
-					}
-					dense_set_.pop_back();
-				} else {
-					sparse_set_.clear();
-					dense_set_.clear();
-				}
-
-				// TODO: Add test that last elements of sparse_set_ is never INVALID_INDEX.
-
-				//assert({ bool test = (sparse_set_.size() > 0) ? (*sparse_set_).back() != INVALID_INDEX : true; test });
-				return true;
-			}
-		}
 		return false;
+		
+		
+		// TODO: https://skypjack.github.io/2019-03-21-ecs-baf-part-2-insights/
+		// Implement sparse, dense and component array.
+		// Dense and component should be synced.
+
+
+		//if (id < sparse_set_.size()) {
+		//	auto& dense_index = sparse_set_[id];
+		//	if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
+		//		if (dense_set_.size() > 1) {
+		//			// If removing last element of sparse set, swap not required.
+		//			if (dense_index == sparse_set_.back()) {
+		//				dense_index = INVALID_INDEX;
+		//				auto first_valid_index = std::find_if(sparse_set_.rbegin(), sparse_set_.rend(), [](ComponentIndex index) { return index != INVALID_INDEX; });
+		//				sparse_set_.erase(first_valid_index.base() + 1, sparse_set_.end());
+		//			} else {
+		//				// TODO: Fix swap and pop mechanism here.
+
+		//			}
+		//			dense_set_.pop_back();
+		//		} else {
+		//			dense_set_.clear();
+		//			sparse_set_.clear();
+		//		}
+		//		return true;
+		//	}
+		//}
+		//return false;
 	}
 
 	const Component& Get(const EntityId id) const {
@@ -222,8 +221,7 @@ public:
 	// Clear the manager, this will destroy all entities and components in the memory of the manager.
 	void Clear() {
 		entity_count_ = 0;
-		// Keep the null entity.
-		entities_.resize(1);
+		entities_.clear();
 		entities_.shrink_to_fit();
 		pools_.clear();
 		pools_.shrink_to_fit();
@@ -374,11 +372,11 @@ private:
 	}
 	// Check if an entity id exists in the manager.
 	bool EntityIsValid(const EntityId id) const {
-		return id != null && id < entities_.size() && entities_[id].version != internal::null_version;
+		return id < entities_.size() && entities_[id].version != internal::null_version;
 	}
 	// Check if a given entity id is considered alive.
 	bool EntityIsAlive(const EntityId id, const EntityVersion version) const {
-		return id != null && id < entities_.size() && entities_[id].alive && version == entities_[id].version && version != internal::null_version;
+		return id < entities_.size() && entities_[id].alive && version == entities_[id].version && version != internal::null_version;
 	}
 
 	// Event which is called upon component addition or removal from an entity.
@@ -476,7 +474,7 @@ private:
 	// Double the entity id vector if capacity is reached.
 	void GrowEntitiesIfNeeded(const EntityId id) {
 		if (id >= entities_.size()) {
-			auto capacity = entities_.capacity() * 2;
+			auto capacity = (entities_.capacity() + 10) * 2;
 			assert(capacity != 0 && "Capacity is 0, cannot double size of entities_ vector");
 			entities_.resize(capacity);
 		}
@@ -520,7 +518,7 @@ private:
 	// Unique manager identifier (used to compare managers).
 	ManagerId id_{ internal::null_manager_id };
 	// Dense vector of entity ids that map to specific metadata (version and dead/alive).
-	std::vector<internal::EntityData> entities_{ {} };
+	std::vector<internal::EntityData> entities_{};
 	// Sparse vector of component pools.
 	mutable std::vector<std::unique_ptr<internal::BasePool>> pools_;
 	// Free list of entity ids to be used before incrementing count.
@@ -608,7 +606,7 @@ private:
 class Entity {
 public:
 	// Default construction to null entity.
-	Entity(EntityId id = null) : id_{ id }, version_{ internal::null_version }, manager_{ nullptr }, loop_entity_{ false } {}
+	Entity() = default;
 	// Entity construction within the manager.
 	Entity(EntityId id, EntityVersion version, Manager* manager, bool loop_entity = false) : id_{ id }, version_{ version }, manager_{ manager }, loop_entity_{ loop_entity } {}
 	~Entity() = default;
@@ -710,10 +708,10 @@ public:
 		return !(lhs == rhs);
 	}
 private:
-	EntityId id_;
-	EntityVersion version_;
-	Manager* manager_;
-	bool loop_entity_;
+	EntityId id_{ 0 };
+	EntityVersion version_{ internal::null_version };
+	Manager* manager_{ nullptr };
+	bool loop_entity_{ false };
 };
 
 struct EntityComparator {
@@ -723,14 +721,13 @@ struct EntityComparator {
 };
 
 inline Entity Manager::CreateEntity() {
-	EntityId id = null;
+	EntityId id = 0;
 	if (free_entity_ids_.size() > 0) { // Pick id from free list before trying to increment entity counter.
 		id = free_entity_ids_.front();
 		free_entity_ids_.pop_front();
 	} else {
-		id = ++entity_count_;
+		id = entity_count_++;
 	}
-	assert(id != null && "Could not create entity due to lack of free entity ids");
 	GrowEntitiesIfNeeded(id);
 	assert(id < entities_.size() && "Entity id outside of range of entities vector");
 	entities_[id].alive = true;
