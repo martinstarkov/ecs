@@ -1,13 +1,18 @@
 
-#include "ManagerBasics.h"
-#include "EntityBasics.h"
+//#include "ManagerBasics.h"
+//#include "EntityBasics.h"
+//#include "ComponentBasics.h"
+//
+//#include "OldTests.h"
+#include "SpeedTests.h"
 
-#include "OldTests.h"
 
 int main() {
 
-	ManagerBasics managerBasics;
+	/*ManagerBasics managerBasics;
 	EntityBasics entityBasics;
+	ComponentBasics componentBasics;*/
+	SpeedTests speedTests;
 
 	LOG("All tests passed");
 

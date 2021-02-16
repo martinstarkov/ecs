@@ -129,12 +129,14 @@ public:
 	bool Remove(const EntityId id) {
 		if (id < sparse_set_.size()) {
 			auto& dense_index = sparse_set_[id];
-			if (static_cast<std::size_t>(dense_index) < dense_set_.size() && dense_index != INVALID_INDEX) {
+			// Figure out why dense_index = 5005 but dense_set size is 5000. This should not happen in.
+			// Check the "component removal" speed test loop.
+			if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
 				if (dense_set_.size() > 1) {
 					if (id == sparse_set_.size() - 1) {
 						dense_index = INVALID_INDEX;
 						auto result = std::find_if(sparse_set_.rbegin(), sparse_set_.rend(),[](ComponentIndex index) { return index != INVALID_INDEX; });
-						sparse_set_.erase(result.base(), sparse_set_.end());
+						sparse_set_.erase(result.base() + 1, sparse_set_.end());
 					} else {
 						std::iter_swap(dense_set_.begin() + dense_index, dense_set_.end() - 1);
 						sparse_set_.back() = dense_index;//INVALID_INDEX;

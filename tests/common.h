@@ -2,6 +2,8 @@
 
 #include "../ECS_new.h"
 
+#include "Timer.h"
+
 #include <type_traits>
 #include <cassert>
 #include <utility>
