@@ -5,6 +5,8 @@
 #include <cstdint> // std::uint64_t, std::uint32_t
 #include <type_traits> // std::is_constructible_v, std::is_destructible_v
 #include <cassert> // assert
+#include <deque> // std::deque
+#include <iostream> // std::err for exception handling
 
 // TODO: TEMPORARY: ONLY FOR TESTS
 class ManagerBasics;
@@ -20,105 +22,188 @@ using HandleIndex = std::uint32_t;
 using ComponentId = std::uint32_t;
 using SystemId = std::uint32_t;
 using Version = std::uint32_t;
+using EntityId = DataIndex;
+using Offset = std::int64_t;
 
 constexpr Version null_version{ 0 };
+constexpr Offset INVALID_OFFSET = -1;
 
 class BasePool {
 public:
-	virtual BasePool* Clone() const = 0;
-	virtual void VirtualRemove(const DataIndex entity) = 0;
+	virtual ~BasePool() = default;
+	virtual void VirtualRemove(const EntityId entity) = 0;
 };
 
 // Object which allows for contiguous storage of components of a single type (with runtime addition!).
+// Object which allows for contiguous storage of components of a single type (with runtime addition!).
 template <typename TComponent>
 class Pool : public BasePool {
-private:
-	using SparseIndex = std::uint32_t;
-	using DenseIndex = std::int32_t;
-	constexpr static DenseIndex INVALID_INDEX = -1;
+// Indicates a nonexistent component in a pool.
 public:
-	Pool() = default;
-	Pool(const std::vector<DenseIndex>& sparse_set, const std::vector<SparseIndex>& dense_set, const std::vector<TComponent>& components) : sparse_set_{ sparse_set }, dense_set_{ dense_set }, components_{ components } {}
-	~Pool() = default;
-	Pool(const Pool&) = default;
-	Pool& operator=(const Pool&) = default;
-	Pool(Pool&&) = default;
-	Pool& operator=(Pool&&) = default;
-	
-	virtual void VirtualRemove(const DataIndex entity) override final {
+	// Since the manager stores component pools by their component's id (for fast random access), a null component pool must exist to fill gaps inside the sparse vector. This, because one manager could have a component pool added which is out of range due to it existing in another manager (component ids are shared among managers).
+	Pool() {
+		Allocate(1);
+	}
+	// Free memory block and call destructors on every component.
+	~Pool() {
+		for (auto offset : offsets_) {
+			if (offset != INVALID_OFFSET) {
+				auto address = pool_ + offset;
+				address->~TComponent();
+			}
+		}
+		try {
+			assert(pool_ != nullptr && "Cannot free invalid component pool pointer");
+			std::free(pool_);
+		} catch (std::exception& e) {
+			// Throw exception if component pool memory could not be freed. For example, if the component pool destructor is entered for a pool in an invalid state, such as after vector emplace induced move operations).
+			std::cerr << "Cannot free memory for a component pool in an invalid state: " << e.what() << std::endl;
+			abort();
+		}
+		pool_ = nullptr;
+		// Byte capacity of the pool.
+		capacity_ = 0;
+		// Byte size of the pool.
+		size_ = 0;
+		offsets_.clear();
+		free_offsets_.clear();
+	}
+	// Component pools should never be copied or reassigned.
+	Pool(const Pool&) = delete;
+	Pool& operator=(const Pool&) = delete;
+	// Move operator used for resizing a vector of component pools (in the manager class).
+	Pool(Pool&& obj) noexcept : pool_{ obj.pool_ }, capacity_{ obj.capacity_ }, size_{ obj.size_ }, offsets_{ std::exchange(obj.offsets_, {}) }, free_offsets_{ std::exchange(obj.free_offsets_, {}) } {
+		obj.pool_ = nullptr;
+		obj.capacity_ = 0;
+		obj.size_ = 0;
+	}
+	// Component pool move assignment is used when null pools are assigned a valid pool (upon addition of the first component of a unique type).
+	Pool& operator=(Pool&& obj) noexcept {
+		for (auto offset : offsets_) {
+			if (offset != INVALID_OFFSET) {
+				auto address = pool_ + offset;
+				address->~TComponent();
+			}
+		}
+		try {
+			assert(pool_ != nullptr && "Cannot free invalid component pool pointer");
+			std::free(pool_);
+		} catch (std::exception& e) {
+			// Throw exception if component pool memory could not be freed. For example, if the component pool destructor is entered for a pool in an invalid state, such as after vector emplace induced move operations).
+			std::cerr << "Cannot free memory for a component pool in an invalid state: " << e.what() << std::endl;
+			abort();
+		}
+
+		pool_ = obj.pool_;
+		capacity_ = obj.capacity_;
+		size_ = obj.size_;
+		offsets_ = std::exchange(obj.offsets_, {});
+		free_offsets_ = std::exchange(obj.free_offsets_, {});
+
+		obj.pool_ = nullptr;
+		obj.capacity_ = 0;
+		obj.size_ = 0;
+
+		return *this;
+	}
+	virtual void VirtualRemove(const EntityId entity) override final {
 		Remove(entity);
 	}
-
-	virtual BasePool* Clone() const override final {
-		return new Pool<TComponent>(sparse_set_, dense_set_, components_);
-	}
-
+	// Add a new component address to the pool and return a void pointer to its location.
 	template <typename ...TArgs>
-	TComponent& Add(const DataIndex id, TArgs&&... args) {
-		if (id < sparse_set_.size()) {
-			auto dense_index = sparse_set_[id];
-			if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
-				dense_set_[dense_index] = id;
-				return *components_.emplace(components_.begin() + dense_index, std::forward<TArgs>(args)...);
-			}
-		} else {
-			sparse_set_.resize(id + 1, INVALID_INDEX);
+	TComponent* Add(const EntityId entity, TArgs&&... args) {
+		auto offset = GetFreeOffset();
+		if (entity >= offsets_.size()) { // if the entity id exceeds the indexing table's size, expand the indexing table
+			offsets_.resize(entity + 1, INVALID_OFFSET);
 		}
-		sparse_set_[id] = dense_set_.size();
-		dense_set_.emplace_back(id);
-		return components_.emplace_back(std::forward<TArgs>(args)...);
+		offsets_[entity] = offset;
+		auto address = pool_ + offset;
+		address->~TComponent();
+		new(address) TComponent(std::forward<TArgs>(args)...);
+		return address;
 	}
-
-	bool Remove(const DataIndex id) {
-		if (id < sparse_set_.size()) {
-			auto& dense_index = sparse_set_[id];
-			if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
-				if (dense_set_.size() > 1) {
-					// If removing last element of sparse set, swap not required.
-					if (dense_index == sparse_set_.back()) {
-						dense_index = INVALID_INDEX;
-						auto first_valid_index = std::find_if(sparse_set_.rbegin(), sparse_set_.rend(), [](DenseIndex index) { return index != INVALID_INDEX; });
-						sparse_set_.erase(first_valid_index.base() + 1, sparse_set_.end());
-					} else {
-						auto last_sparse_index = dense_set_.back();
-						std::swap(dense_set_[dense_index], dense_set_.back());
-						assert(static_cast<std::size_t>(dense_index) < components_.size());
-						std::swap(components_[dense_index], components_.back());
-						sparse_set_[last_sparse_index] = dense_index;
-						dense_index = INVALID_INDEX;
-					}
-					dense_set_.pop_back();
-					components_.pop_back();
-				} else {
-					dense_set_.clear();
-					sparse_set_.clear();
-					components_.clear();
-				}
-				return true;
+	// Call the component's destructor and remove its address from the component pool.
+	void Remove(const EntityId entity) {
+		if (entity < offsets_.size()) {
+			auto& offset = offsets_[entity];
+			if (offset != INVALID_OFFSET) {
+				auto address = pool_ + offset;
+				address->~TComponent();
+				free_offsets_.emplace_back(offset);
+				offset = INVALID_OFFSET;
 			}
 		}
-		return false;
 	}
-
-	const TComponent& Get(const DataIndex id) const {
-		assert(id < sparse_set_.size());
-		auto dense_index = sparse_set_[id];
-		assert(dense_index != INVALID_INDEX);
-		assert(static_cast<std::size_t>(dense_index) < components_.size());
-		return components_[dense_index];
+	// Retrieve the memory location of a component, or nullptr if it does not exist
+	TComponent* Get(const EntityId entity) {
+		if (Has(entity)) {
+			return pool_ + offsets_[entity];
+		}
+		return nullptr;
 	}
-
-	TComponent& Get(const DataIndex id) {
-		return const_cast<TComponent&>(static_cast<const Pool&>(*this).Get(id));
-	}
-
-	bool Has(const DataIndex id) const {
-		return id < sparse_set_.size() && sparse_set_[id] != INVALID_INDEX;
+	// Check if the component pool contains a valid component offset for a given entity id.
+	bool Has(const EntityId entity) const {
+		return entity < offsets_.size() && offsets_[entity] != INVALID_OFFSET;
 	}
 private:
-	std::vector<DenseIndex> sparse_set_;
-	std::vector<SparseIndex> dense_set_;
-	std::vector<TComponent> components_;
+	// Initial pool memory allocation, should only called once in non-empty pool constructors.
+	void Allocate(const std::size_t starting_capacity) {
+		assert(size_ == 0 && capacity_ == 0 && pool_ == nullptr && "Cannot call initial memory allocation for occupied component pool");
+		capacity_ = starting_capacity;
+		TComponent* memory = nullptr;
+		try {
+			memory = static_cast<TComponent*>(std::malloc(capacity_ * sizeof(TComponent)));
+		} catch (std::exception& e) {
+			// Could not allocate enough memory for component pool (malloc failed).
+			std::cerr << e.what() << std::endl;
+			throw;
+		}
+		assert(memory != nullptr && "Failed to allocate initial memory for component pool");
+		pool_ = memory;
+	}
+	// Double the size of a pool if the given capacity exceeds the previous capacity.
+	void ReallocateIfNeeded(const std::size_t new_capacity) {
+		if (new_capacity >= capacity_) {
+			assert(pool_ != nullptr && "Pool memory must be allocated before reallocation");
+			capacity_ = new_capacity * 2; // Double the capacity.
+			TComponent* memory = nullptr;
+			try {
+				memory = static_cast<TComponent*>(std::realloc(pool_, capacity_ * sizeof(TComponent)));
+			} catch (std::exception& e) {
+				// Could not reallocate enough memory for component pool (realloc failed).
+				std::cerr << e.what() << std::endl;
+				throw;
+			}
+			assert(memory != nullptr && "Failed to reallocate memory for pool");
+			pool_ = memory;
+		}
+	}
+	// Returns the first available component offset in the component pool.
+	Offset GetFreeOffset() {
+		auto next_free_offset = INVALID_OFFSET;
+		if (free_offsets_.size() > 0) {
+			// Use first free offset found in the pool.
+			next_free_offset = free_offsets_.front();
+			// Remove the offset from free offsets.
+			free_offsets_.pop_front();
+		} else {
+			// Use the end of the pool.
+			next_free_offset = size_;
+			++size_;
+			// Expand the pool if necessary.
+			ReallocateIfNeeded(size_);
+		}
+		assert(next_free_offset != INVALID_OFFSET && "Could not find a valid component offset from component pool");
+		return next_free_offset;
+	}
+	// Pointer to the beginning of the component pool's memory block.
+	TComponent* pool_{ nullptr };
+	// Byte capacity of the pool.
+	std::size_t capacity_{ 0 };
+	// Byte size of the pool.
+	std::size_t size_{ 0 };
+	std::vector<Offset> offsets_;
+	std::deque<Offset> free_offsets_;
 };
 
 struct EntityData {
@@ -148,10 +233,10 @@ struct HandleData {
 	HandleData& operator=(const HandleData&) = default;
 	HandleData(HandleData&&) = default;
 	HandleData& operator=(HandleData&&) = default;
-	bool operator==(const HandleData & other) const {
+	bool operator==(const HandleData& other) const {
 		return entity_index == other.entity_index && counter == other.counter;
 	}
-	bool operator!=(const HandleData & other) const {
+	bool operator!=(const HandleData& other) const {
 		return !operator==(other);
 	}
 	EntityIndex entity_index{ 0 };
@@ -207,7 +292,7 @@ public:
 	}
 	Manager(const Manager&) = delete;
 	Manager& operator=(const Manager&) = delete;
-	bool operator==(const Manager& other) const { 
+	bool operator==(const Manager& other) const {
 		return size_ == other.size_ && size_next_ == other.size_next_ && entities_ == other.entities_ && component_pools_ == other.component_pools_ && handles_ == other.handles_;
 	}
 	bool operator!=(const Manager& other) const {
@@ -304,7 +389,7 @@ private:
 			component_pools_[component] = pool;
 		}
 		assert(pool != nullptr);
-		auto& component_object = pool->Add(entity, std::forward<TArgs>(args)...);
+		auto& component_object = *pool->Add(entity, std::forward<TArgs>(args)...);
 
 		if (new_component) {
 			// ComponentChange(entity, component, loop_entity);
@@ -316,7 +401,7 @@ private:
 		auto component = GetComponentId<TComponent>();
 		auto pool = GetPool<TComponent>(component);
 		assert(pool != nullptr);
-		return pool->Get(entity);
+		return *pool->Get(entity);
 	}
 	template <typename TComponent>
 	bool HasComponent(const internal::DataIndex entity) const {
@@ -334,10 +419,10 @@ private:
 		auto component = GetComponentId<TComponent>();
 		auto pool = GetPool<TComponent>(component);
 		if (pool != nullptr) {
-			bool removed = pool->Remove(entity);
-			if (removed) {
-				//ComponentChange(id, component_id, loop_entity);
-			}
+			pool->Remove(entity);
+			//if (removed) {
+			//	//ComponentChange(id, component_id, loop_entity);
+			//}
 		}
 	}
 	template <typename ...TComponents>

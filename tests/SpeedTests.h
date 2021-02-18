@@ -1,13 +1,15 @@
 #pragma once
 
 #include "Timer.h"
-#include "../ECS.h"
+#include "../ECS_old_rework_refresh.h"
 
 #include <iostream>
+
 #define LOG(x) { std::cout << x << std::endl; }
 #define LOG_(x) { std::cout << x; }
 
 struct Test {
+	Test() = delete;
 	Test(int a) : a{a} {}
 	int a;
 	int b = 0;
@@ -16,6 +18,7 @@ struct Test {
 };
 
 struct Test2 {
+	Test2() = delete;
 	Test2(int z) : z{ z } {}
 	int z;
 	int x = 0;
@@ -27,6 +30,7 @@ class SpeedTests {
 public:
 	SpeedTests() {
 		Timer creation;
+		Timer refresh;
 		Timer entity_retrieval;
 		Timer addition;
 		Timer has;
@@ -36,14 +40,17 @@ public:
 
 		ecs::Manager manager;
 
-		int e = 10;
+		int e = 100000000;
+		//int e = 100;
 
 		creation.Start();
 		for (auto i = 0; i < e; ++i) {
 			manager.CreateEntity();
 		}
-		//manager.Refresh();
 		LOG("Entity creation (" << e << ") took " << creation.ElapsedSeconds() << "s");
+		refresh.Start();
+		manager.Refresh();
+		LOG("Entity refresh took (" << e << ") took " << refresh.ElapsedSeconds() << "s");
 
 		entity_retrieval.Start();
 		auto entities = manager.GetEntities();
@@ -68,9 +75,12 @@ public:
 		LOG("Component has check (" << e << ") took " << has.ElapsedSeconds() << "s");
 
 		get_retrieval.Start();
-		for (auto& entity : entities) {
+		for (std::size_t i = 0; i < entities.size(); ++i) {
+			auto& entity = entities[i];
 			auto& comp = entity.GetComponent<Test>();
+			assert(comp.a == i);
 			auto& comp2 = entity.GetComponent<Test2>();
+			assert(comp2.z == i);
 			comp.d += 1;
 			comp2.w += 3;
 		}
@@ -78,9 +88,6 @@ public:
 
 		removal.Start();
 		for (auto& entity : entities) {
-			if (entity.GetId() == 4) {
-				bool test = true;
-			}
 			entity.RemoveComponent<Test>();
 			entity.RemoveComponent<Test2>();
 		}
@@ -94,9 +101,11 @@ public:
 		for (auto& entity : entities) {
 			entity.Destroy();
 		}
-		//manager.Refresh();
 		LOG("Entity destruction (" << e << ") took " << destruction.ElapsedSeconds() << "s");
-	
+		refresh.Start();
+		manager.Refresh();
+		LOG("Entity refresh (" << e << ") took " << refresh.ElapsedSeconds() << "s");
+		
 		LOG("Manager basics passed");
 
 	}

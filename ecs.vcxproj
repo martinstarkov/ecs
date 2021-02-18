@@ -146,6 +146,9 @@
     <ClInclude Include="ECS.h" />
     <ClInclude Include="ECS_new.h" />
     <ClInclude Include="ECS_old.h" />
+    <ClInclude Include="ECS_old_rework.h" />
+    <ClInclude Include="ECS_old_rework_refresh.h" />
+    <ClInclude Include="ECS_new_charpools.h" />
     <ClInclude Include="tests\SpeedTests.h" />
     <ClInclude Include="tests\common.h" />
     <ClInclude Include="tests\ComponentBasics.h" />

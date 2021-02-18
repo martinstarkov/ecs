@@ -74,106 +74,99 @@ constexpr EntityVersion null_version = 0;
 // Invalid manager id.
 constexpr ManagerId null_manager_id = -1;
 
-using ComponentIndex = std::int64_t;
-
-constexpr ComponentIndex INVALID_INDEX = -1;
 
 class BasePool {
 public:
-	virtual void Destroy() = 0;
 	virtual std::unique_ptr<BasePool> Clone() = 0;
 private:
 };
 
 // Object which allows for contiguous storage of components of a single type (with runtime addition!).
-template <typename Component>
+template <typename TComponent>
 class Pool : public BasePool {
+private:
+	using SparseIndex = std::uint64_t;
+	using DenseIndex = std::int64_t;
+	constexpr static DenseIndex INVALID_INDEX = -1;
 public:
-
 	Pool() = default;
-	Pool(const std::vector<ComponentIndex>& sparse_set, const std::vector<Component>& dense_set) : sparse_set_{ sparse_set }, dense_set_{ dense_set } {}
+	Pool(const std::vector<DenseIndex> & sparse_set, const std::vector<SparseIndex> & dense_set, const std::vector<TComponent> & components) : sparse_set_{ sparse_set }, dense_set_{ dense_set }, components_{ components } {}
 	~Pool() = default;
 	Pool(const Pool&) = default;
 	Pool& operator=(const Pool&) = default;
 	Pool(Pool&&) = default;
 	Pool& operator=(Pool&&) = default;
 
-	virtual void Destroy() override final {
-		dense_set_.clear();
-		sparse_set_.clear();
-	}
-
 	virtual std::unique_ptr<BasePool> Clone() override final {
-		return std::make_unique<Pool<Component>>(sparse_set_, dense_set_);
+		return std::make_unique<Pool<TComponent>>(sparse_set_, dense_set_, components_);
 	}
 
 	template <typename ...TArgs>
-	Component& Add(const EntityId id, TArgs&&... args) {
+	TComponent& Add(const EntityId id, TArgs&&... args) {
 		if (id < sparse_set_.size()) {
 			auto dense_index = sparse_set_[id];
 			if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
-				auto& component = dense_set_[dense_index];
-				component = Component(std::forward<TArgs>(args)...);
-				return component;
+				dense_set_[dense_index] = id;
+				return *components_.emplace(components_.begin() + dense_index, std::forward<TArgs>(args)...);
 			}
 		} else {
 			sparse_set_.resize(id + 1, INVALID_INDEX);
 		}
 		sparse_set_[id] = dense_set_.size();
-		return dense_set_.emplace_back(std::forward<TArgs>(args)...);
+		dense_set_.emplace_back(id);
+		return components_.emplace_back(std::forward<TArgs>(args)...);
 	}
 
 	bool Remove(const EntityId id) {
+		if (id < sparse_set_.size()) {
+			auto& dense_index = sparse_set_[id];
+			if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
+				if (dense_set_.size() > 1) {
+					// If removing last element of sparse set, swap not required.
+					if (dense_index == sparse_set_.back()) {
+						dense_index = INVALID_INDEX;
+						auto first_valid_index = std::find_if(sparse_set_.rbegin(), sparse_set_.rend(), [](DenseIndex index) { return index != INVALID_INDEX; });
+						sparse_set_.erase(first_valid_index.base() + 1, sparse_set_.end());
+					} else {
+						auto last_sparse_index = dense_set_.back();
+						std::swap(dense_set_[dense_index], dense_set_.back());
+						assert(static_cast<std::size_t>(dense_index) < components_.size());
+						std::swap(components_[dense_index], components_.back());
+						sparse_set_[last_sparse_index] = dense_index;
+						dense_index = INVALID_INDEX;
+					}
+					dense_set_.pop_back();
+					components_.pop_back();
+				} else {
+					dense_set_.clear();
+					sparse_set_.clear();
+					components_.clear();
+				}
+				return true;
+			}
+		}
 		return false;
-		
-		
-		// TODO: https://skypjack.github.io/2019-03-21-ecs-baf-part-2-insights/
-		// Implement sparse, dense and component array.
-		// Dense and component should be synced.
-
-
-		//if (id < sparse_set_.size()) {
-		//	auto& dense_index = sparse_set_[id];
-		//	if (dense_index != INVALID_INDEX && static_cast<std::size_t>(dense_index) < dense_set_.size()) {
-		//		if (dense_set_.size() > 1) {
-		//			// If removing last element of sparse set, swap not required.
-		//			if (dense_index == sparse_set_.back()) {
-		//				dense_index = INVALID_INDEX;
-		//				auto first_valid_index = std::find_if(sparse_set_.rbegin(), sparse_set_.rend(), [](ComponentIndex index) { return index != INVALID_INDEX; });
-		//				sparse_set_.erase(first_valid_index.base() + 1, sparse_set_.end());
-		//			} else {
-		//				// TODO: Fix swap and pop mechanism here.
-
-		//			}
-		//			dense_set_.pop_back();
-		//		} else {
-		//			dense_set_.clear();
-		//			sparse_set_.clear();
-		//		}
-		//		return true;
-		//	}
-		//}
-		//return false;
 	}
 
-	const Component& Get(const EntityId id) const {
+	const TComponent& Get(const EntityId id) const {
 		assert(id < sparse_set_.size());
 		auto dense_index = sparse_set_[id];
 		assert(dense_index != INVALID_INDEX);
-		assert(static_cast<std::size_t>(dense_index) < dense_set_.size());
-		return dense_set_[dense_index];
+		assert(static_cast<std::size_t>(dense_index) < components_.size());
+		return components_[dense_index];
 	}
 
-	Component& Get(const EntityId id) {
-		return const_cast<Component&>(static_cast<const Pool&>(*this).Get(id));
+	TComponent& Get(const EntityId id) {
+		return const_cast<TComponent&>(static_cast<const Pool&>(*this).Get(id));
 	}
 
 	bool Has(const EntityId id) const {
 		return id < sparse_set_.size() && sparse_set_[id] != INVALID_INDEX;
 	}
 private:
-	std::vector<ComponentIndex> sparse_set_;
-	std::vector<Component> dense_set_;
+	std::vector<DenseIndex> sparse_set_;
+	std::vector<SparseIndex> dense_set_;
+	std::vector<TComponent> components_;
 };
 
 // Holds the state of an entity id
@@ -191,6 +184,7 @@ struct EntityData {
 	EntityVersion version = null_version;
 	// Determines if the entity id is currently in use (or invalidated / free)
 	bool alive = false;
+	bool marked = false;
 };
 
 } // namespace internal
@@ -361,6 +355,7 @@ public:
 	std::vector<std::tuple<Entity, Ts&...>> GetComponentTuple();
 	// Return the manager's unique id. Can be useful for comparison purposes.
 	ManagerId GetId() const { return id_; }
+	void Refresh() {}
 private:
 	// Internally used method implementations.
 
@@ -378,6 +373,7 @@ private:
 	bool EntityIsAlive(const EntityId id, const EntityVersion version) const {
 		return id < entities_.size() && entities_[id].alive && version == entities_[id].version && version != internal::null_version;
 	}
+
 
 	// Event which is called upon component addition or removal from an entity.
 	void ComponentChange(const EntityId id, const ComponentId component_id, bool loop_entity);
@@ -765,7 +761,6 @@ inline std::vector<Entity> Manager::GetEntitiesWith() {
 			entities.emplace_back(id, entity_data.version, this);
 		}
 	}
-	entities.shrink_to_fit();
 	return entities;
 }
 template <typename ...Components>

@@ -291,6 +291,7 @@ struct EntityData {
 	EntityVersion version = null_version;
 	// Determines if the entity id is currently in use (or invalidated / free)
 	bool alive = false;
+	bool marked = false;
 };
 
 } // namespace internal
@@ -325,6 +326,7 @@ public:
 		systems_.~vector();
 		free_entity_ids.~deque();
 	}
+	void Refresh() {}
 	// Clear the manager, this will destroy all entities and components in the memory of the manager.
 	void Clear() {
 		entity_count_ = 0;
@@ -960,7 +962,6 @@ inline std::vector<Entity> Manager::GetEntitiesWith() {
 			entities.emplace_back(id, entity_data.version, this);
 		}
 	}
-	entities.shrink_to_fit();
 	return entities;
 }
 template <typename ...Ts>
