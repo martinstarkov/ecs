@@ -63,6 +63,7 @@ public:
 	virtual ~BasePool() = default;
 	virtual BasePool* Clone() const = 0;
 	virtual bool Remove(const Id entity) = 0;
+	virtual void Reset() = 0;
 };
 
 template <typename TComponent, type_traits::is_valid_pool_t<TComponent> = true>
@@ -73,16 +74,7 @@ public:
 		Allocate(1);
 	}
 	~Pool() {
-		// Call destructor of all addresses with valid offsets.
-		for (auto offset : offsets_) {
-			if (offset != 0) {
-				auto address = pool_ + (offset - 1);
-				address->~TComponent();
-			}
-		}
-		assert(pool_ != nullptr && "Cannot free invalid component pool pointer");
-		// Free the allocated pool memory block.
-		std::free(pool_);
+		Deallocate();
 	}
 	// Component pools should never be copied.
 	Pool(const Pool&) = delete;
@@ -107,6 +99,18 @@ public:
 		// Copy entire pool block over to new pool.
 		std::memcpy(new_block, pool_, capacity_ * sizeof(TComponent));
 		return new Pool<TComponent>(new_block, capacity_, size_, offsets_, available_offsets_);
+	}
+	// Resets memory block and all pool variables.
+	// Equivalent to constructing an entirely new pool.
+	virtual void Reset() override final {
+		Deallocate();
+		capacity_ = 0;
+		size_ = 0;
+		offsets_.clear();
+		offsets_.shrink_to_fit();
+		available_offsets_.clear();
+		available_offsets_.shrink_to_fit();
+		Allocate(1);
 	}
 	/* 
 	* @param Id of the entity to remove a component for.
@@ -186,6 +190,20 @@ private:
 		capacity_ = starting_capacity;
 		pool_ = static_cast<TComponent*>(std::malloc(capacity_ * sizeof(TComponent)));
 	}
+	// Destroys all the components in the offset array and frees the pool.
+	void Deallocate() {
+		// Call destructor of all addresses with valid offsets.
+		for (auto offset : offsets_) {
+			if (offset != 0) {
+				auto address = pool_ + (offset - 1);
+				address->~TComponent();
+			}
+		}
+		assert(pool_ != nullptr && "Cannot free invalid component pool pointer");
+		// Free the allocated pool memory block.
+		std::free(pool_);
+		assert(pool_ == nullptr && "Could not free component pool pointer");
+	}
 	/*
 	* Double the capacity of a pool if the current capacity is exceeded.
 	* @param New desired size of the pool (minimum # of components it should support).
@@ -245,10 +263,7 @@ class Manager {
 public:
 	Manager() = default;
 	~Manager() {
-		// Destroy component pools.
-		for (auto pool : pools_) {
-			delete pool;
-		}
+		DestroyPools();
 	}
 	// Managers cannot be copied. Use Clone() if you wish 
 	// to create a new manager with identical composition.
@@ -265,9 +280,7 @@ public:
 	}
 	Manager& operator=(Manager&& obj) noexcept {
 		// Deallocate previous manager pools.
-		for (auto pool : pools_) {
-			delete pool;
-		}
+		DestroyPools();
 		// Move manager into current manager.
 		next_entity_ = obj.next_entity_;
 		entities_ = std::exchange(obj.entities_, {});
@@ -325,29 +338,51 @@ public:
 		assert(clone == *this && "Cloning manager failed");
 		return clone;
 	}
-
+	// Clears entity cache and reset component pools to empty ones.
+	// Keeps entity capacity unchanged.
 	void Clear() {
 		next_entity_ = 0;
+
 		entities_.clear();
 		refresh_.clear();
 		versions_.clear();
 		free_entities_.clear();
-	}
 
+		for (auto pool : pools_) {
+			if (pool != nullptr) {
+				pool->Reset();
+			}
+		}
+	}
+	// Clears entity cache and destroys component pools.
+	// Resets entity capacity to 0.
 	void Reset() {
 		next_entity_ = 0;
+
 		entities_.clear();
 		refresh_.clear();
 		versions_.clear();
 		free_entities_.clear();
+
+		entities_.shrink_to_fit();
+		refresh_.shrink_to_fit();
+		versions_.shrink_to_fit();
+		free_entities_.shrink_to_fit();
+
+		DestroyPools();
+
+		pools_.clear();
+		pools_.shrink_to_fit();
+	}
+
+private:
+	// Destroy and deallocate all the component pools.
+	void DestroyPools() {
 		for (auto pool : pools_) {
 			delete pool;
 		}
 	}
 
-	// TODO: Add create entity function.
-
-private:
 	// Entity handles must have access to internal functions.
 	// This because ids are internal and (mostly) hidden from the user.
 	friend class Entity;
