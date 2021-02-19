@@ -6,7 +6,6 @@
 //#include "OldTests.h"
 #include "SpeedTests.h"
 
-
 int main() {
 
 	/*ManagerBasics managerBasics;

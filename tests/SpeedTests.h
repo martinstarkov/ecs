@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Timer.h"
-#include "../ECS_old_rework_refresh.h"
+#include "../ECS_final.h"
 
 #include <iostream>
 
@@ -29,6 +29,7 @@ struct Test2 {
 class SpeedTests {
 public:
 	SpeedTests() {
+		/*
 		Timer creation;
 		Timer refresh;
 		Timer entity_retrieval;
@@ -93,9 +94,7 @@ public:
 		}
 		LOG("Component removal (" << e << ") took " << removal.ElapsedSeconds() << "s");
 
-		/*for (auto& entity : entities) {
-			entity.AddComponent<Test>(99);
-		}*/
+		//for (auto& entity : entities) entity.AddComponent<Test>(99);
 
 		destruction.Start();
 		for (auto& entity : entities) {
@@ -107,6 +106,6 @@ public:
 		LOG("Entity refresh (" << e << ") took " << refresh.ElapsedSeconds() << "s");
 		
 		LOG("Manager basics passed");
-
+		*/
 	}
 };
