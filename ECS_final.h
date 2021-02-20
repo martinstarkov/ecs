@@ -189,6 +189,7 @@ private:
 		assert(pool_ == nullptr && size_ == 0 && capacity_ == 0 && "Cannot allocate memory for occupied component pool");
 		capacity_ = starting_capacity;
 		pool_ = static_cast<TComponent*>(std::malloc(capacity_ * sizeof(TComponent)));
+		assert(pool_ != nullptr && "Could not properly allocate memory for component pool");
 	}
 	// Destroys all the components in the offset array and frees the pool.
 	void Deallocate() {
@@ -231,7 +232,7 @@ private:
 			available_offsets_.pop_front();
 		} else {
 			// 'Generate' new offset at the end of the pool.
-			next_offset = size_++;
+			next_offset = ++size_;
 			// Expand pool if necessary.
 			ReallocateIfNeeded(size_);
 		}
@@ -262,13 +263,16 @@ class Entity;
 class Manager {
 public:
 	Manager() = default;
+
 	~Manager() {
 		DestroyPools();
 	}
+
 	// Managers cannot be copied. Use Clone() if you wish 
 	// to create a new manager with identical composition.
 	Manager& operator=(const Manager&) = delete;
 	Manager(const Manager&) = delete;
+
 	Manager(Manager&& obj) noexcept :
 		next_entity_{ obj.next_entity_ },
 		entities_{ std::exchange(obj.entities_, {}) },
@@ -291,6 +295,7 @@ public:
 		// Reset state of other manager.
 		obj.next_entity_ = 0;
 	}
+
 	/*
 	* Note that managers are not unique (can be cloned).
 	* It is not advisable to use this in performance critical code.
@@ -305,6 +310,7 @@ public:
 			&& free_entities_ == other.free_entities_
 			&& refresh_ == other.refresh_;
 	}
+
 	/*
 	* Note that managers are not unique (can be cloned).
 	* It is not advisable to use this in performance critical code.
@@ -314,6 +320,7 @@ public:
 	bool operator!=(const Manager& other) const {
 		return !operator==(other);
 	}
+
 	/*
 	* Copying managers accidentally is expensive.
 	* This provides a way of replicating a manager with
@@ -338,6 +345,7 @@ public:
 		assert(clone == *this && "Cloning manager failed");
 		return clone;
 	}
+
 	// Clears entity cache and reset component pools to empty ones.
 	// Keeps entity capacity unchanged.
 	void Clear() {
@@ -354,6 +362,28 @@ public:
 			}
 		}
 	}
+
+	// Cycles through all entities and destroys 
+	// ones that have been marked for destruction.
+	void Refresh() {
+		assert(entities_.size() == versions_.size() && entities_.size() == refresh_.size());
+		assert(next_entity_ <= entities_.size());
+		for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+			// Entity was marked for refresh.
+			if (refresh_[entity]) {
+				refresh_[entity] = false;
+				if (entities_[entity]) { // Marked for deletion.
+					entities_[entity] = false;
+					RemoveComponents(entity);
+					++versions_[entity];
+					free_entities_.emplace_back(entity);
+				} else { // Marked for 'creation'.
+					entities_[entity] = true;
+				}
+			}
+		}
+	}
+
 	// Clears entity cache and destroys component pools.
 	// Resets entity capacity to 0.
 	void Reset() {
@@ -375,11 +405,45 @@ public:
 		pools_.shrink_to_fit();
 	}
 
+	/*
+	* @return A handle to a new entity object.
+	*/
+	Entity CreateEntity();
+
+	/*
+	* @return A vector of handles to each living entity in the manager.
+	*/
+	std::vector<Entity> GetEntities();
+
+	/*
+	* @return The number of entities which are currently alive in the manager.
+	*/
+	std::size_t GetEntityCount() const {
+		auto count = next_entity_ - GetDeadEntityCount();
+		assert(count >= 0);
+		return count;
+	}
+	/*
+	* @return The number of entities which are currently not alive in the manager.
+	*/
+	std::size_t GetDeadEntityCount() const {
+		return free_entities_.size();
+	}
 private:
 	// Destroy and deallocate all the component pools.
 	void DestroyPools() {
 		for (auto pool : pools_) {
 			delete pool;
+		}
+	}
+	// Destroy all components associated with an entity.
+	// This requires calling a virtual Remove function 
+	// on each component pool.
+	void RemoveComponents(const internal::Id entity) {
+		for (auto pool : pools_) {
+			if (pool) {
+				pool->Remove(entity);
+			}
 		}
 	}
 
@@ -408,7 +472,26 @@ private:
 	std::deque<internal::Id> free_entities_;
 };
 
+class Entity {
+public:
+
+private:
+
+};
+
+inline Entity Manager::CreateEntity() {
 
 
+
+	return Entity{};
+}
+
+inline std::vector<Entity> GetEntities() {
+	std::vector<Entity> entities;
+
+
+
+	return entities;
+}
 
 } // namespace ecs
