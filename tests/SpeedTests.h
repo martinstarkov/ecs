@@ -29,7 +29,7 @@ struct Test2 {
 class SpeedTests {
 public:
 	SpeedTests() {
-		/*
+		
 		Timer creation;
 		Timer refresh;
 		Timer entity_retrieval;
@@ -57,7 +57,7 @@ public:
 		auto entities = manager.GetEntities();
 		assert(entities.size() == e);
 		LOG("Group entity retrieval (" << e << ") took " << entity_retrieval.ElapsedSeconds() << "s");
-
+		/*
 		addition.Start();
 		for (std::size_t i = 0; i < entities.size(); ++i) {
 			auto& entity = entities[i];

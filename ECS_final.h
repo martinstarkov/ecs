@@ -437,12 +437,12 @@ public:
 	* @param Desired capacity of the manager. If smaller than current capacity, nothing happens.
 	*/
 	void Reserve(const std::size_t capacity) {
-		if (capacity > entities_.capacity()) {
-			entities_.reserve(capacity);
-			refresh_.reserve(capacity);
-			versions_.reserve(capacity);
-		}
-		assert(entities_.capacity() == refresh_.capacity() && entities_.capacity() == versions_.capacity());
+		entities_.reserve(capacity);
+		refresh_.reserve(capacity);
+		versions_.reserve(capacity);
+		assert(entities_.capacity() == refresh_.capacity());
+		// TODO: Figure out how to test this.
+		//assert(versions_.capacity() == entities_.capacity());
 	}
 private:
 	// Destroy and deallocate all the component pools.
@@ -497,34 +497,58 @@ private:
 
 class Entity {
 public:
-	// Entity handles can be moved and copied but not constructed.
+	// Null entity constructor.
+	Entity() = default;
 
+	// Valid entity constructor.
+	Entity(const internal::Id entity, const internal::Version version, Manager* manager) : entity_{ entity }, version_{ version }, manager_{ manager } {}
+	
 	~Entity() = default;
+
+	// Entity handles can be moved and copied.
+
 	Entity& operator=(const Entity&) = default;
 	Entity(const Entity&) = default;
 	Entity& operator=(Entity&&) = default;
 	Entity(Entity&&) = default;
 private:
-	// Manager and NullEntity require access to private constructor.
-	friend class Manager;
+	// NullEntity comparison uses versions so it requires private access.
 	friend class NullEntity;
-	// Constructor used for generating a valid entity.
-	Entity(const internal::Id entity, const internal::Version version, Manager* manager) : entity_{ entity }, version_{ version }, manager_{ manager } {}
-	Entity() = default;
-
+	// Id associated with an entity in the manager.
 	internal::Id entity_{ 0 };
-	
+	// Version counter to check if handle has been invalidated.
 	internal::Version version_{ internal::null_version };
-	
+	// Parent manager pointer for calling handle functions.
 	Manager* manager_{ nullptr };
 };
 
 class NullEntity {
 public:
-
-private:
-
+	operator Entity() const {
+		return Entity{};
+	}
+	constexpr bool operator==(const NullEntity&) const {
+		return true;
+	}
+	constexpr bool operator!=(const NullEntity&) const {
+		return false;
+	}
+	bool operator==(const Entity& entity) const {
+		return entity.version_ == internal::null_version;
+	}
+	bool operator!=(const Entity& entity) const {
+		return !(*this == entity);
+	}
 };
+
+bool operator==(const Entity& entity, const NullEntity& null_entity) {
+	return null_entity == entity;
+}
+bool operator!=(const Entity& entity, const NullEntity& null_entity) {
+	return !(null_entity == entity);
+}
+
+inline constexpr NullEntity null{};
 
 inline Entity Manager::CreateEntity() {
 	internal::Id entity{ 0 };
@@ -540,17 +564,23 @@ inline Entity Manager::CreateEntity() {
 		Resize(entities_.capacity() * 2);
 	}
 	assert(entity < entities_.size());
-	assert(entities_[entity] && "Cannot create new entity from live entity");
+	assert(!entities_[entity] && "Cannot create new entity from live entity");
 	assert(!refresh_[entity] && "Cannot create new entity from refresh marked entity");
 	refresh_[entity] = true;
 	return Entity{ entity, ++versions_[entity], this };
 }
 
-inline std::vector<Entity> GetEntities() {
+inline std::vector<Entity> Manager::GetEntities() {
 	std::vector<Entity> entities;
-
-
-
+	entities.reserve(next_entity_);
+	// Cycle through all manager entities.
+	assert(entities_.size() == versions_.size());
+	assert(next_entity_ <= entities_.size());
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		if (entities_[entity]) {
+			entities.emplace_back(entity, versions_[entity], this);
+		}
+	}
 	return entities;
 }
 
