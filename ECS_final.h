@@ -259,10 +259,13 @@ private:
 // Forward declarations.
 
 class Entity;
+class NullEntity;
 
 class Manager {
 public:
-	Manager() = default;
+	Manager() {
+		Reserve(1);
+	}
 
 	~Manager() {
 		DestroyPools();
@@ -429,12 +432,32 @@ public:
 	std::size_t GetDeadEntityCount() const {
 		return free_entities_.size();
 	}
+	/*
+	* Reserve additional memory for entities.
+	* @param Desired capacity of the manager. If smaller than current capacity, nothing happens.
+	*/
+	void Reserve(const std::size_t capacity) {
+		if (capacity > entities_.capacity()) {
+			entities_.reserve(capacity);
+			refresh_.reserve(capacity);
+			versions_.reserve(capacity);
+		}
+		assert(entities_.capacity() == refresh_.capacity() && entities_.capacity() == versions_.capacity());
+	}
 private:
 	// Destroy and deallocate all the component pools.
 	void DestroyPools() {
 		for (auto pool : pools_) {
 			delete pool;
 		}
+	}
+	void Resize(const std::size_t size) {
+		if (size > entities_.size()) {
+			entities_.resize(size, false);
+			refresh_.resize(size, false);
+			versions_.resize(size, internal::null_version);
+		}
+		assert(entities_.size() == refresh_.size() && entities_.size() == versions_.size());
 	}
 	// Destroy all components associated with an entity.
 	// This requires calling a virtual Remove function 
@@ -474,16 +497,53 @@ private:
 
 class Entity {
 public:
+	// Entity handles can be moved and copied but not constructed.
+
+	~Entity() = default;
+	Entity& operator=(const Entity&) = default;
+	Entity(const Entity&) = default;
+	Entity& operator=(Entity&&) = default;
+	Entity(Entity&&) = default;
+private:
+	// Manager and NullEntity require access to private constructor.
+	friend class Manager;
+	friend class NullEntity;
+	// Constructor used for generating a valid entity.
+	Entity(const internal::Id entity, const internal::Version version, Manager* manager) : entity_{ entity }, version_{ version }, manager_{ manager } {}
+	Entity() = default;
+
+	internal::Id entity_{ 0 };
+	
+	internal::Version version_{ internal::null_version };
+	
+	Manager* manager_{ nullptr };
+};
+
+class NullEntity {
+public:
 
 private:
 
 };
 
 inline Entity Manager::CreateEntity() {
-
-
-
-	return Entity{};
+	internal::Id entity{ 0 };
+	// Pick entity from free list before trying to increment entity counter.
+	if (free_entities_.size() > 0) { 
+		entity = free_entities_.front();
+		free_entities_.pop_front();
+	} else {
+		entity = next_entity_++;
+	}
+	// Double the size of the manager if capacity is reached.
+	if (entity >= entities_.size()) {
+		Resize(entities_.capacity() * 2);
+	}
+	assert(entity < entities_.size());
+	assert(entities_[entity] && "Cannot create new entity from live entity");
+	assert(!refresh_[entity] && "Cannot create new entity from refresh marked entity");
+	refresh_[entity] = true;
+	return Entity{ entity, ++versions_[entity], this };
 }
 
 inline std::vector<Entity> GetEntities() {
