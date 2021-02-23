@@ -140,7 +140,7 @@ public:
 		// If the entity exceeds the indexing table's size, 
 		// expand the indexing table with invalid offsets.
 		if (entity >= offsets_.size()) {
-			offsets_.resize(entity + 1, 0);
+			offsets_.resize(static_cast<std::size_t>(entity) + 1, 0);
 		}
 		offsets_[entity] = offset;
 		auto address = pool_ + (offset - 1);
@@ -264,6 +264,8 @@ class NullEntity;
 class Manager {
 public:
 	Manager() {
+		// Reserve capacity for 1 entity so
+		// size will double in powers of 2.
 		Reserve(1);
 	}
 
@@ -451,6 +453,10 @@ private:
 			delete pool;
 		}
 	}
+	/*
+	* Resize vector of entities, refresh marks and versions.
+	* @param Desired size of the vectors. If smaller than current size, nothing happens.
+	*/
 	void Resize(const std::size_t size) {
 		if (size > entities_.size()) {
 			entities_.resize(size, false);
@@ -459,15 +465,37 @@ private:
 		}
 		assert(entities_.size() == refresh_.size() && entities_.size() == versions_.size());
 	}
-	// Destroy all components associated with an entity.
-	// This requires calling a virtual Remove function 
-	// on each component pool.
+	/* Destroy all components associated with an entity.
+	* This requires calling a virtual Remove function
+	* on each component pool.
+	* @param Id of entity to remove components from.
+	*/ 
 	void RemoveComponents(const internal::Id entity) {
 		for (auto pool : pools_) {
 			if (pool) {
 				pool->Remove(entity);
 			}
 		}
+	}
+	/*
+	* Marks entity for deletion during next manager refresh.
+	* @param Id of entity to mark for deletion.
+	* @param Version of entity for handle comparison.
+	*/
+	void DestroyEntity(const internal::Id entity, const internal::Version version) {
+		assert(entity < versions_.size() && entity < refresh_.size());
+		if (versions_[entity] == version) {
+			refresh_[entity] = true;
+		}
+	}
+	/*
+	* Checks if entity is valid and alive.
+	* @param Id of entity to check.
+	* @param Version of entity for handle comparison.
+	* @return True if entity is alive, false otherwise.
+	*/
+	bool IsAlive(const internal::Id entity, const internal::Version version) const {
+		return entity < versions_.size() && versions_[entity] == version && entity < entities_.size() && entities_[entity];
 	}
 
 	// Entity handles must have access to internal functions.
@@ -524,15 +552,22 @@ private:
 
 class NullEntity {
 public:
+	// Implicit conversion to entity object.
 	operator Entity() const {
 		return Entity{};
 	}
+
+	// Comparison to other null entities.
+
 	constexpr bool operator==(const NullEntity&) const {
 		return true;
 	}
 	constexpr bool operator!=(const NullEntity&) const {
 		return false;
 	}
+
+	// Comparison to entity objects.
+
 	bool operator==(const Entity& entity) const {
 		return entity.version_ == internal::null_version;
 	}
@@ -541,6 +576,8 @@ public:
 	}
 };
 
+// Entity comparison with null entity.
+
 bool operator==(const Entity& entity, const NullEntity& null_entity) {
 	return null_entity == entity;
 }
@@ -548,6 +585,9 @@ bool operator!=(const Entity& entity, const NullEntity& null_entity) {
 	return !(null_entity == entity);
 }
 
+// Null entity object.
+// Allows for comparing invalid / uninitialized 
+// entities with valid manager created entities.
 inline constexpr NullEntity null{};
 
 inline Entity Manager::CreateEntity() {
@@ -566,6 +606,7 @@ inline Entity Manager::CreateEntity() {
 	assert(entity < entities_.size());
 	assert(!entities_[entity] && "Cannot create new entity from live entity");
 	assert(!refresh_[entity] && "Cannot create new entity from refresh marked entity");
+	// Mark entity for refresh.
 	refresh_[entity] = true;
 	return Entity{ entity, ++versions_[entity], this };
 }
@@ -573,10 +614,11 @@ inline Entity Manager::CreateEntity() {
 inline std::vector<Entity> Manager::GetEntities() {
 	std::vector<Entity> entities;
 	entities.reserve(next_entity_);
-	// Cycle through all manager entities.
 	assert(entities_.size() == versions_.size());
 	assert(next_entity_ <= entities_.size());
+	// Cycle through all manager entities.
 	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
 		if (entities_[entity]) {
 			entities.emplace_back(entity, versions_[entity], this);
 		}
