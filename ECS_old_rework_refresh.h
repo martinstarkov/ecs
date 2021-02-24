@@ -317,7 +317,7 @@ private:
 	void DestroyEntity(const EntityId entity, const EntityVersion version) {
 		assert(entity < marked_.size() && entity < versions_.size());
 		if (versions_[entity] == version) {
-			marked_[entity] = false;
+			marked_[entity] = true;
 		}
 	}
 	bool IsAlive(const EntityId entity, const EntityVersion version) const {
