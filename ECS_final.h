@@ -82,12 +82,15 @@ public:
 		// Allocate enough memory for the first component.
 		Allocate(1);
 	}
+
 	~Pool() {
 		Deallocate();
 	}
+
 	// Component pools should never be copied.
 	Pool(const Pool&) = delete;
 	Pool& operator=(const Pool&) = delete;
+
 	// Move operator used for resizing a vector of component pools (in the manager class).
 	Pool(Pool&& obj) noexcept : 
 		pool_{ obj.pool_ }, 
@@ -100,6 +103,7 @@ public:
 		obj.size_ = 0;
 	}
 	Pool& operator=(Pool&&) = delete;
+
 	/*
 	* @return Pointer to an identical component pool.
 	*/
@@ -109,6 +113,7 @@ public:
 		std::memcpy(new_block, pool_, capacity_ * sizeof(TComponent));
 		return new Pool<TComponent>(new_block, capacity_, size_, offsets_, available_offsets_);
 	}
+
 	// Resets memory block and all pool variables.
 	// Equivalent to constructing an entirely new pool.
 	virtual void Reset() override final {
@@ -121,10 +126,12 @@ public:
 		available_offsets_.shrink_to_fit();
 		Allocate(1);
 	}
+
 	/* 
 	* @param entity Id of the entity to remove a component for.
+	* @return True if component was removed, false otherwise.
 	*/
-	virtual void Remove(const Id entity) override final {
+	virtual bool Remove(const Id entity) override final {
 		if (entity < offsets_.size()) {
 			auto& offset = offsets_[entity];
 			if (offset != 0) {
@@ -134,15 +141,18 @@ public:
 				available_offsets_.emplace_back(offset);
 				// Set offset to invalid.
 				offset = 0;
+				return true;
 			}
 		}
+		return false;
 	}
+
 	/* 
 	* Create / replace a component in the pool.
 	* @tparam TArgs Types of constructor arguments.
 	* @param entity Id of the entity for the added component.
 	* @param constructor_args Arguments to be passed to the component constructor.
-	* @return Pointer to the newly added / replaced component
+	* @return Pointer to the newly added / replaced component.
 	*/
 	template <typename ...TArgs, type_traits::is_valid_component_t<TComponent, TArgs...> = true>
 	TComponent* Add(const Id entity, TArgs&&... constructor_args) {
@@ -162,6 +172,7 @@ public:
 		new(address) TComponent(std::forward<TArgs>(constructor_args)...);
 		return address;
 	}
+	
 	/*
 	* @param Id of the entity to check a component for.
 	* @return entity True if the pool contains a valid offset, false otherwise.
@@ -169,6 +180,7 @@ public:
 	bool Has(const Id entity) const {
 		return entity < offsets_.size() && offsets_[entity] != 0;
 	}
+
 	/*
 	* @param Id of the entity to retrieve a component for.
 	* @return entity The memory location of a component, nullptr if it does not exist.
@@ -181,7 +193,7 @@ public:
 	}
 private:
 	// Constructor used for cloning pools.
-	Pool(const TComponent* pool, 
+	Pool(TComponent* pool, 
 		 const std::size_t capacity, 
 		 const std::size_t size, 
 		 const std::vector<Offset>& offsets, 
@@ -191,6 +203,7 @@ private:
 		size_{ size }, 
 		offsets_{ offsets }, 
 		available_offsets_{ available_offsets } {}
+	
 	/*
 	* Allocate some initial amount of memory for the pool.
 	* @param starting_capacity The starting capacity of the pool 
@@ -202,6 +215,7 @@ private:
 		pool_ = static_cast<TComponent*>(std::malloc(capacity_ * sizeof(TComponent)));
 		assert(pool_ != nullptr && "Could not properly allocate memory for component pool");
 	}
+	
 	// Destroys all the components in the offset array and frees the pool.
 	void Deallocate() {
 		// Call destructor of all addresses with valid offsets.
@@ -214,8 +228,8 @@ private:
 		assert(pool_ != nullptr && "Cannot free invalid component pool pointer");
 		// Free the allocated pool memory block.
 		std::free(pool_);
-		assert(pool_ == nullptr && "Could not free component pool pointer");
 	}
+	
 	/*
 	* Double the capacity of a pool if the current capacity is exceeded.
 	* @param new_size Desired size of the pool 
@@ -229,6 +243,7 @@ private:
 			pool_ = static_cast<TComponent*>(std::realloc(pool_, capacity_ * sizeof(TComponent)));
 		}
 	}
+	
 	/* 
 	* Checks available offset list before generating a new offset.
 	* Reallocates the pool if no new offset can be generated.
@@ -251,15 +266,20 @@ private:
 		assert(next_offset != 0 && "Could not find a valid offset from component pool");
 		return next_offset;
 	}
+	
 	// Pointer to the beginning of the pool's memory block.
 	TComponent* pool_{ nullptr };
+	
 	// Component capacity of the pool.
 	std::size_t capacity_{ 0 };
+	
 	// Number of components currently in the pool.
 	std::size_t size_{ 0 };
+	
 	// Sparse set which maps entity ids (index of element) 
 	// to offsets from the start of the pool_ pointer.
 	std::vector<Offset> offsets_;
+	
 	// List of free offsets (avoid reallocating entire pool block).
 	// Choice of double ended queue as popping the front offset
 	// allows for efficient component memory locality.
@@ -299,6 +319,7 @@ public:
 		free_entities_{ std::exchange(obj.free_entities_, {}) } {
 		obj.next_entity_ = 0;
 	}
+	
 	Manager& operator=(Manager&& obj) noexcept {
 		// Deallocate previous manager pools.
 		DestroyPools();
@@ -385,6 +406,7 @@ public:
 	void Refresh() {
 		assert(entities_.size() == versions_.size() && entities_.size() == refresh_.size());
 		assert(next_entity_ <= entities_.size());
+		internal::Id count = count_;
 		for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
 			// Entity was marked for refresh.
 			if (refresh_[entity]) {
@@ -394,11 +416,15 @@ public:
 					RemoveComponents(entity);
 					++versions_[entity];
 					free_entities_.emplace_back(entity);
+					--count;
 				} else { // Marked for 'creation'.
 					entities_[entity] = true;
+					++count;
 				}
 			}
 		}
+		assert(count >= 0);
+		count_ = count;
 	}
 
 	// Clears entity cache and destroys component pools.
@@ -436,16 +462,16 @@ public:
 	* @return The number of entities which are currently alive in the manager.
 	*/
 	std::size_t GetEntityCount() const {
-		auto count = next_entity_ - GetDeadEntityCount();
-		assert(count >= 0);
-		return count;
+		return count_;
 	}
+	
 	/*
 	* @return The number of entities which are currently not alive in the manager.
 	*/
 	std::size_t GetDeadEntityCount() const {
 		return free_entities_.size();
 	}
+	
 	/*
 	* Reserve additional memory for entities.
 	* @param capacity Desired capacity of the manager. 
@@ -460,30 +486,17 @@ public:
 		//assert(versions_.capacity() == entities_.capacity());
 	}
 private:
-	/*
-	* Retrieve a pointer to the component pool with matching component id.
-	* @tparam TComponent Type of component to retrieve pool for.
-	* @param component Id of component to retrieve pool for.
-	* @return Pointer to the component pool, nullptr if pool does not exist.
-	*/
-	template <typename TComponent>
-	internal::Pool<TComponent>* GetPool(const internal::Id component) {
-		assert(component == GetComponentId<TComponent>());
-		if (component < pools_.size()) {
-			return static_cast<internal::Pool<TComponent>*>(pools_[component]);
-		}
-		return nullptr;
-	}
 	// Destroy and deallocate all the component pools.
 	void DestroyPools() {
 		for (auto pool : pools_) {
 			delete pool;
 		}
 	}
+	
 	/*
 	* Resize vector of entities, refresh marks and versions.
-	* @param size Desired size of the vectors. 
 	* If smaller than current size, nothing happens.
+	* @param size Desired size of the vectors. 
 	*/
 	void Resize(const std::size_t size) {
 		if (size > entities_.size()) {
@@ -493,9 +506,10 @@ private:
 		}
 		assert(entities_.size() == refresh_.size() && entities_.size() == versions_.size());
 	}
-	/* Destroy all components associated with an entity.
-	* This requires calling a virtual Remove function
-	* on each component pool.
+	
+	/* 
+	* Destroy all components associated with an entity.
+	* Results in virtual function call on each component pool.
 	* @param entity Id of entity to remove components from.
 	*/ 
 	void RemoveComponents(const internal::Id entity) {
@@ -505,6 +519,7 @@ private:
 			}
 		}
 	}
+	
 	/*
 	* Marks entity for deletion during next manager refresh.
 	* @param entity Id of entity to mark for deletion.
@@ -517,6 +532,7 @@ private:
 			refresh_[entity] = true;
 		}
 	}
+	
 	/*
 	* Checks if entity is valid and alive.
 	* @param entity Id of entity to check.
@@ -527,7 +543,110 @@ private:
 		return entity < versions_.size() 
 			&& versions_[entity] == version 
 			&& entity < entities_.size() 
-			&& entities_[entity];
+			&& (entities_[entity] || refresh_[entity]);
+	}
+
+	/*
+	* Retrieve a pointer to the component pool with matching component id.
+	* @tparam TComponent Type of component to retrieve pool for.
+	* @param component Id of component to retrieve pool for.
+	* @return Pointer to the component pool, nullptr if pool does not exist.
+	*/
+	template <typename TComponent>
+	internal::Pool<TComponent>* GetPool(const internal::Id component) const {
+		assert(component == GetComponentId<TComponent>());
+		if (component < pools_.size()) {
+			return static_cast<internal::Pool<TComponent>*>(pools_[component]);
+		}
+		return nullptr;
+	}
+
+	/*
+	* Retrieves a const reference to the specified component type.
+	* If entity does not have component, debug assertion is called.
+	* @tparam TComponent Type of component to retrieve.
+	* @param entity Id of entity to retrieve component for.
+	* @param component Id of component to retrieve.
+	* @return Const reference to the component.
+	*/
+	template <typename TComponent>
+	const TComponent& GetComponent(const internal::Id entity, const internal::Id component) const {
+		const auto pool = GetPool<TComponent>(component);
+		assert(pool != nullptr && "Cannot retrieve component which has not been added to manager");
+		const auto component_address = pool->Get(entity);
+		// Debug tip: 
+		// If you ended up here and want to find out which
+		// entity called this function, follow the call stack.
+		assert(component_address != nullptr && "Cannot get component which entity does not have");
+		return *component_address;
+	}
+
+	/*
+	* Returns whether or not an entity has the component type.
+	* @tparam TComponent Type of component to check.
+	* @param entity Id of entity to check component for.
+	* @param component Id of component to check.
+	* @return True if entity has component, false otherwise.
+	*/
+	template <typename TComponent>
+	bool HasComponent(const internal::Id entity, const internal::Id component) const {
+		const auto pool = GetPool<TComponent>(component);
+		return pool != nullptr && pool->Has(entity);
+	}
+
+	/*
+	* Returns whether or not an entity has all the given component types.
+	* @tparam TComponents Types of components to check.
+	* @param entity Id of entity to check components for.
+	* @return True if entity has each component type, false otherwise.
+	*/
+	template <typename ...TComponents>
+	bool HasComponents(const internal::Id entity) const {
+		return { (HasComponent<TComponents>(entity, GetComponentId<TComponents>()) && ...) };
+	}
+
+	/*
+	* Adds a component to the specified manager entity.
+	* If entity already has component type, it is replaced.
+	* @tparam TComponent Type of component to add.
+	* @tparam TArgs Types of component constructor arguments.
+	* @param entity Id of entity to add component to.
+	* @param component Id of component to add.
+	* @param constructor_args Arguments for constructing component.
+	* @return Reference to the newly added / replaced component.
+	*/
+	template <typename TComponent, typename ...TArgs>
+	TComponent& AddComponent(const internal::Id entity, const internal::Id component, TArgs&&... constructor_args) {
+		static_assert(std::is_constructible_v<TComponent, TArgs...>, "Cannot construct component type from given arguments");
+		static_assert(std::is_destructible_v<TComponent>, "Cannot add component which does not have a valid destructor");
+		if (component >= pools_.size()) {
+			pools_.resize(static_cast<std::size_t>(component) + 1, nullptr);
+		}
+		auto pool = GetPool<TComponent>(component);
+		bool new_component = pool == nullptr;
+		// If component type has not been added to manager,
+		// generate a new pool for the given type.
+		if (new_component) {
+			pool = new internal::Pool<TComponent>();
+			pools_[component] = pool;
+		}
+		assert(pool != nullptr && "Could not create new component pool correctly");
+		return *pool->Add(entity, std::forward<TArgs>(constructor_args)...);
+	}
+
+	/*
+	* Removes a component from the specified manager entity.
+	* If entity does not have component type, nothing happens.
+	* @tparam TComponent Type of component to remove.
+	* @param entity Id of entity to remove component from.
+	* @param component Id of component to remove.
+	*/
+	template <typename TComponent>
+	void RemoveComponent(const internal::Id entity, const internal::Id component) {
+		auto pool = GetPool<TComponent>(component);
+		assert(pool != nullptr && "Cannot remove component which has never been added to a manager entity");
+		// Static call to derived component pool class (no dynamic dispatch).
+		pool->internal::Pool<TComponent>::Remove(entity);
 	}
 
 	/*
@@ -539,7 +658,7 @@ private:
 	static internal::Id GetComponentId() {
 		// Get the next available id save that id as
 		// a static variable for the component type.
-		static internal::Id id = ComponentCount()++;
+		static internal::Id id{ ComponentCount()++ };
 		return id;
 	}
 	/* 
@@ -556,23 +675,33 @@ private:
 	// Entity handles must have access to internal functions.
 	// This because ids are internal and (mostly) hidden from the user.
 	friend class Entity;
+	
 	// Stores the next valid entity id.
 	// This will be incremented if no free id is found.
 	internal::Id next_entity_{ 0 };
+
+	// Stores the current alive entity count (purely for retrieval).
+	internal::Id count_{ 0 };
+	
 	// Vector index corresponds to the entity's id.
 	// Element corresponds to whether or not the entity 
 	// is currently alive.
 	std::vector<bool> entities_;
+	
 	// Vector index corresponds to the entity's id.
 	// Element corresponds to a flag for refreshing the entity.
 	std::vector<bool> refresh_;
+	
 	// Vector index corresponds to the entity's id.
 	// Element corresponds to the current version of the id.
 	std::vector<internal::Version> versions_;
+	
 	// Vector index corresponds to the component's unique id.
 	// If a component has not been added to a manager entity, 
 	// its corresponding pool will be nullptr.
-	std::vector<internal::BasePool*> pools_;
+	// Mutable as pools are accessed from const methods.
+	mutable std::vector<internal::BasePool*> pools_;
+	
 	// Free list of entity ids to be used 
 	// before incrementing next_entity_.
 	std::deque<internal::Id> free_entities_;
@@ -594,13 +723,132 @@ public:
 	Entity(const Entity&) = default;
 	Entity& operator=(Entity&&) = default;
 	Entity(Entity&&) = default;
+
+	// Entity handle comparison operators.
+
+	bool operator==(const Entity& entity) const {
+		return entity_ == entity.entity_
+			&& version_ == entity.version_
+			&& manager_ == entity.manager_;
+	}
+	bool operator!=(const Entity& entity) const {
+		return !(*this == entity);
+	}
+
+	/*
+	* Retrieves the parent manager of the entity.
+	* @return Reference to the parent manager.
+	*/
+	Manager& GetManager() {
+		assert(manager_ != nullptr && "Cannot return parent manager of a null entity");
+		return *manager_;
+	}
+
+	/*
+	* Checks if entity handle is valid and alive.
+	* @return True if entity is alive, false otherwise.
+	*/
+	bool IsAlive() const {
+		return manager_ != nullptr && manager_->IsAlive(entity_, version_);
+	}
+
+	/*
+	* Retrieves a const reference to the specified component type. 
+	* If entity does not have component, debug assertion is called.
+	* @tparam TComponent Type of component.
+	* @return Const reference to the component.
+	*/
+	template <typename TComponent>
+	const TComponent& GetComponent() const {
+		assert(IsAlive() && "Cannot retrieve component for dead or null entity");
+		return manager_->GetComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
+	}
+
+	/*
+	* Retrieves a reference to the specified component type.
+	* If entity does not have component, debug assertion is called.
+	* @tparam TComponent Type of component.
+	* @return Reference to the component.
+	*/
+	template <typename TComponent>
+	TComponent& GetComponent() {
+		return const_cast<TComponent&>(static_cast<const Entity&>(*this).GetComponent<TComponent>());
+	}
+
+	/*
+	* Adds a component to the entity.
+	* If entity already has component type, it is replaced.
+	* @tparam TComponent Type of component to add.
+	* @tparam TArgs Types of component constructor arguments.
+	* @param constructor_args Arguments for constructing component.
+	* @return Reference to the newly added / replaced component.
+	*/
+	template <typename TComponent, typename ...TArgs>
+	TComponent& AddComponent(TArgs&&... constructor_args) {
+		assert(IsAlive() && "Cannot add component to dead or null entity");
+		return manager_->AddComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>(), std::forward<TArgs>(constructor_args)...);
+	}
+
+	/*
+	* Checks if entity has a component.
+	* @tparam TComponent Type of component to check.
+	* @return True is entity has component, false otherwise.
+	*/
+	template <typename TComponent>
+	bool HasComponent() {
+		assert(IsAlive() && "Cannot check if dead or null entity has a component");
+		return manager_->HasComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
+	}
+
+	/*
+	* Check if entity has all the given components.
+	* @tparam TComponents Types of components to check.
+	* @return True if entity has each component, false otherwise.
+	*/
+	template <typename ...TComponents>
+	bool HasComponents() {
+		assert(IsAlive() && "Cannot check if dead or null entity has components");
+		return manager_->HasComponents<TComponents...>(entity_);
+	}
+
+	/*
+	* Removes a component from the entity.
+	* If entity does not have component type, nothing happens.
+	* @tparam TComponent Type of component to remove.
+	*/
+	template <typename TComponent>
+	void RemoveComponent() {
+		assert(IsAlive() && "Cannot remove component from dead or null entity");
+		manager_->RemoveComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
+	}
+
+	/*
+	* Removes all components from the entity.
+	*/
+	void RemoveComponents() {
+		assert(IsAlive() && "Cannot remove all components from dead or null entity");
+		return manager_->RemoveComponents(entity_);
+	}
+
+	// Marks the entity for destruction.
+	// Note that the entity will remain alive and valid 
+	// until Refresh() is called on its parent manager.
+	// If entity is already marked for deletion, nothing happens.
+	void Destroy() {
+		if (IsAlive()) {
+			manager_->DestroyEntity(entity_, version_);
+		}
+	}
 private:
 	// NullEntity comparison uses versions so it requires private access.
 	friend class NullEntity;
+
 	// Id associated with an entity in the manager.
 	internal::Id entity_{ 0 };
+	
 	// Version counter to check if handle has been invalidated.
 	internal::Version version_{ internal::null_version };
+	
 	// Parent manager pointer for calling handle functions.
 	Manager* manager_{ nullptr };
 };
@@ -633,10 +881,10 @@ public:
 
 // Entity comparison with null entity.
 
-bool operator==(const Entity& entity, const NullEntity& null_entity) {
+inline bool operator==(const Entity& entity, const NullEntity& null_entity) {
 	return null_entity == entity;
 }
-bool operator!=(const Entity& entity, const NullEntity& null_entity) {
+inline bool operator!=(const Entity& entity, const NullEntity& null_entity) {
 	return !(null_entity == entity);
 }
 
