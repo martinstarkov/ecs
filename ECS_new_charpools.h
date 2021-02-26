@@ -114,7 +114,7 @@ public:
 	TComponent* Add(const EntityId entity, TArgs&&... args) {
 		auto offset = GetFreeOffset();
 		if (entity >= offsets_.size()) { // if the entity id exceeds the indexing table's size, expand the indexing table
-			offsets_.resize(entity + 1, INVALID_OFFSET);
+			offsets_.resize(static_cast<std::size_t>(entity) + 1, INVALID_OFFSET);
 		}
 		offsets_[entity] = offset;
 		auto address = pool_ + offset;

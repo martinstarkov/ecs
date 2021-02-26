@@ -12,27 +12,15 @@ public:
 		assert(manager == manager2);
 		assert(manager2 == manager);
 
-		// auto new_manager = manager; // does not compile as manager copying is not allowed.
-
-		// Entity difference equality test.
-		manager2.entities_.resize(1);
-		assert(manager != manager2);
-		assert(manager2 != manager);
-		manager2.entities_.pop_back();
-		assert(manager == manager2);
-
-		// Pool difference equality test.
-		manager2.component_pools_.resize(1);
-		assert(manager != manager2);
-		manager2.component_pools_.pop_back();
-		assert(manager == manager2);
-
 		// Move construction.
-		manager.component_pools_.resize(1);
-		manager2.component_pools_.resize(1);
-		auto manager3 = std::move(manager2);
+		ecs::Manager manager3 = std::move(manager2);
 		assert(manager == manager3);
-		assert(manager != manager2);
+		assert(manager == manager2);
+		auto manager4 = std::move(manager3.Clone());
+		assert(manager4 == manager3);
+
+		auto manager5 = manager4.Clone();
+		assert(manager5 == manager4);
 
 		LOG("Manager basics passed");
 

@@ -41,7 +41,7 @@ public:
 
 		ecs::Manager manager;
 
-		int e = 100000000;
+		int e = 100000000; // 100 million
 		//int e = 100;
 
 		creation.Start();
@@ -57,7 +57,7 @@ public:
 		auto entities = manager.GetEntities();
 		assert(entities.size() == e);
 		LOG("Group entity retrieval (" << e << ") took " << entity_retrieval.ElapsedSeconds() << "s");
-		/*
+		
 		addition.Start();
 		for (std::size_t i = 0; i < entities.size(); ++i) {
 			auto& entity = entities[i];
@@ -106,6 +106,5 @@ public:
 		LOG("Entity refresh (" << e << ") took " << refresh.ElapsedSeconds() << "s");
 		
 		LOG("Manager basics passed");
-		*/
 	}
 };
