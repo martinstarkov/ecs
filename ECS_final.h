@@ -24,8 +24,6 @@ SOFTWARE.
 
 */
 
-// TODO: Add system destruction and cloning.
-
 #pragma once
 
 #include <cstdlib> // std::size_t, std::malloc, std::realloc, std::free
@@ -115,6 +113,7 @@ public:
 	virtual BasePool* Clone() const = 0;
 	virtual bool Remove(const Id entity) = 0;
 	virtual void Reset() = 0;
+	virtual const std::tuple<Offset, Offset, const std::vector<Offset>&, const std::deque<Offset>&> GetVariables() const = 0;
 };
 
 /*
@@ -236,7 +235,12 @@ public:
 		}
 		return nullptr;
 	}
+
+	virtual const std::tuple<Offset, Offset, const std::vector<Offset>&, const std::deque<Offset>&> GetVariables() const override final {
+		return std::make_tuple(size_, capacity_, offsets_, available_offsets_);
+	}
 private:
+
 	// Constructor used for cloning pools.
 	Pool(TComponent* pool, 
 		 const Offset capacity, 
@@ -340,6 +344,7 @@ public:
 private:
 	virtual void FlagForReset(const internal::Id component) = 0;
 	virtual void ResetIfFlagged() = 0;
+	virtual const std::tuple<const std::vector<bool>&, bool> GetVariables() const = 0;
 };
 
 } // namespace internal
@@ -355,12 +360,17 @@ public:
 	virtual ~System() = default;
 	using Components = internal::type_traits::pack<TComponents...>;
 protected:
+
 	Manager& GetManager() {
 		assert(manager_ != nullptr && "Cannot retrieve manager for uninitialized system");
 		return *manager_; 
 	}
 	std::vector<std::tuple<Entity, TComponents&...>> entities;
 private:
+
+	virtual const std::tuple<const std::vector<bool>&, bool> GetVariables() const override final {
+		return std::make_tuple(components, refresh_cache_);
+	}
 
 	friend class Manager;
 
@@ -398,6 +408,7 @@ public:
 	}
 
 	~Manager() {
+		DestroySystems();
 		DestroyPools();
 	}
 
@@ -411,19 +422,22 @@ public:
 		entities_{ std::exchange(obj.entities_, {}) },
 		refresh_{ std::exchange(obj.refresh_, {}) },
 		versions_{ std::exchange(obj.versions_, {}) },
+		systems_{ std::exchange(obj.systems_, {}) },
 		pools_{ std::exchange(obj.pools_, {}) },
 		free_entities_{ std::exchange(obj.free_entities_, {}) } {
 		obj.next_entity_ = 0;
 	}
 
 	Manager& operator=(Manager&& obj) noexcept {
-		// Deallocate previous manager pools.
+		// Destroy previous manager internals.
+		DestroySystems();
 		DestroyPools();
 		// Move manager into current manager.
 		next_entity_ = obj.next_entity_;
 		entities_ = std::exchange(obj.entities_, {});
 		refresh_ = std::exchange(obj.refresh_, {});
 		versions_ = std::exchange(obj.versions_, {});
+		systems_ = std::exchange(obj.systems_, {});
 		pools_ = std::exchange(obj.pools_, {});
 		free_entities_ = std::exchange(obj.free_entities_, {});
 		// Reset state of other manager.
@@ -440,9 +454,16 @@ public:
 		return next_entity_ == other.next_entity_
 			&& entities_ == other.entities_
 			&& versions_ == other.versions_
-			&& pools_ == other.pools_
 			&& free_entities_ == other.free_entities_
-			&& refresh_ == other.refresh_;
+			&& refresh_ == other.refresh_
+			&& std::equal(std::begin(systems_), std::end(systems_),
+					   std::begin(other.systems_), std::end(other.systems_),
+				[](const internal::BaseSystem* lhs, const internal::BaseSystem* rhs) {
+				return lhs && rhs && lhs->GetVariables() == rhs->GetVariables();})
+			&& std::equal(std::begin(pools_), std::end(pools_),
+							 std::begin(other.pools_), std::end(other.pools_),
+							 [](const internal::BasePool* lhs, const internal::BasePool* rhs) {
+				return lhs && rhs && lhs->GetVariables() == rhs->GetVariables();});
 	}
 
 	/*
@@ -469,6 +490,13 @@ public:
 		clone.refresh_ = refresh_;
 		clone.versions_ = versions_;
 		clone.free_entities_ = free_entities_;
+		clone.systems_.resize(systems_.size(), nullptr);
+		for (std::size_t i = 0; i < systems_.size(); ++i) {
+			auto system = systems_[i];
+			if (system != nullptr) {
+				clone.systems_[i] = system->Clone();
+			}
+		}
 		clone.pools_.resize(pools_.size(), nullptr);
 		for (std::size_t i = 0; i < pools_.size(); ++i) {
 			auto pool = pools_[i];
@@ -654,6 +682,12 @@ private:
 	void DestroyPools() {
 		for (auto pool : pools_) {
 			delete pool;
+		}
+	}
+
+	void DestroySystems() {
+		for (auto system : systems_) {
+			delete system;
 		}
 	}
 	
