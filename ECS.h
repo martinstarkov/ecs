@@ -110,7 +110,7 @@ public:
 				return *components_.emplace(components_.begin() + dense_index, std::forward<TArgs>(args)...);
 			}
 		} else {
-			sparse_set_.resize(id + 1, INVALID_INDEX);
+			sparse_set_.resize(static_cast<std::size_t>(id) + 1, INVALID_INDEX);
 		}
 		sparse_set_[id] = dense_set_.size();
 		dense_set_.emplace_back(id);

@@ -41,8 +41,8 @@ public:
 
 		ecs::Manager manager;
 
-		int e = 100000000; // 100 million
-		//int e = 100;
+		//int e = 100000000; // 100 million
+		int e = 1000;
 
 		creation.Start();
 		for (auto i = 0; i < e; ++i) {
@@ -59,7 +59,7 @@ public:
 		LOG("Group entity retrieval (" << e << ") took " << entity_retrieval.ElapsedSeconds() << "s");
 		
 		addition.Start();
-		for (std::size_t i = 0; i < entities.size(); ++i) {
+		for (int i = 0; static_cast<std::size_t>(i) < entities.size(); ++i) {
 			auto& entity = entities[i];
 			entity.AddComponent<Test>(i);
 			entity.AddComponent<Test2>(i);

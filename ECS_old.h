@@ -1017,7 +1017,7 @@ template <typename T>
 inline void Manager::ForEachEntity(T&& function) {
 	// TODO: Write some tests for lambda function parameters.
 	auto entities = GetEntities();
-	for (auto entity : entities) {
+	for (auto& entity : entities) {
 		// Call the lambda for each entity in the manager
 		function(entity);
 	}
