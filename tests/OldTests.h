@@ -61,7 +61,7 @@ struct Test7System : public ecs::System<TPos<6>, TPos<7>> {
 struct Test8System : public ecs::System<TPos<0>, TPos<1>> {
 	void Update() {
 		for (auto [entity, zero, one] : entities) {
-			LOG("Entity " << entity.GetId() << " has a zero and a one : [" << zero.a << ", " << one.a << "]");
+			LOG("Entity " << " has a zero and a one : [" << zero.a << ", " << one.a << "]");
 		}
 	}
 };
