@@ -180,7 +180,7 @@ public:
 		if (entity < offsets_.size()) {
 			auto& offset = offsets_[entity];
 			if (offset != 0) {
-				auto address = pool_ + (offset - 1);
+				TComponent* address = pool_ + (offset - 1);
 				// Call destructor on component memory location.
 				address->~TComponent();
 				available_offsets_.emplace_back(offset);
@@ -209,7 +209,7 @@ public:
 		}
 		bool replace = offsets_[entity] != 0;
 		offsets_[entity] = offset;
-		auto address = pool_ + (offset - 1);
+		TComponent* address = pool_ + (offset - 1);
 		// Call destructor on potential previous components
 		// at the address.
 		assert(address != nullptr);
@@ -277,7 +277,7 @@ private:
 		// Call destructor of all addresses with valid offsets.
 		for (auto offset : offsets_) {
 			if (offset != 0) {
-				auto address = pool_ + (offset - 1);
+				TComponent* address = pool_ + (offset - 1);
 				address->~TComponent();
 			}
 		}
@@ -576,8 +576,8 @@ public:
 			if (refresh_[entity]) {
 				refresh_[entity] = false;
 				if (entities_[entity]) { // Marked for deletion.
-					entities_[entity] = false;
 					RemoveComponents(entity);
+					entities_[entity] = false;
 					++versions_[entity];
 					free_entities_.emplace_back(entity);
 					--count;
@@ -628,6 +628,8 @@ public:
 
 	template <typename ...TComponents>
 	std::vector<Entity> GetEntitiesWithout();
+
+	void DestroyEntities();
 
 	template <typename ...TComponents>
 	void DestroyEntitiesWith();
@@ -812,11 +814,10 @@ private:
 
 	void ComponentChange(const internal::Id entity, const internal::Id component) {
 		assert(entity < entities_.size());
-		if (entities_[entity]) {
-			for (auto& system : systems_) {
-				if (system) {
-					system->FlagForResetIfDependsOn(component);
-				}
+		// Note that even a "not currently alive" can trigger cache refresh.
+		for (auto& system : systems_) {
+			if (system) {
+				system->FlagForResetIfDependsOn(component);
 			}
 		}
 	}
@@ -1306,10 +1307,10 @@ inline std::vector<Entity> Manager::GetEntitiesWithout() {
 	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
 		// If entity is alive, add its handle to the entities vector.
 		if (entities_[entity]) {
-			bool has_components = {
-						(std::get<internal::Pool<TComponents>*>(pools)->Has(entity) && ...)
+			bool does_not_have_components = {
+						(!std::get<internal::Pool<TComponents>*>(pools)->Has(entity) || ...)
 			};
-			if (!has_components) {
+			if (does_not_have_components) {
 				entities.emplace_back(entity, versions_[entity], this);
 			}
 		}
@@ -1318,22 +1319,69 @@ inline std::vector<Entity> Manager::GetEntitiesWithout() {
 }
 
 inline std::vector<Entity> Manager::GetEntities() {
-	return GetEntitiesWith<>();
+	std::vector<Entity> entities;
+	entities.reserve(next_entity_);
+	assert(entities_.size() == versions_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			entities.emplace_back(entity, versions_[entity], this);
+		}
+	}
+	return entities;
 }
 
 template <typename ...TComponents>
 inline void Manager::DestroyEntitiesWith() {
-	auto entities = GetEntitiesWith<TComponents...>();
-	for (auto entity : entities) {
-		entity.Destroy();
+	assert(entities_.size() == refresh_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cache component pools.
+	auto pools = std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...);
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			bool has_components = {
+						(std::get<internal::Pool<TComponents>*>(pools)->Has(entity) && ...)
+			};
+			if (has_components) {
+				refresh_[entity] = true;
+			}
+		}
 	}
 }
 
 template <typename ...TComponents>
 inline void Manager::DestroyEntitiesWithout() {
-	auto entities = GetEntitiesWithout<TComponents...>();
-	for (auto entity : entities) {
-		entity.Destroy();
+	assert(entities_.size() == refresh_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cache component pools.
+	auto pools = std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...);
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			bool does_not_have_components = {
+						(!std::get<internal::Pool<TComponents>*>(pools)->Has(entity) || ...)
+			};
+			if (does_not_have_components) {
+				refresh_[entity] = true;
+			}
+		}
+	}
+}
+
+inline void Manager::DestroyEntities() {
+	assert(entities_.size() == refresh_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			refresh_[entity] = true;
+		}
 	}
 }
 
