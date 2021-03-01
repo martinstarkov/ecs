@@ -884,16 +884,17 @@ private:
 			pools_.resize(static_cast<std::size_t>(component) + 1, nullptr);
 		}
 		auto pool = GetPool<TComponent>(component);
-		bool new_component = pool == nullptr;
+		bool new_pool = pool == nullptr;
 		// If component type has not been added to manager,
 		// generate a new pool for the given type.
-		if (new_component) {
+		if (new_pool) {
 			pool = new internal::Pool<TComponent>();
 			pools_[component] = pool;
 		}
 		assert(pool != nullptr && "Could not create new component pool correctly");
+		bool new_component = !pool->Has(entity);
 		auto& component_reference = *pool->Add(entity, std::forward<TArgs>(constructor_args)...);
-		if (new_component) {
+		if (new_pool || new_component) {
 			ComponentChange(entity, component);
 		}
 		return component_reference;
