@@ -704,7 +704,7 @@ public:
 	}
 
 	template <typename TSystem>
-	void UpdateSystem(bool refresh_manager = true) {
+	void UpdateSystem(bool refresh_manager = false) {
 		static_assert(internal::type_traits::is_valid_system_v<TSystem>, "Cannot update a system which does not inherit from ecs::System class");
 		UpdateSystemImpl<TSystem>(refresh_manager);
 	}

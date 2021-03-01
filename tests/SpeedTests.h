@@ -53,6 +53,10 @@ public:
 		manager.Refresh();
 		LOG("Entity refresh took (" << e << ") took " << refresh.ElapsedSeconds() << "s");
 
+		refresh.Start();
+		manager.Refresh();
+		LOG("Useless Entity refresh took (" << e << ") took " << refresh.ElapsedSeconds() << "s");
+
 		entity_retrieval.Start();
 		auto entities = manager.GetEntities();
 		assert(entities.size() == e);
