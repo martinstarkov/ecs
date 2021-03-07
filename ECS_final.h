@@ -1263,7 +1263,7 @@ inline Entity Manager::CreateEntity() {
 	}
 	// Double the size of the manager if capacity is reached.
 	if (entity >= entities_.size()) {
-		Resize(entities_.capacity() * 2);
+		Resize(versions_.capacity() * 2);
 	}
 	assert(entity < entities_.size());
 	assert(!entities_[entity] && "Cannot create new entity from live entity");
