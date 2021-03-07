@@ -35,6 +35,7 @@ SOFTWARE.
 #include <functional> // std::hash
 #include <utility> // std::exchange
 #include <algorithm> // std::max_element
+#include <memory> // std::allocator
 #include <type_traits> // std::enable_if_t, std::is_destructible_v, std::is_base_of_v, etc
 #include <cassert> // assert
 
@@ -44,9 +45,9 @@ namespace ecs {
 
 class Entity;
 class NullEntity;
-class Manager;
 template <typename ...TComponents>
 class System;
+class Manager;
 
 namespace internal {
 
@@ -62,6 +63,11 @@ using Version = std::uint32_t;
 // Type representing the offset of a component 
 // from the start of a memory block in a pool.
 using Offset = std::uint32_t;
+
+// Constants.
+
+// Represents an invalid version number.
+inline constexpr Version null_version{ 0 };
 
 namespace type_traits {
 
@@ -98,6 +104,13 @@ private:
 
 };
 
+/* 
+* Container which stores the offsets of components
+* from the beginning of a memory block pointer.
+* Offsets can be accessed using unique entity ids.
+* Component must be move constructible and destructible.
+* @tparam TComponent Type of component to store in the pool.
+*/
 template <typename TComponent, 
 	type_traits::is_valid_component<TComponent> = true>
 class Pool : public BasePool {
@@ -388,10 +401,228 @@ private:
 
 class Entity {
 public:
+	// Null entity constructor.
+	Entity() = default;
 
+	// Valid entity constructor.
+	// This is not intended for use by users of the ECS library.
+	// It must remain public in order to allow vector emplace construction.
+	Entity(const internal::Id entity, const internal::Version version, Manager* manager) : entity_{ entity }, version_{ version }, manager_{ manager } {}
+
+	~Entity() = default;
+
+	// Entity handles can be moved and copied.
+
+	Entity& operator=(const Entity&) = default;
+	Entity(const Entity&) = default;
+	Entity& operator=(Entity&&) = default;
+	Entity(Entity&&) = default;
+
+	// Entity handle comparison operators.
+
+	bool operator==(const Entity& entity) const {
+		return entity_ == entity.entity_
+			&& version_ == entity.version_
+			&& manager_ == entity.manager_;
+	}
+	bool operator!=(const Entity& entity) const {
+		return !(*this == entity);
+	}
+
+	/*
+	* Retrieves const reference to the parent manager of the entity.
+	* @return Const reference to the parent manager.
+	*/
+	const Manager& GetManager() const {
+		assert(manager_ != nullptr && "Cannot return parent manager of a null entity");
+		return *manager_;
+	}
+
+	/*
+	* Retrieves reference to the parent manager of the entity.
+	* @return Reference to the parent manager.
+	*/
+	Manager& GetManager() {
+		return const_cast<Manager&>(static_cast<const Entity&>(*this).GetManager());
+	}
+
+	/*
+	* Checks if entity handle is valid and alive.
+	* @return True if entity is alive, false otherwise.
+	*/
+	bool IsAlive() const {
+		return manager_ != nullptr && manager_->IsAlive(entity_, version_);
+	}
+
+	/*
+	* Retrieves a const reference to the specified component type.
+	* If entity does not have component, debug assertion is called.
+	* @tparam TComponent Type of component.
+	* @return Const reference to the component.
+	*/
+	template <typename TComponent>
+	const TComponent& GetComponent() const {
+		assert(IsAlive() && "Cannot retrieve component for dead or null entity");
+		return manager_->GetComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
+	}
+
+	/*
+	* Retrieves a reference to the specified component type.
+	* If entity does not have component, debug assertion is called.
+	* @tparam TComponent Type of component.
+	* @return Reference to the component.
+	*/
+	template <typename TComponent>
+	TComponent& GetComponent() {
+		return const_cast<TComponent&>(static_cast<const Entity&>(*this).GetComponent<TComponent>());
+	}
+
+	template <typename ...TComponents>
+	std::tuple<const TComponents&...> GetComponents() const {
+		return std::forward_as_tuple<const TComponents&...>(GetComponent<TComponents>()...);
+	}
+
+	template <typename ...TComponents>
+	std::tuple<TComponents&...> GetComponents() {
+		return std::forward_as_tuple<TComponents&...>(GetComponent<TComponents>()...);
+	}
+
+	/*
+	* Adds a component to the entity.
+	* If entity already has component type, it is replaced.
+	* @tparam TComponent Type of component to add.
+	* @tparam TArgs Types of component constructor arguments.
+	* @param constructor_args Arguments for constructing component.
+	* @return Reference to the newly added / replaced component.
+	*/
+	template <typename TComponent, typename ...TArgs>
+	TComponent& AddComponent(TArgs&&... constructor_args) {
+		static_assert(std::is_constructible_v<TComponent, TArgs...>, "Cannot construct component type from given arguments");
+		static_assert(std::is_destructible_v<TComponent>, "Cannot add component which does not have a valid destructor");
+		assert(IsAlive() && "Cannot add component to dead or null entity");
+		return manager_->AddComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>(), std::forward<TArgs>(constructor_args)...);
+	}
+
+	/*
+	* Checks if entity has a component.
+	* @tparam TComponent Type of component to check.
+	* @return True is entity has component, false otherwise.
+	*/
+	template <typename TComponent>
+	bool HasComponent() const {
+		assert(IsAlive() && "Cannot check if dead or null entity has a component");
+		return manager_->HasComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
+	}
+
+	/*
+	* Check if entity has all the given components.
+	* @tparam TComponents Types of components to check.
+	* @return True if entity has each component, false otherwise.
+	*/
+	template <typename ...TComponents>
+	bool HasComponents() const {
+		assert(IsAlive() && "Cannot check if dead or null entity has components");
+		return manager_->HasComponents<TComponents...>(entity_);
+	}
+
+	/*
+	* Removes a component from the entity.
+	* If entity does not have component type, nothing happens.
+	* @tparam TComponent Type of component to remove.
+	*/
+	template <typename TComponent>
+	void RemoveComponent() {
+		assert(IsAlive() && "Cannot remove component from dead or null entity");
+		manager_->RemoveComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
+	}
+
+	template <typename ...TComponents>
+	bool RemoveComponents() const {
+		assert(IsAlive() && "Cannot remove components from dead or null entity");
+		return manager_->RemoveComponents<TComponents...>(entity_);
+	}
+
+	/*
+	* Removes all components from the entity.
+	*/
+	void RemoveComponents() {
+		assert(IsAlive() && "Cannot remove all components from dead or null entity");
+		return manager_->RemoveComponents(entity_);
+	}
+
+	// Marks the entity for destruction.
+	// Note that the entity will remain alive and valid 
+	// until Refresh() is called on its parent manager.
+	// If entity is already marked for deletion, nothing happens.
+	void Destroy() {
+		if (IsAlive()) {
+			manager_->DestroyEntity(entity_, version_);
+		}
+	}
 private:
 
+	internal::Id GetId() const {
+		return entity_;
+	}
+
+	internal::Version GetVersion() const {
+		return version_;
+	}
+
+	friend struct std::hash<Entity>;
+
+	// NullEntity comparison uses versions so it requires private access.
+	friend class NullEntity;
+
+	// Id associated with an entity in the manager.
+	internal::Id entity_{ 0 };
+
+	// Version counter to check if handle has been invalidated.
+	internal::Version version_{ internal::null_version };
+
+	// Parent manager pointer for calling handle functions.
+	Manager* manager_{ nullptr };
 };
+
+class NullEntity {
+public:
+	// Implicit conversion to entity object.
+	operator Entity() const {
+		return Entity{};
+	}
+
+	// Constexpr comparisons of null entities to each other.
+
+	constexpr bool operator==(const NullEntity&) const {
+		return true;
+	}
+	constexpr bool operator!=(const NullEntity&) const {
+		return false;
+	}
+
+	// Comparison to entity objects.
+
+	bool operator==(const Entity& entity) const {
+		return entity.version_ == internal::null_version;
+	}
+	bool operator!=(const Entity& entity) const {
+		return !(*this == entity);
+	}
+};
+
+// Entity comparison with null entity.
+
+inline bool operator==(const Entity& entity, const NullEntity& null_entity) {
+	return null_entity == entity;
+}
+inline bool operator!=(const Entity& entity, const NullEntity& null_entity) {
+	return !(null_entity == entity);
+}
+
+// Null entity object.
+// Allows for comparing invalid / uninitialized 
+// entities with valid manager created entities.
+inline constexpr NullEntity null{};
 
 template <typename ...TRequiredComponents>
 class System {
@@ -405,9 +636,109 @@ private:
 
 class Manager {
 public:
-
+	std::vector<Entity> GetEntities() {
+		std::vector<Entity> entities;
+		entities.reserve(next_entity_);
+		assert(entities_.size() == versions_.size());
+		assert(next_entity_ <= entities_.size());
+		// Cycle through all manager entities.
+		for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+			// If entity is alive, add its handle to the entities vector.
+			if (entities_[entity]) {
+				entities.emplace_back(entity, versions_[entity], this);
+			}
+		}
+		return entities;
+	}
 private:
 
+	/*
+	* Return a unique id for a type of component.
+	* @tparam TComponent Type of component.
+	* @return Unique id for the given component type.
+	*/
+	template <typename TComponent>
+	static internal::Id GetComponentId() {
+		// Get the next available id save that id as
+		// a static variable for the component type.
+		static internal::Id id{ ComponentCount()++ };
+		return id;
+	}
+	/*
+	* Important design decision: Component ids shared among all created managers
+	* I.e. struct Position has id '3' in all manager instances, as opposed to
+	* the order in which a component is first added to each manager.
+	* @return Next available component id.
+	*/
+	static internal::Id& ComponentCount() {
+		static internal::Id id{ 0 };
+		return id;
+	}
+
+	/*
+	* Return a unique id for a type of system.
+	* @tparam TSystem Type of system.
+	* @return Unique id for the given system type.
+	*/
+	template <typename TSystem>
+	static internal::Id GetSystemId() {
+		// Get the next available id save that id as
+		// a static variable for the system type.
+		static internal::Id id{ SystemCount()++ };
+		return id;
+	}
+	/*
+	* Important design decision: System ids shared among all created managers
+	* I.e. class HealthSystem has id '3' in all manager instances, as opposed to
+	* the order in which a system is first added to each manager.
+	* @return Next available system id.
+	*/
+	static internal::Id& SystemCount() {
+		static internal::Id id{ 0 };
+		return id;
+	}
+
+	// Entity handles must have access to internal functions.
+	// This because ids are internal and (mostly) hidden from the user.
+	friend class Entity;
+
+	template <typename ...TComponents>
+	friend class System;
+
+	// Stores the next valid entity id.
+	// This will be incremented if no free id is found.
+	internal::Id next_entity_{ 0 };
+
+	// Stores the current alive entity count (purely for retrieval).
+	internal::Id count_{ 0 };
+
+	// Vector index corresponds to the entity's id.
+	// Element corresponds to whether or not the entity 
+	// is currently alive.
+	std::vector<bool> entities_;
+
+	// Vector index corresponds to the entity's id.
+	// Element corresponds to a flag for refreshing the entity.
+	std::vector<bool> refresh_;
+
+	// Vector index corresponds to the entity's id.
+	// Element corresponds to the current version of the id.
+	std::vector<internal::Version> versions_;
+
+	// Vector index corresponds to the component's unique id.
+	// If a component has not been added to a manager entity, 
+	// its corresponding pool pointer will be nullptr.
+	// Mutable as pools are accessed from const methods.
+	mutable std::vector<internal::BasePool*> pools_;
+
+	// Vector index corresponds to the system's unique id.
+	// If a system has not been added to a manager entity, 
+	// its corresponding pointer will be nullptr.
+	std::vector<internal::BaseSystem*> systems_;
+
+	// Free list of entity ids to be used 
+	// before incrementing next_entity_.
+	std::deque<internal::Id> free_entities_;
 };
 
 
