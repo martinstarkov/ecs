@@ -85,10 +85,42 @@ using is_valid_component = std::enable_if_t<
 template <typename T, typename ...TArgs>
 using is_constructible = std::enable_if_t<std::is_constructible_v<T, TArgs...>, bool>;
 
+template <typename ...TArgs>
+struct parameter_pack {};
+
+
+template <typename>
+struct strip_pack {};
+
+template <typename ...TArgs>
+struct strip_pack<parameter_pack<TArgs...>> {
+	using type = System<TArgs...>;
+};
+
+template <typename T, class R = void>
+struct enable_if_alias { using type = R; };
+
+template <typename T, typename Enable = void>
+struct has_components_alias {
+	static const bool value{ false };
+};
+
+template <typename T>
+struct has_components_alias<T, typename enable_if_alias<typename T::Components>::type> {
+	static const bool value{ std::is_base_of_v<strip_pack<T::Components>::type, T> };
+};
+
+template <typename TSystem>
+constexpr bool is_valid_system_v{ has_components_alias<TSystem>::value };
+
+template <typename TSystem>
+using is_valid_system = std::enable_if_t<is_valid_system_v<TSystem>, bool>;
+
 } // namespace type_traits
 
 class BasePool {
 public:
+	virtual ~BasePool() = default;
 	virtual BasePool* Clone() const = 0;
 	virtual void Clear() = 0;
 	virtual bool Remove(const Id entity) = 0;
@@ -97,11 +129,18 @@ public:
 
 class BaseSystem {
 public:
-
-protected:
-
+	virtual void Update() = 0;
+	virtual ~BaseSystem() = default;
 private:
-
+	friend class Manager;
+	virtual void SetManager(Manager* manager) = 0;
+	virtual void SetComponentDependencies() = 0;
+	virtual void FlagIfDependsOnNone() = 0;
+	virtual BaseSystem* Clone() const = 0;
+	virtual void ResetCacheIfFlagged() = 0;
+	virtual void FlagIfDependsOn(const internal::Id component) = 0;
+	virtual void FlagForReset() = 0;
+	virtual std::size_t Hash() const = 0;
 };
 
 /* 
@@ -253,6 +292,18 @@ public:
 	/*
 	* Retrieves the component of a given entity from the pool.
 	* @param entity Id of the entity to retrieve a component for.
+	* @return Const pointer to the component, nullptr if the component does not exist.
+	*/
+	const TComponent* Get(const Id entity) const {
+		if (Has(entity)) {
+			return block_ + (offsets_[entity] - 1);
+		}
+		return nullptr;
+	}
+
+	/*
+	* Retrieves the component of a given entity from the pool.
+	* @param entity Id of the entity to retrieve a component for.
 	* @return Pointer to the component, nullptr if the component does not exist.
 	*/
 	TComponent* Get(const Id entity) {
@@ -399,20 +450,730 @@ private:
 
 } // namespace internal
 
+template <typename ...TRequiredComponents>
+class System : public internal::BaseSystem {
+public:
+	virtual void Update() override {}
+	System() = default;
+	virtual ~System() = default;
+	using Components = internal::type_traits::parameter_pack<TRequiredComponents...>;
+	Manager& GetManager() {
+		assert(manager_ != nullptr && "Cannot retrieve manager for uninitialized system");
+		return *manager_;
+	}
+protected:
+	template <typename T>
+	friend struct has_components_alias;
+	std::vector<std::tuple<Entity, TRequiredComponents&...>> entities;
+
+private:
+	friend class Manager;
+	virtual std::size_t Hash() const override final {
+		// Hashing combination algorithm from:
+		// https://stackoverflow.com/a/17017281
+		std::size_t h = 17;
+		h = h * 31 + std::hash<Manager*>()(manager_);
+		h = h * 31 + std::hash<bool>()(reset_required_);
+		h = h * 31 + std::hash<std::vector<bool>>()(components_);
+		return h;
+	}
+
+	System(Manager* manager,
+		   const std::vector<bool>& components,
+		   bool reset_required) :
+		manager_{ manager },
+		components_{ components },
+		reset_required_{ reset_required } {
+	}
+
+	virtual void SetManager(Manager* manager) override final {
+		assert(manager != nullptr && "Cannot set system manager to nullptr");
+		manager_ = manager;
+	}
+
+	virtual void FlagForReset() override final {
+		reset_required_ = true;
+	}
+
+	virtual void FlagIfDependsOn(const internal::Id component) override final {
+		if (component < components_.size() && components_[component]) {
+			reset_required_ = true;
+		}
+	}
+
+	virtual internal::BaseSystem* Clone() const override final {
+		return new System<TRequiredComponents...>(manager_, components_, reset_required_);
+	}
+
+	virtual void SetComponentDependencies() override final;
+
+	virtual void ResetCacheIfFlagged() override final;
+
+	virtual void FlagIfDependsOnNone() override final {
+		if constexpr (sizeof...(TRequiredComponents) == 0) {
+			reset_required_ = true;
+		}
+	}
+
+	Manager* manager_{ nullptr };
+	std::vector<bool> components_;
+	bool reset_required_{ false };
+};
+
+class Manager {
+public:
+	Manager() {
+		// Reserve capacity for 1 entity so that
+		// manager size will double in powers of 2.
+		Reserve(1);
+	}
+
+	~Manager() {
+		DestroySystems();
+		DestroyPools();
+	}
+
+	// Managers cannot be copied. Use Clone() if you wish 
+	// to create a new manager with identical composition.
+	Manager& operator=(const Manager&) = delete;
+	Manager(const Manager&) = delete;
+
+	Manager(Manager&& obj) noexcept :
+		next_entity_{ obj.next_entity_ },
+		entities_{ std::exchange(obj.entities_, {}) },
+		refresh_{ std::exchange(obj.refresh_, {}) },
+		versions_{ std::exchange(obj.versions_, {}) },
+		pools_{ std::exchange(obj.pools_, {}) },
+		systems_{ std::exchange(obj.systems_, {}) },
+		free_entities_{ std::exchange(obj.free_entities_, {}) } {
+		obj.next_entity_ = 0;
+	}
+
+	Manager& operator=(Manager&& obj) noexcept {
+		// Destroy previous manager internals.
+		DestroySystems();
+		DestroyPools();
+		// Move manager into current manager.
+		next_entity_ = obj.next_entity_;
+		entities_ = std::exchange(obj.entities_, {});
+		refresh_ = std::exchange(obj.refresh_, {});
+		versions_ = std::exchange(obj.versions_, {});
+		pools_ = std::exchange(obj.pools_, {});
+		systems_ = std::exchange(obj.systems_, {});
+		free_entities_ = std::exchange(obj.free_entities_, {});
+		// Reset state of other manager.
+		obj.next_entity_ = 0;
+	}
+
+	/*
+	* Note that managers are not unique (can be cloned).
+	* It is not advisable to use comparison in performance critical code.
+	* @param other Manager to compare with.
+	* @return True if manager composition is identical, false otherwise.
+	*/
+	bool operator==(const Manager& other) const {
+		return next_entity_ == other.next_entity_
+			&& entities_ == other.entities_
+			&& versions_ == other.versions_
+			&& free_entities_ == other.free_entities_
+			&& refresh_ == other.refresh_
+			// Compare manager systems.
+			&& std::equal(std::begin(systems_), std::end(systems_),
+						  std::begin(other.systems_), std::end(other.systems_),
+						  [](const internal::BaseSystem* lhs, const internal::BaseSystem* rhs) {
+				return lhs && rhs && lhs->Hash() == rhs->Hash();
+			})
+			// Compare manager component pools.
+			&& std::equal(std::begin(pools_), std::end(pools_),
+						  std::begin(other.pools_), std::end(other.pools_),
+						  [](const internal::BasePool* lhs, const internal::BasePool* rhs) {
+				return lhs && rhs && lhs->Hash() == rhs->Hash();
+			});
+	}
+
+	/*
+	* Note that managers are not unique (can be cloned).
+	* It is not advisable to use comparison in performance critical code.
+	* @param other Manager to compare with.
+	* @return True if manager composition differs in any way, false otherwise.
+	*/
+	bool operator!=(const Manager& other) const {
+		return !operator==(other);
+	}
+
+	/*
+	* Copying managers accidentally is expensive.
+	* This provides a way of replicating a manager with
+	* identical entities and components.
+	* @return New manager with identical composition.
+	*/
+	Manager Clone() const {
+		Manager clone;
+		clone.next_entity_ = next_entity_;
+		clone.entities_ = entities_;
+		clone.refresh_ = refresh_;
+		clone.versions_ = versions_;
+		clone.free_entities_ = free_entities_;
+		clone.pools_.resize(pools_.size(), nullptr);
+		for (std::size_t i = 0; i < pools_.size(); ++i) {
+			auto pool = pools_[i];
+			if (pool != nullptr) {
+				// Clone pools over to new manager.
+				clone.pools_[i] = pool->Clone();
+			}
+		}
+		clone.systems_.resize(systems_.size(), nullptr);
+		for (std::size_t i = 0; i < systems_.size(); ++i) {
+			auto system = systems_[i];
+			if (system != nullptr) {
+				// Clone systems over to new manager.
+				clone.systems_[i] = system->Clone();
+			}
+		}
+		assert(clone == *this && "Cloning manager failed");
+		return clone;
+	}
+
+	// Clears entity cache and reset component pools to empty ones.
+	// Keeps entity capacity unchanged.
+	// Systems are not removed but caches are flagged for reset.
+	void Clear() {
+		next_entity_ = 0;
+
+		entities_.clear();
+		refresh_.clear();
+		versions_.clear();
+		free_entities_.clear();
+
+		for (auto pool : pools_) {
+			if (pool != nullptr) {
+				pool->Clear();
+			}
+		}
+		for (auto system : systems_) {
+			if (system != nullptr) {
+				system->FlagForReset();
+			}
+		}
+	}
+
+	// Cycles through all entities and destroys 
+	// ones that have been marked for destruction.
+	void Refresh() {
+		assert(entities_.size() == versions_.size());
+		assert(entities_.size() == refresh_.size());
+		assert(next_entity_ <= entities_.size());
+		internal::Id alive{ 0 };
+		internal::Id dead{ 0 };
+		for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+			// Entity was marked for refresh.
+			if (refresh_[entity]) {
+				refresh_[entity] = false;
+				if (entities_[entity]) { // Marked for deletion.
+					RemoveComponents(entity);
+					entities_[entity] = false;
+					++versions_[entity];
+					free_entities_.emplace_back(entity);
+					++dead;
+				} else { // Marked for 'creation'.
+					entities_[entity] = true;
+					++alive;
+				}
+			}
+		}
+		if (alive > 0) {
+			// If even a single entity was created, flag refresh for
+			// all systems that don't depend on specific components.
+			for (auto& system : systems_) {
+				if (system) {
+					system->FlagIfDependsOnNone();
+				}
+			}
+		}
+		assert(alive >= 0 && dead >= 0);
+		// Update entity count with net change.
+		count_ += alive - dead;
+		assert(count_ >= 0);
+	}
+
+	// Equivalent to creating an entirely new manager.
+	// Clears entity caches and destroys component pools.
+	// Resets all capacities to 0.
+	void Reset() {
+		next_entity_ = 0;
+
+		entities_.clear();
+		refresh_.clear();
+		versions_.clear();
+		free_entities_.clear();
+
+		entities_.shrink_to_fit();
+		refresh_.shrink_to_fit();
+		versions_.shrink_to_fit();
+		free_entities_.shrink_to_fit();
+
+		DestroyPools();
+		pools_.clear();
+		pools_.shrink_to_fit();
+
+		DestroySystems();
+		systems_.clear();
+		systems_.shrink_to_fit();
+
+		Reserve(1);
+	}
+
+	/*
+	* @return A handle to a new entity object.
+	*/
+	Entity CreateEntity();
+
+	/*
+	* @return A vector of handles to each living entity in the manager.
+	*/
+	std::vector<Entity> GetEntities();
+
+	template <typename ...TComponents>
+	std::vector<Entity> GetEntitiesWith();
+
+	template <typename ...TComponents>
+	std::vector<Entity> GetEntitiesWithout();
+
+	void DestroyEntities();
+
+	template <typename ...TComponents>
+	void DestroyEntitiesWith();
+
+	template <typename ...TComponents>
+	void DestroyEntitiesWithout();
+
+	/*
+	* @return The number of entities which are currently alive in the manager.
+	*/
+	std::size_t GetEntityCount() const {
+		return count_;
+	}
+
+	/*
+	* @return The number of entities which are currently not alive in the manager.
+	*/
+	std::size_t GetDeadEntityCount() const {
+		return free_entities_.size();
+	}
+
+	/*
+	* Reserve additional memory for entities.
+	* @param capacity Desired capacity of the manager.
+	* If smaller than current capacity, nothing happens.
+	*/
+	void Reserve(const std::size_t capacity) {
+		entities_.reserve(capacity);
+		refresh_.reserve(capacity);
+		versions_.reserve(capacity);
+		assert(entities_.capacity() == refresh_.capacity());
+		// TODO: Figure out how to test this.
+		//assert(versions_.capacity() == entities_.capacity());
+	}
+
+	template <typename ...TComponents>
+	std::vector<std::tuple<Entity, TComponents&...>> GetComponentTuple();
+
+	template <typename TSystem>
+	void AddSystemImpl() {
+		auto system_id = GetSystemId<TSystem>();
+		if (system_id >= systems_.size()) {
+			systems_.resize(static_cast<std::size_t>(system_id) + 1, nullptr);
+		}
+		// Destroy system if it already exists in the manager.
+		delete GetSystem<TSystem>(system_id);
+		auto system = new TSystem();
+		assert(system != nullptr && "Could not create new system correctly");
+		system->TSystem::SetComponentDependencies();
+		system->TSystem::SetManager(this);
+		systems_[system_id] = system;
+	}
+
+	template <typename TSystem>
+	void AddSystem() {
+		static_assert(internal::type_traits::is_valid_system_v<TSystem>,
+					  "Cannot add a system to the manager which does not inherit from ecs::System class");
+		AddSystemImpl<TSystem>();
+	}
+
+	template <typename TSystem>
+	void UpdateSystemImpl() {
+		auto system_id = GetSystemId<TSystem>();
+		assert(HasSystem<TSystem>() && "Cannot update a system which does not exist in manager");
+		auto system = GetSystem<TSystem>(system_id);
+		system->TSystem::ResetCacheIfFlagged();
+		system->TSystem::Update();
+	}
+
+	template <typename TSystem>
+	void UpdateSystem() {
+		static_assert(internal::type_traits::is_valid_system_v<TSystem>,
+					  "Cannot update a system which does not inherit from ecs::System class");
+		UpdateSystemImpl<TSystem>();
+	}
+
+	template <typename TSystem>
+	bool HasSystem() const {
+		if constexpr (!internal::type_traits::is_valid_system_v<TSystem>) {
+			return false;
+		} else {
+			auto system = GetSystemId<TSystem>();
+			return system < systems_.size() && systems_[system] != nullptr;
+		}
+	}
+
+	template <typename TSystem>
+	void RemoveSystem() {
+		if constexpr (internal::type_traits::is_valid_system_v<TSystem>) {
+			auto system = GetSystemId<TSystem>();
+			if (system < systems_.size()) {
+				delete systems_[system];
+			}
+		}
+	}
+private:
+	// Destroy and deallocate all the component pools.
+	void DestroyPools() {
+		for (auto pool : pools_) {
+			delete pool;
+		}
+	}
+
+	void DestroySystems() {
+		for (auto system : systems_) {
+			delete system;
+		}
+	}
+
+	/*
+	* Resize vector of entities, refresh marks and versions.
+	* If smaller than current size, nothing happens.
+	* @param size Desired size of the vectors.
+	*/
+	void Resize(const std::size_t size) {
+		if (size > entities_.size()) {
+			entities_.resize(size, false);
+			refresh_.resize(size, false);
+			versions_.resize(size, internal::null_version);
+		}
+		assert(entities_.size() == refresh_.size());
+		assert(entities_.size() == versions_.size());
+	}
+
+	/*
+	* Marks entity for deletion during next manager refresh.
+	* @param entity Id of entity to mark for deletion.
+	* @param version Version of entity for handle comparison.
+	*/
+	void DestroyEntity(const internal::Id entity, const internal::Version version) {
+		assert(entity < versions_.size());
+		assert(entity < refresh_.size());
+		if (versions_[entity] == version) {
+			refresh_[entity] = true;
+		}
+	}
+
+	/*
+	* Checks if entity is valid and alive.
+	* @param entity Id of entity to check.
+	* @param version Version of entity for handle comparison.
+	* @return True if entity is alive, false otherwise.
+	*/
+	bool IsAlive(const internal::Id entity, const internal::Version version) const {
+		return entity < versions_.size()
+			&& versions_[entity] == version
+			&& entity < entities_.size()
+			&& (entities_[entity] || refresh_[entity]);
+	}
+
+	/*
+	* Retrieve a const pointer to the component pool with matching component id.
+	* @tparam TComponent Type of component to retrieve pool for.
+	* @param component Id of component to retrieve pool for.
+	* @return Const pointer to the component pool, nullptr if pool does not exist.
+	*/
+	template <typename TComponent>
+	internal::Pool<TComponent>* GetPool(const internal::Id component) const {
+		assert(component == GetComponentId<TComponent>());
+		if (component < pools_.size()) {
+			return static_cast<internal::Pool<TComponent>*>(pools_[component]);
+		}
+		return nullptr;
+	}
+
+	/*
+	* Retrieve a pointer to the system with matching system id.
+	* @tparam TSystem Type of system to retrieve.
+	* @param system Id of system to retrieve.
+	* @return Pointer to the system, nullptr if system does not exist.
+	*/
+	template <typename TSystem>
+	TSystem* GetSystem(const internal::Id system) {
+		assert(system == GetSystemId<TSystem>());
+		if (system < systems_.size()) {
+			return static_cast<TSystem*>(systems_[system]);
+		}
+		return nullptr;
+	}
+
+	void ComponentChange(const internal::Id entity, const internal::Id component) {
+		assert(entity < entities_.size());
+		// Note that even a "not currently alive" can trigger cache refresh.
+		for (auto& system : systems_) {
+			if (system) {
+				system->FlagIfDependsOn(component);
+			}
+		}
+	}
+
+	/*
+	* Retrieves a const reference to the specified component type.
+	* If entity does not have component, debug assertion is called.
+	* @tparam TComponent Type of component to retrieve.
+	* @param entity Id of entity to retrieve component for.
+	* @param component Id of component to retrieve.
+	* @return Const reference to the component.
+	*/
+	template <typename TComponent>
+	const TComponent& GetComponent(const internal::Id entity, const internal::Id component) const {
+		const auto pool = GetPool<TComponent>(component);
+		assert(pool != nullptr && "Cannot retrieve component which has not been added to manager");
+		const auto component_address = pool->Get(entity);
+		// Debug tip: 
+		// If you ended up here and want to find out which
+		// entity called this function, follow the call stack.
+		assert(component_address != nullptr && "Cannot get component which entity does not have");
+		return *component_address;
+	}
+
+	/*
+	* Retrieves a reference to the specified component type.
+	* If entity does not have component, debug assertion is called.
+	* @tparam TComponent Type of component to retrieve.
+	* @param entity Id of entity to retrieve component for.
+	* @param component Id of component to retrieve.
+	* @return Reference to the component.
+	*/
+	template <typename TComponent>
+	TComponent& GetComponent(const internal::Id entity, const internal::Id component) {
+		const auto pool = GetPool<TComponent>(component);
+		assert(pool != nullptr && "Cannot retrieve component which has not been added to manager");
+		auto component_address = pool->Get(entity);
+		// Debug tip: 
+		// If you ended up here and want to find out which
+		// entity called this function, follow the call stack.
+		assert(component_address != nullptr && "Cannot get component which entity does not have");
+		return *component_address;
+	}
+
+	/*
+	* Returns whether or not an entity has the component type.
+	* @tparam TComponent Type of component to check.
+	* @param entity Id of entity to check component for.
+	* @param component Id of component to check.
+	* @return True if entity has component, false otherwise.
+	*/
+	template <typename TComponent>
+	bool HasComponent(const internal::Id entity, const internal::Id component) const {
+		const auto pool = GetPool<TComponent>(component);
+		return pool != nullptr && pool->Has(entity);
+	}
+
+	/*
+	* Returns whether or not an entity has all the given component types.
+	* @tparam TComponents Types of components to check.
+	* @param entity Id of entity to check components for.
+	* @return True if entity has each component type, false otherwise.
+	*/
+	template <typename ...TComponents>
+	bool HasComponents(const internal::Id entity) const {
+		return { (HasComponent<TComponents>(entity, GetComponentId<TComponents>()) && ...) };
+	}
+
+	/*
+	* Adds a component to the specified manager entity.
+	* If entity already has component type, it is replaced.
+	* @tparam TComponent Type of component to add.
+	* @tparam TArgs Types of component constructor arguments.
+	* @param entity Id of entity to add component to.
+	* @param component Id of component to add.
+	* @param constructor_args Arguments for constructing component.
+	* @return Reference to the newly added / replaced component.
+	*/
+	template <typename TComponent, typename ...TArgs>
+	TComponent& AddComponent(const internal::Id entity, const internal::Id component, TArgs&&... constructor_args) {
+		static_assert(std::is_constructible_v<TComponent, TArgs...>, "Cannot construct component type from given arguments");
+		static_assert(std::is_destructible_v<TComponent>, "Cannot add component which does not have a valid destructor");
+		if (component >= pools_.size()) {
+			pools_.resize(static_cast<std::size_t>(component) + 1, nullptr);
+		}
+		auto pool = GetPool<TComponent>(component);
+		bool new_pool = pool == nullptr;
+		// If component type has not been added to manager,
+		// generate a new pool for the given type.
+		if (new_pool) {
+			pool = new internal::Pool<TComponent>();
+			pools_[component] = pool;
+		}
+		assert(pool != nullptr && "Could not create new component pool correctly");
+		bool new_component = !pool->Has(entity);
+		auto& component_reference = pool->Add(entity, std::forward<TArgs>(constructor_args)...);
+		if (new_pool || new_component) {
+			ComponentChange(entity, component);
+		}
+		return component_reference;
+	}
+
+	/*
+	* Removes a component from the specified manager entity.
+	* If entity does not have component type, nothing happens.
+	* @tparam TComponent Type of component to remove.
+	* @param entity Id of entity to remove component from.
+	* @param component Id of component to remove.
+	*/
+	template <typename TComponent>
+	void RemoveComponent(const internal::Id entity, const internal::Id component) {
+		auto pool = GetPool<TComponent>(component);
+		assert(pool != nullptr && "Cannot remove component which has never been added to a manager entity");
+		// Static call to derived component pool class (no dynamic dispatch).
+		bool removed = pool->internal::Pool<TComponent>::Remove(entity);
+		if (removed) {
+			ComponentChange(entity, component);
+		}
+	}
+
+	template <typename ...TComponents>
+	void RemoveComponents(const internal::Id entity) {
+		(RemoveComponent<TComponents>(entity, GetComponentId<TComponents>()), ...);
+	}
+
+	/*
+	* Destroy all components associated with an entity.
+	* Results in virtual function call on each component pool.
+	* @param entity Id of entity to remove components from.
+	*/
+	void RemoveComponents(const internal::Id entity) {
+		for (internal::Id i{ 0 }; i < pools_.size(); ++i) {
+			auto pool = pools_[i];
+			if (pool) {
+				bool removed = pool->Remove(entity);
+				if (removed) {
+					ComponentChange(entity, i);
+				}
+			}
+		}
+	}
+
+	/*
+	* Return a unique id for a type of component.
+	* @tparam TComponent Type of component.
+	* @return Unique id for the given component type.
+	*/
+	template <typename TComponent>
+	static internal::Id GetComponentId() {
+		// Get the next available id save that id as
+		// a static variable for the component type.
+		static internal::Id id{ ComponentCount()++ };
+		return id;
+	}
+
+	/*
+	* Important design decision: Component ids shared among all created managers
+	* I.e. struct Position has id '3' in all manager instances, as opposed to
+	* the order in which a component is first added to each manager.
+	* @return Next available component id.
+	*/
+	static internal::Id& ComponentCount() {
+		static internal::Id id{ 0 };
+		return id;
+	}
+
+	/*
+	* Return a unique id for a type of system.
+	* @tparam TSystem Type of system.
+	* @return Unique id for the given system type.
+	*/
+	template <typename TSystem>
+	static internal::Id GetSystemId() {
+		// Get the next available id save that id as
+		// a static variable for the system type.
+		static internal::Id id{ SystemCount()++ };
+		return id;
+	}
+
+	/*
+	* Important design decision: System ids shared among all created managers
+	* I.e. class HealthSystem has id '3' in all manager instances, as opposed to
+	* the order in which a system is first added to each manager.
+	* @return Next available system id.
+	*/
+	static internal::Id& SystemCount() {
+		static internal::Id id{ 0 };
+		return id;
+	}
+
+	// Entity handles must have access to internal functions.
+	// This because ids are internal and (mostly) hidden from the user.
+	friend class Entity;
+
+	// Systems require access to entity component access functions.
+	template <typename ...T>
+	friend class System;
+
+	// Stores the next valid entity id.
+	// This will be incremented if no free id is found.
+	internal::Id next_entity_{ 0 };
+
+	// Stores the current alive entity count (purely for retrieval).
+	internal::Id count_{ 0 };
+
+	// Vector index corresponds to the entity's id.
+	// Element corresponds to whether or not the entity 
+	// is currently alive.
+	std::vector<bool> entities_;
+
+	// Vector index corresponds to the entity's id.
+	// Element corresponds to a flag for refreshing the entity.
+	std::vector<bool> refresh_;
+
+	// Vector index corresponds to the entity's id.
+	// Element corresponds to the current version of the id.
+	std::vector<internal::Version> versions_;
+
+	// Vector index corresponds to the component's unique id.
+	// If a component has not been added to a manager entity, 
+	// its corresponding pool pointer will be nullptr.
+	mutable std::vector<internal::BasePool*> pools_;
+
+	// Vector index corresponds to the system's unique id.
+	// If a system has not been added to a manager entity, 
+	// its corresponding pointer will be nullptr.
+	std::vector<internal::BaseSystem*> systems_;
+
+	// Free list of entity ids to be used 
+	// before incrementing next_entity_.
+	std::deque<internal::Id> free_entities_;
+};
+
+// Entity handle object.
+// Allows access to manager entities through a light-weight interface.
+// Contains id, version, and a pointer to the parent manager.
 class Entity {
 public:
 	// Null entity constructor.
 	Entity() = default;
 
-	// Valid entity constructor.
-	// This is not intended for use by users of the ECS library.
+	// This constructor is not intended for use by users of the ECS library.
 	// It must remain public in order to allow vector emplace construction.
 	Entity(const internal::Id entity, const internal::Version version, Manager* manager) : entity_{ entity }, version_{ version }, manager_{ manager } {}
 
 	~Entity() = default;
 
 	// Entity handles can be moved and copied.
-
 	Entity& operator=(const Entity&) = default;
 	Entity(const Entity&) = default;
 	Entity& operator=(Entity&&) = default;
@@ -443,11 +1204,12 @@ public:
 	* @return Reference to the parent manager.
 	*/
 	Manager& GetManager() {
-		return const_cast<Manager&>(static_cast<const Entity&>(*this).GetManager());
+		assert(manager_ != nullptr && "Cannot return parent manager of a null entity");
+		return *manager_;
 	}
 
 	/*
-	* Checks if entity handle is valid and alive.
+	* Checks if an entity handle is valid.
 	* @return True if entity is alive, false otherwise.
 	*/
 	bool IsAlive() const {
@@ -474,14 +1236,27 @@ public:
 	*/
 	template <typename TComponent>
 	TComponent& GetComponent() {
-		return const_cast<TComponent&>(static_cast<const Entity&>(*this).GetComponent<TComponent>());
+		assert(IsAlive() && "Cannot retrieve component for dead or null entity");
+		return manager_->GetComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
 	}
 
+	/*
+	* Retrieves a tuple of const references to the specified component types.
+	* If entity does not have components, debug assertion is called.
+	* @tparam TComponent Types of components.
+	* @return Tuple of const references to the requested components.
+	*/
 	template <typename ...TComponents>
 	std::tuple<const TComponents&...> GetComponents() const {
 		return std::forward_as_tuple<const TComponents&...>(GetComponent<TComponents>()...);
 	}
 
+	/*
+	* Retrieves a tuple of references to the specified component types.
+	* If entity does not have components, debug assertion is called.
+	* @tparam TComponent Types of components.
+	* @return Tuple of references to the requested components.
+	*/
 	template <typename ...TComponents>
 	std::tuple<TComponents&...> GetComponents() {
 		return std::forward_as_tuple<TComponents&...>(GetComponent<TComponents>()...);
@@ -492,13 +1267,15 @@ public:
 	* If entity already has component type, it is replaced.
 	* @tparam TComponent Type of component to add.
 	* @tparam TArgs Types of component constructor arguments.
-	* @param constructor_args Arguments for constructing component.
+	* @param constructor_args Arguments for constructing the component.
 	* @return Reference to the newly added / replaced component.
 	*/
 	template <typename TComponent, typename ...TArgs>
 	TComponent& AddComponent(TArgs&&... constructor_args) {
-		static_assert(std::is_constructible_v<TComponent, TArgs...>, "Cannot construct component type from given arguments");
-		static_assert(std::is_destructible_v<TComponent>, "Cannot add component which does not have a valid destructor");
+		static_assert(std::is_constructible_v<TComponent, TArgs...>,
+					  "Cannot construct component type from given arguments");
+		static_assert(internal::type_traits::is_valid_component_v<TComponent>,
+					  "Cannot add component which is not move-constructable or destructable");
 		assert(IsAlive() && "Cannot add component to dead or null entity");
 		return manager_->AddComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>(), std::forward<TArgs>(constructor_args)...);
 	}
@@ -510,19 +1287,17 @@ public:
 	*/
 	template <typename TComponent>
 	bool HasComponent() const {
-		assert(IsAlive() && "Cannot check if dead or null entity has a component");
-		return manager_->HasComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
+		return IsAlive() && manager_->HasComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
 	}
 
 	/*
-	* Check if entity has all the given components.
+	* Checks if entity has all the given components.
 	* @tparam TComponents Types of components to check.
 	* @return True if entity has each component, false otherwise.
 	*/
 	template <typename ...TComponents>
 	bool HasComponents() const {
-		assert(IsAlive() && "Cannot check if dead or null entity has components");
-		return manager_->HasComponents<TComponents...>(entity_);
+		return IsAlive() && manager_->HasComponents<TComponents...>(entity_);
 	}
 
 	/*
@@ -536,15 +1311,18 @@ public:
 		manager_->RemoveComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
 	}
 
+	/*
+	* Removes multiple components from the entity.
+	* If entity does not have a component type, it is ignored.
+	* @tparam TComponents Types of components to remove.
+	*/
 	template <typename ...TComponents>
-	bool RemoveComponents() const {
+	void RemoveComponents() const {
 		assert(IsAlive() && "Cannot remove components from dead or null entity");
-		return manager_->RemoveComponents<TComponents...>(entity_);
+		manager_->RemoveComponents<TComponents...>(entity_);
 	}
 
-	/*
-	* Removes all components from the entity.
-	*/
+	// Removes all components from the entity.
 	void RemoveComponents() {
 		assert(IsAlive() && "Cannot remove all components from dead or null entity");
 		return manager_->RemoveComponents(entity_);
@@ -560,15 +1338,24 @@ public:
 		}
 	}
 private:
-
+	/*
+	* Ids are numbers by which entities are identified in the manager.
+	* @return Id of the entity.
+	*/
 	internal::Id GetId() const {
 		return entity_;
 	}
 
+	/*
+	* Versions are numbers which represent how many times an entity
+	* has been reused in the manager.
+	* @return Version of the entity.
+	*/
 	internal::Version GetVersion() const {
 		return version_;
 	}
 
+	// Custom hash function requires access to id, version, and manager.
 	friend struct std::hash<Entity>;
 
 	// NullEntity comparison uses versions so it requires private access.
@@ -584,6 +1371,9 @@ private:
 	Manager* manager_{ nullptr };
 };
 
+// Null entity object.
+// Allows for comparing invalid / uninitialized 
+// entities with valid manager created entities.
 class NullEntity {
 public:
 	// Implicit conversion to entity object.
@@ -619,128 +1409,212 @@ inline bool operator!=(const Entity& entity, const NullEntity& null_entity) {
 	return !(null_entity == entity);
 }
 
-// Null entity object.
+// Null entity.
 // Allows for comparing invalid / uninitialized 
 // entities with valid manager created entities.
 inline constexpr NullEntity null{};
 
-template <typename ...TRequiredComponents>
-class System {
-public:
+inline Entity Manager::CreateEntity() {
+	internal::Id entity{ 0 };
+	// Pick entity from free list before trying to increment entity counter.
+	if (free_entities_.size() > 0) {
+		entity = free_entities_.front();
+		free_entities_.pop_front();
+	} else {
+		entity = next_entity_++;
+	}
+	// Double the size of the manager if capacity is reached.
+	if (entity >= entities_.size()) {
+		Resize(versions_.capacity() * 2);
+	}
+	assert(entity < entities_.size());
+	assert(!entities_[entity] && "Cannot create new entity from live entity");
+	assert(!refresh_[entity] && "Cannot create new entity from refresh marked entity");
+	// Mark entity for refresh.
+	refresh_[entity] = true;
+	return Entity{ entity, ++versions_[entity], this };
+}
 
-protected:
-
-private:
-
-};
-
-class Manager {
-public:
-	std::vector<Entity> GetEntities() {
-		std::vector<Entity> entities;
-		entities.reserve(next_entity_);
-		assert(entities_.size() == versions_.size());
-		assert(next_entity_ <= entities_.size());
-		// Cycle through all manager entities.
-		for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
-			// If entity is alive, add its handle to the entities vector.
-			if (entities_[entity]) {
+template <typename ...TComponents>
+inline std::vector<Entity> Manager::GetEntitiesWith() {
+	std::vector<Entity> entities;
+	entities.reserve(next_entity_);
+	assert(entities_.size() == versions_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cache component pools.
+	auto pools = std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...);
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			bool has_components = {
+						(std::get<internal::Pool<TComponents>*>(pools)->Has(entity) && ...)
+			};
+			if (has_components) {
 				entities.emplace_back(entity, versions_[entity], this);
 			}
 		}
-		return entities;
 	}
-private:
+	return entities;
+}
 
-	/*
-	* Return a unique id for a type of component.
-	* @tparam TComponent Type of component.
-	* @return Unique id for the given component type.
-	*/
-	template <typename TComponent>
-	static internal::Id GetComponentId() {
-		// Get the next available id save that id as
-		// a static variable for the component type.
-		static internal::Id id{ ComponentCount()++ };
-		return id;
+template <typename ...TComponents>
+inline std::vector<Entity> Manager::GetEntitiesWithout() {
+	std::vector<Entity> entities;
+	entities.reserve(next_entity_);
+	assert(entities_.size() == versions_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cache component pools.
+	auto pools = std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...);
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			bool does_not_have_components = {
+						(!std::get<internal::Pool<TComponents>*>(pools)->Has(entity) || ...)
+			};
+			if (does_not_have_components) {
+				entities.emplace_back(entity, versions_[entity], this);
+			}
+		}
 	}
-	/*
-	* Important design decision: Component ids shared among all created managers
-	* I.e. struct Position has id '3' in all manager instances, as opposed to
-	* the order in which a component is first added to each manager.
-	* @return Next available component id.
-	*/
-	static internal::Id& ComponentCount() {
-		static internal::Id id{ 0 };
-		return id;
+	return entities;
+}
+
+inline std::vector<Entity> Manager::GetEntities() {
+	std::vector<Entity> entities;
+	entities.reserve(next_entity_);
+	assert(entities_.size() == versions_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			entities.emplace_back(entity, versions_[entity], this);
+		}
 	}
+	return entities;
+}
 
-	/*
-	* Return a unique id for a type of system.
-	* @tparam TSystem Type of system.
-	* @return Unique id for the given system type.
-	*/
-	template <typename TSystem>
-	static internal::Id GetSystemId() {
-		// Get the next available id save that id as
-		// a static variable for the system type.
-		static internal::Id id{ SystemCount()++ };
-		return id;
+template <typename ...TComponents>
+inline void Manager::DestroyEntitiesWith() {
+	assert(entities_.size() == refresh_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cache component pools.
+	auto pools = std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...);
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			bool has_components = {
+						(std::get<internal::Pool<TComponents>*>(pools)->Has(entity) && ...)
+			};
+			if (has_components) {
+				refresh_[entity] = true;
+			}
+		}
 	}
-	/*
-	* Important design decision: System ids shared among all created managers
-	* I.e. class HealthSystem has id '3' in all manager instances, as opposed to
-	* the order in which a system is first added to each manager.
-	* @return Next available system id.
-	*/
-	static internal::Id& SystemCount() {
-		static internal::Id id{ 0 };
-		return id;
+}
+
+template <typename ...TComponents>
+inline void Manager::DestroyEntitiesWithout() {
+	assert(entities_.size() == refresh_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cache component pools.
+	auto pools = std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...);
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			bool does_not_have_components = {
+						(!std::get<internal::Pool<TComponents>*>(pools)->Has(entity) || ...)
+			};
+			if (does_not_have_components) {
+				refresh_[entity] = true;
+			}
+		}
 	}
+}
 
-	// Entity handles must have access to internal functions.
-	// This because ids are internal and (mostly) hidden from the user.
-	friend class Entity;
+inline void Manager::DestroyEntities() {
+	assert(entities_.size() == refresh_.size());
+	assert(next_entity_ <= entities_.size());
+	// Cycle through all manager entities.
+	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		// If entity is alive, add its handle to the entities vector.
+		if (entities_[entity]) {
+			refresh_[entity] = true;
+		}
+	}
+}
 
-	template <typename ...TComponents>
-	friend class System;
+template <typename ...TComponents>
+inline std::vector<std::tuple<Entity, TComponents&...>> Manager::GetComponentTuple() {
+	std::vector<std::tuple<Entity, TComponents&...>> vector_of_tuples;
+	if (count_ > 0) {
+		auto pools = std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...);
+		bool manager_has_components = {
+			((std::get<internal::Pool<TComponents>*>(pools) != nullptr) && ...)
+		};
+		// Cycle through all manager entities.
+		if (manager_has_components) {
+			vector_of_tuples.reserve(next_entity_);
+			assert(entities_.size() == versions_.size());
+			assert(next_entity_ <= entities_.size());
+			// Cycle through all manager entities.
+			for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+				if (entities_[entity]) {
+					bool has_components = {
+						(std::get<internal::Pool<TComponents>*>(pools)->Has(entity) && ...)
+					};
+					if (has_components) {
+						vector_of_tuples.emplace_back(Entity{ entity, versions_[entity], this }, (*std::get<internal::Pool<TComponents>*>(pools)->Get(entity))...);
+					}
+				}
+			}
+		}
+	}
+	return vector_of_tuples;
+}
 
-	// Stores the next valid entity id.
-	// This will be incremented if no free id is found.
-	internal::Id next_entity_{ 0 };
+template <typename ...TRequiredComponents>
+inline void System<TRequiredComponents...>::SetComponentDependencies() {
+	std::array<internal::Id, sizeof...(TRequiredComponents)> components{ Manager::GetComponentId<TRequiredComponents>()... };
+	if (components.size() > 0) {
+		auto size{ *std::max_element(components.begin(), components.end()) + 1 };
+		components_.reserve(size);
+		components_.resize(size, false);
+		for (auto component : components) {
+			assert(component < components_.size());
+			components_[component] = true;
+		}
+	}
+}
 
-	// Stores the current alive entity count (purely for retrieval).
-	internal::Id count_{ 0 };
-
-	// Vector index corresponds to the entity's id.
-	// Element corresponds to whether or not the entity 
-	// is currently alive.
-	std::vector<bool> entities_;
-
-	// Vector index corresponds to the entity's id.
-	// Element corresponds to a flag for refreshing the entity.
-	std::vector<bool> refresh_;
-
-	// Vector index corresponds to the entity's id.
-	// Element corresponds to the current version of the id.
-	std::vector<internal::Version> versions_;
-
-	// Vector index corresponds to the component's unique id.
-	// If a component has not been added to a manager entity, 
-	// its corresponding pool pointer will be nullptr.
-	// Mutable as pools are accessed from const methods.
-	mutable std::vector<internal::BasePool*> pools_;
-
-	// Vector index corresponds to the system's unique id.
-	// If a system has not been added to a manager entity, 
-	// its corresponding pointer will be nullptr.
-	std::vector<internal::BaseSystem*> systems_;
-
-	// Free list of entity ids to be used 
-	// before incrementing next_entity_.
-	std::deque<internal::Id> free_entities_;
-};
-
-
+template <typename ...TRequiredComponents>
+inline void System<TRequiredComponents...>::ResetCacheIfFlagged() {
+	if (reset_required_) {
+		entities = manager_->GetComponentTuple<TRequiredComponents...>();
+		reset_required_ = false;
+	}
+}
 
 } // namespace ecs
+
+namespace std {
+
+// Custom hashing function for ecs::Entity class allows for use of unordered maps and sets with entities as keys
+template <>
+struct hash<ecs::Entity> {
+	std::size_t operator()(const ecs::Entity& k) const {
+		// Hashing combination algorithm from:
+		// https://stackoverflow.com/a/17017281
+		std::size_t h = 17;
+		h = h * 31 + std::hash<ecs::Manager*>()(k.manager_);
+		h = h * 31 + std::hash<ecs::internal::Id>()(k.entity_);
+		h = h * 31 + std::hash<ecs::internal::Version>()(k.version_);
+		return h;
+	}
+};
+
+} // namespace std

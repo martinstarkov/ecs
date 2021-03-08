@@ -1,32 +1,30 @@
 
-//#include "ManagerBasics.h"
-//#include "EntityBasics.h"
-//#include "ComponentBasics.h"
-//#include "PoolTests.h"
+#include "ManagerBasics.h"
+#include "EntityBasics.h"
+#include "ComponentBasics.h"
+#include "PoolTests.h"
 
-//#include "OldTests.h"
-//#include "SpeedTests.h"
-
-#include "../ECS_complete.h"
+#include "OldTests.h"
+#include "SpeedTests.h"
 
 #include <iostream>
 
 int main() {
 
-	//ManagerBasics managerBasics;
-	//EntityBasics entityBasics;
-	//ComponentBasics componentBasics;
-	//SpeedTests speedTests;
-	//PoolTests();
+	ManagerBasics();
+	EntityBasics();
+	ComponentBasics();
+	SpeedTests();
+	PoolTests();
 
-	//test3();
-	//test4();
-	//test5();
-	//test6();
-	//test7();
-	//test8();
-	//test9();
-	//test10();
+	test3();
+	test4();
+	test5();
+	test6();
+	test7();
+	test8();
+	test9();
+	test10();
 
 	std::cout << "All tests passed" << std::endl;
 
