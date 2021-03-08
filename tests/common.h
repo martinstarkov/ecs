@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ECS_complete.h"
+#include "../ECS.h"
 
 #include "Timer.h"
 
