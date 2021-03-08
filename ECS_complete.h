@@ -85,36 +85,25 @@ using is_valid_component = std::enable_if_t<
 template <typename T, typename ...TArgs>
 using is_constructible = std::enable_if_t<std::is_constructible_v<T, TArgs...>, bool>;
 
-template <typename ...TArgs>
-struct parameter_pack {};
+// Enforced inheritence from:
+// https://stackoverflow.com/a/22592618
+template <template <typename> typename T, typename U>
+struct IsDerivedFrom {
+private:
+	template <typename ...V>
+	static decltype(static_cast<const T<V...>&>(std::declval<U>()), std::true_type{})
+		test(const T<V...>&);
 
-
-template <typename>
-struct strip_pack {};
-
-template <typename ...TArgs>
-struct strip_pack<parameter_pack<TArgs...>> {
-	using type = System<TArgs...>;
-};
-
-template <typename T, class R = void>
-struct enable_if_alias { using type = R; };
-
-template <typename T, typename Enable = void>
-struct has_components_alias {
-	static const bool value{ false };
-};
-
-template <typename T>
-struct has_components_alias<T, typename enable_if_alias<typename T::Components>::type> {
-	static const bool value{ std::is_base_of_v<strip_pack<T::Components>::type, T> };
+	static std::false_type test(...);
+public:
+	static constexpr bool value{ decltype(IsDerivedFrom::test(std::declval<U>()))::value };
 };
 
 template <typename TSystem>
-constexpr bool is_valid_system_v{ has_components_alias<TSystem>::value };
+inline constexpr bool is_system_v{ IsDerivedFrom<System, TSystem>::value };
 
 template <typename TSystem>
-using is_valid_system = std::enable_if_t<is_valid_system_v<TSystem>, bool>;
+using is_valid_system = std::enable_if_t<is_system_v<TSystem>, bool>;
 
 } // namespace type_traits
 
@@ -453,21 +442,22 @@ private:
 template <typename ...TRequiredComponents>
 class System : public internal::BaseSystem {
 public:
-	virtual void Update() override {}
 	System() = default;
 	virtual ~System() = default;
-	using Components = internal::type_traits::parameter_pack<TRequiredComponents...>;
+
+	// Override this function in order to call
+	// manager's UpdateSystem() function.
+	virtual void Update() override {}
+
 	Manager& GetManager() {
 		assert(manager_ != nullptr && "Cannot retrieve manager for uninitialized system");
 		return *manager_;
 	}
 protected:
-	template <typename T>
-	friend struct has_components_alias;
 	std::vector<std::tuple<Entity, TRequiredComponents&...>> entities;
-
 private:
 	friend class Manager;
+
 	virtual std::size_t Hash() const override final {
 		// Hashing combination algorithm from:
 		// https://stackoverflow.com/a/17017281
@@ -795,7 +785,7 @@ public:
 
 	template <typename TSystem>
 	void AddSystem() {
-		static_assert(internal::type_traits::is_valid_system_v<TSystem>,
+		static_assert(internal::type_traits::is_system_v<TSystem>,
 					  "Cannot add a system to the manager which does not inherit from ecs::System class");
 		AddSystemImpl<TSystem>();
 	}
@@ -811,14 +801,14 @@ public:
 
 	template <typename TSystem>
 	void UpdateSystem() {
-		static_assert(internal::type_traits::is_valid_system_v<TSystem>,
+		static_assert(internal::type_traits::is_system_v<TSystem>,
 					  "Cannot update a system which does not inherit from ecs::System class");
 		UpdateSystemImpl<TSystem>();
 	}
 
 	template <typename TSystem>
 	bool HasSystem() const {
-		if constexpr (!internal::type_traits::is_valid_system_v<TSystem>) {
+		if constexpr (!internal::type_traits::is_system_v<TSystem>) {
 			return false;
 		} else {
 			auto system = GetSystemId<TSystem>();
@@ -828,7 +818,7 @@ public:
 
 	template <typename TSystem>
 	void RemoveSystem() {
-		if constexpr (internal::type_traits::is_valid_system_v<TSystem>) {
+		if constexpr (internal::type_traits::is_system_v<TSystem>) {
 			auto system = GetSystemId<TSystem>();
 			if (system < systems_.size()) {
 				delete systems_[system];

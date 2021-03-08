@@ -32,8 +32,8 @@ void static SpeedTests() {
 
 	ecs::Manager manager;
 
-	int e = 100000000; // 100 million
-	//int e = 1000;
+	//int e = 100000000; // 100 million
+	int e = 1000;
 
 	creation.Start();
 	for (auto i = 0; i < e; ++i) {

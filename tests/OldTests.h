@@ -35,7 +35,6 @@ struct ExampleSystem : public ecs::System<TPos<0>, TPos<1>> {
 template <typename ...T>
 struct Testing {
 public:
-	using Components = ecs::internal::type_traits::parameter_pack<T...>;
 	std::vector<std::tuple<int, T&...>> entities;
 };
 
