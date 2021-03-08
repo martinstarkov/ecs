@@ -39,19 +39,23 @@ void static SpeedTests() {
 	for (auto i = 0; i < e; ++i) {
 		manager.CreateEntity();
 	}
-	LOG("Entity creation (" << e << ") took " << creation.ElapsedSeconds() << "s");
+	LOG(creation.ElapsedSeconds());
+	//LOG("Entity creation (" << e << ") took " << creation.ElapsedSeconds() << "s");
 	refresh.Start();
 	manager.Refresh();
-	LOG("Entity refresh took (" << e << ") took " << refresh.ElapsedSeconds() << "s");
+	LOG(refresh.ElapsedSeconds());
+	//LOG("Entity refresh took (" << e << ") took " << refresh.ElapsedSeconds() << "s");
 
 	refresh.Start();
 	manager.Refresh();
-	LOG("Useless Entity refresh took (" << e << ") took " << refresh.ElapsedSeconds() << "s");
+	LOG(refresh.ElapsedSeconds());
+	//LOG("Useless Entity refresh took (" << e << ") took " << refresh.ElapsedSeconds() << "s");
 
 	entity_retrieval.Start();
 	auto entities = manager.GetEntities();
 	assert(entities.size() == e);
-	LOG("Group entity retrieval (" << e << ") took " << entity_retrieval.ElapsedSeconds() << "s");
+	LOG(entity_retrieval.ElapsedSeconds());
+	//LOG("Group entity retrieval (" << e << ") took " << entity_retrieval.ElapsedSeconds() << "s");
 		
 	addition.Start();
 	for (int i = 0; static_cast<std::size_t>(i) < entities.size(); ++i) {
@@ -59,7 +63,8 @@ void static SpeedTests() {
 		entity.AddComponent<Test>(i);
 		entity.AddComponent<Test2>(i);
 	}
-	LOG("Component addition (" << e << ") took " << addition.ElapsedSeconds() << "s");
+	LOG(addition.ElapsedSeconds());
+	//LOG("Component addition (" << e << ") took " << addition.ElapsedSeconds() << "s");
 
 	has.Start();
 	for (auto& entity : entities) {
@@ -68,7 +73,8 @@ void static SpeedTests() {
 			i += 1;
 		}
 	}
-	LOG("Component has check (" << e << ") took " << has.ElapsedSeconds() << "s");
+	LOG(has.ElapsedSeconds());
+	//LOG("Component has check (" << e << ") took " << has.ElapsedSeconds() << "s");
 
 	get_retrieval.Start();
 	for (std::size_t i = 0; i < entities.size(); ++i) {
@@ -80,14 +86,16 @@ void static SpeedTests() {
 		comp.d += 1;
 		comp2.w += 3;
 	}
-	LOG("Component retrieval (" << e << ") took " << get_retrieval.ElapsedSeconds() << "s");
+	LOG(get_retrieval.ElapsedSeconds());
+	//LOG("Component retrieval (" << e << ") took " << get_retrieval.ElapsedSeconds() << "s");
 
 	removal.Start();
 	for (auto& entity : entities) {
 		entity.RemoveComponent<Test>();
 		entity.RemoveComponent<Test2>();
 	}
-	LOG("Component removal (" << e << ") took " << removal.ElapsedSeconds() << "s");
+	LOG(removal.ElapsedSeconds());
+	//LOG("Component removal (" << e << ") took " << removal.ElapsedSeconds() << "s");
 
 	//for (auto& entity : entities) entity.AddComponent<Test>(99);
 
@@ -95,10 +103,12 @@ void static SpeedTests() {
 	for (auto& entity : entities) {
 		entity.Destroy();
 	}
-	LOG("Entity destruction (" << e << ") took " << destruction.ElapsedSeconds() << "s");
+	LOG(destruction.ElapsedSeconds());
+	//LOG("Entity destruction (" << e << ") took " << destruction.ElapsedSeconds() << "s");
 	refresh.Start();
 	manager.Refresh();
-	LOG("Entity refresh (" << e << ") took " << refresh.ElapsedSeconds() << "s");
+	LOG(refresh.ElapsedSeconds());
+	//LOG("Entity refresh (" << e << ") took " << refresh.ElapsedSeconds() << "s");
 		
 	LOG("Manager basics passed");
 }

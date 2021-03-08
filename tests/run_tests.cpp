@@ -5,6 +5,7 @@
 #include "PoolTests.h"
 
 #include "OldTests.h"
+
 #include "SpeedTests.h"
 
 #include <iostream>
@@ -14,8 +15,8 @@ int main() {
 	ManagerBasics();
 	EntityBasics();
 	ComponentBasics();
-	SpeedTests();
 	PoolTests();
+	SpeedTests();
 
 	test3();
 	test4();

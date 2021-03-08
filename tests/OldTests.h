@@ -88,27 +88,6 @@ void test3() {
 	auto stop_addition = std::chrono::high_resolution_clock::now();
 	auto duration_addition = std::chrono::duration_cast<std::chrono::microseconds>(stop_addition - start);
 	std::cout << "test3 took " << std::fixed << std::setprecision(1) << duration_addition.count() / 1000000.000 << " seconds to add all components" << std::endl;
-	for (auto i = 0; i < 2; ++i) {
-		//ecs.ForEach<TPos<1>, TPos<5>>([&](auto entity, auto& pos, auto& pos2) {
-		//	//LOG_(pos.a << " -> ");
-		//	pos.a += 1;
-		//	//LOG(pos.a);
-		//	pos.d += 1;
-		//	pos2.a += 1;
-		//	pos2.d += 1;
-		//	ecs.ForEach<TPos<6>, TPos<10>>([&](auto entity, auto& pos3, auto& pos4) {
-		//		pos3.a += 1;
-		//		pos3.d += 1;
-		//		pos4.a += 1;
-		//		pos4.d += 1;
-		//	});
-		//});
-	}
-	auto stop = std::chrono::high_resolution_clock::now();
-	auto duration_get = std::chrono::duration_cast<std::chrono::microseconds>(stop - stop_addition);
-	std::cout << "test3 get component loop time = " << std::fixed << std::setprecision(1) << duration_get.count() / 1000000.000 << std::endl;
-	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-	std::cout << "test3 total execution_time = " << std::fixed << std::setprecision(1) << duration.count() / 1000000.000 << std::endl;
 }
 
 void test4() {
@@ -139,14 +118,6 @@ void test5() {
 	e1.AddComponent<TPos<0>>(1);
 	e2.AddComponent<TPos<0>>(2);
 	e3.AddComponent<TPos<0>>(3);
-	/*ecs.ForEachEntity([&](ecs::Entity entity) {
-		LOG("entity: " << entity.GetComponent<TPos<0>>().a << ", isalive: " << ecs.IsAlive(entity));
-		entity.Destroy();
-		ecs.ForEachEntity([&](ecs::Entity entity) {
-			LOG("entity: " << entity.GetComponent<TPos<0>>().a << ", isalive: " << ecs.IsAlive(entity));
-		});
-	});*/
-	LOG("...");
 	ecs.Refresh();
 	auto entities = ecs.GetEntities();
 	for (auto& e : entities) {
@@ -263,23 +234,6 @@ void test9() {
 	//assert((ecs.GetEntitiesWith<TPos<1>>().size()) == 3);
 	//assert((ecs.GetComponentTuple<TPos<1>, TPos<2>>().size()) == 2);
 	auto [one, two] = e3.GetComponents<TPos<1>, TPos<2>>();
-	/*ecs.ForEach<TPos<1>>([](auto entity, auto& pos_one) {
-		LOG_(pos_one.a << " -> ");
-		pos_one.a += 1;
-		LOG(pos_one.a);
-	});
-	ecs.ForEachEntity([](auto entity) {
-		entity.AddComponent<TPos<0>>(5);
-		if (entity.HasComponent<TPos<0>>()) {
-			LOG("Entity " << entity.GetId() << " has TPos<0>");
-		}
-		if (entity.GetId() > 2) {
-			entity.RemoveComponent<TPos<0>>();
-		}
-	});
-	ecs.ForEach<TPos<0>>([](auto entity, auto& pos_zero) {
-		LOG("Entity " << entity.GetId() << " TPos<0> after: " << pos_zero.a);
-	});*/
 }
 
 void test10() {
