@@ -92,22 +92,20 @@ using is_valid_component = std::enable_if_t<
 template <typename T, typename ...TArgs>
 using is_constructible = std::enable_if_t<std::is_constructible_v<T, TArgs...>, bool>;
 
-// Enforced inheritence from:
-// https://stackoverflow.com/a/22592618
-template <template <typename> typename T, typename U>
-struct IsDerivedFrom {
-private:
-	template <typename ...V>
-	static decltype(static_cast<const T<V...>&>(std::declval<U>()), std::true_type{})
-		test(const T<V...>&);
-
-	static std::false_type test(...);
-public:
-	static constexpr bool value{ decltype(IsDerivedFrom::test(std::declval<U>()))::value };
+// Source: https://stackoverflow.com/a/34672753/4384023
+template <template <typename...> class base, typename derived>
+struct is_base_of_template_impl {
+	template<typename... Ts>
+	static constexpr std::true_type  test(const base<Ts...>*);
+	static constexpr std::false_type test(...);
+	using type = decltype(test(std::declval<derived*>()));
 };
 
+template < template <typename...> class base, typename derived>
+using is_base_of_template = typename is_base_of_template_impl<base, derived>::type;
+
 template <typename TSystem>
-inline constexpr bool is_system_v{ IsDerivedFrom<System, TSystem>::value };
+inline constexpr bool is_system_v{ is_base_of_template<System, TSystem>::value };
 
 template <typename TSystem>
 using is_valid_system = std::enable_if_t<is_system_v<TSystem>, bool>;
@@ -490,7 +488,7 @@ protected:
 	std::vector<std::tuple<Entity, TRequiredComponents&...>> entities;
 private:
 	// Manager requires private access for processing and manipulating systems.
-	friend class Manager;
+	friend class ecs::Manager;
 
 	/*
 	* Generates a hash number using system members.
@@ -633,6 +631,7 @@ public:
 		free_entities_ = std::exchange(obj.free_entities_, {});
 		// Reset state of other manager.
 		obj.next_entity_ = 0;
+		return *this;
 	}
 
 	/*
