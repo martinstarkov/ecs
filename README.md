@@ -1,70 +1,80 @@
-# C++ Single-Header Entity Component System Library
+# C++ Entity Component System Library
 
 ## Introduction
-This library aims to be as cache-friendly as possible while also supporting runtime addition of new component types. This is achieved by storing all components contiguously in memory in the form of void pointers, which are then cast to specific components when required. As far as this approach goes, while it is not type safe, the implementation gets around this by maintaining an indexing table of components with unique type ids for each entity which prevents retrieval / access of invalid component types.
-
+This library aims to be cache-friendly by storing components contiguously in memory, while also supporting runtime addition of new component types. The implementation uses a dense and sparse set combined with an indexing table to match entities to their respective components.
 
 ## Usage
 
-Simply add `#include "ECS.h"` in whichever file utilizes the entity component system.
+1. Acquire the ```ECS.h``` file from this repository.
 
+2. Add `#include "path/to/ECS.h"` in files which utilize the entity component system.
 
 ## Manager
 
-The core storage unit of entities and systems is the `ecs::Manager` class, created like so.
+The core storage unit of entities and components is the `ecs::Manager` class, created like so:
+
 ```c++
 #include "ECS.h"
 
-ecs::Manager my_manager;
+ecs::Manager manager;
 ```
-Note that managers can be moved, cannot be copied, but can be cloned. This prevents accidental copies as they are expensive and some users may not used to move semantics.
 
-Manager functions are elaborated upon at the end of this documentation.
+Managers can be moved but no copied. This prevents accidental copying as it is expensive and some users may not used to move semantics. ```manager.Clone()``` should be used if the user wishes to duplicate a manager.
+
+Manager functions are explained at the end of this documentation.
 
 
 ## Entities
 
-Users can interact with entities through handles (`ecs::Entity`), which can be created using the manager.
-```c++
-ecs::Manager my_manager;
+Users can interact with entities through `ecs::Entity` handle objects, which are returned by the manager.
 
-auto entity1 = my_manager.CreateEntity();
-```
-Important note: Calling ```CreateEntity()``` will give the user a handle which can be used as normal but the entity will not me considered a part of the manager until a refresh is called. The memory associated with this entity is, however, stored in the manager and therefore any added components will be stored in the manager.
 ```c++
-my_manager.Refresh();
+ecs::Manager manager;
+
+auto entity = manager.CreateEntity();
 ```
 
-Entities can be marked for destruction using the handle function.
+Calling ```manager.CreateEntity()``` will create an entity but it will not be considered alive until the manager is refreshed. Entities must be alive to be detected in the manager. The memory associated with the entity is, however, stored in the manager and therefore components can be added or removed to/from the entity before refreshing.
+
 ```c++
-entity1.Destroy();
+manager.Refresh();
 ```
-Important note: Similarly to creation, an entity and its components are not immediately destroyed when ```Destroy()``` is called, but rather it flags the entity and its components to be destroyed on the next manager refresh call. This allows for loops where entities may destroy other entities to finish before invalidating themselves.
 
-TLDR: Call ```Refresh()``` after ```CreateEntity()``` or ```entity.Destroy()``` unless you want to wait for the entity to be considered 'valid'. Valid means it appears in system caches.
+Entities can be marked for destruction using:
 
-A null entity can be created using `ecs::null`, this may be useful if attempting to find an entity which matches a specific condition and returning an invalid entity if no such entity is found.
+```c++
+entity.Destroy();
+```
 
-Note that ```ecs::null``` is technically an instance of the ```ecs::NullEntity``` class, therefore the auto keyword cannot be used if you wish to set ecs::null entity to something else later.
+But will not be removed from the manager until a refresh is called. This prevents iterator invalidation if entities destroy each other during container loops.
+```entity.IsAlive()``` can be called to check the state of validity of an entity in its parent manager.
+
+**TLDR;** Remember to call ```manager.Refresh()``` before looping through entities using the manager.
+
+A null (invalid) entity can be represented using `ecs::null`.
+
+Note: ```ecs::null``` is a constexpr instance of the ```ecs::NullEntity``` class, therefore the auto keyword should not be used if the entity will be set to a valid one later.
+
 ```c++
 ecs::Entity initially_invalid_entity = ecs::null;
 // vs.
-auto always_invalid_entity = ecs::null;
+auto permanently_invalid_entity = ecs::null;
 ```
 
-Entity handles contain some properties / functions which may be useful in specific circumstances:
-- Overloaded `==` and `!=` operators for comparison between entities, for `==` comparison to return true the manager, version, and id of both entities must match.
-- Comparison with `ecs::null` (invalid entity).
-- Custom hashing function for use as keys in unordered maps or sets.
-- `GetManager()` returns a reference to the parent manager if it exists.
+Comparing entities can be done as follows:
+- Using overloaded ```==``` or ```!=``` operator to compare two entity handles (or ```ecs::null```).
+- Using ```entity.IsIdenticalTo(other_entity)``` to compare entity composition (whether they have identical components).
 
+Entity handles implement ```std::hash``` which allows them to be used as keys in hashed containers such as ```std::unordered_map```.
+
+```entity.GetManager()``` returns a reference to the entity handle's parent manager.
 
 ## Components
 
-Components contain all the data but none of the logic.
-Components can be defined without inheriting from a base class. Due to runtime addition support, the manager does not need to be notified of new component additions in compile time.
+Components can be viewed as properties (or data) of an entity. Due to runtime addition support, the manager does not need to be notified of new component types in compile time. 
 
-Every component requires a valid constructor, destructor, and must be move constructable.
+Components require a valid constructor, destructor, and move constructor.
+
 ```c++
 struct HumanComponent {
     HumanComponent(int age, double height) : age{ age }, height{ height } {}
@@ -75,182 +85,145 @@ struct HumanComponent {
 
 The user can interact with an entity's components through the entity handle.
 
-`AddComponent<>(constructor_args...)` requires you to pass the component type as a template parameter and the constructor arguments as parameters. If the entity already contains the component type, it will be replaced.
+`AddComponent<Type>(constructor_args...)` requires you to pass the component type as a template parameter and the component constructor arguments as function parameters. If the entity already has the component type, it will be replaced.
 A reference to the newly created component is returned.
+
 ```c++
-auto entity1 = my_manager.CreateEntity();
+auto entity = manager.CreateEntity();
 
 int age = 22;
-
 double height = 180.5;
 
-auto& human_component = entity1.AddComponent<HumanComponent>(age, height);
-
-human_component.height += 0.5;
+auto& human = entity.AddComponent<HumanComponent>(age, height);
+human.height += 0.5;
 ```
 
-Checking if an entity has a component can be done using `HasComponent<>()`.
+Checking if an entity has component(s) can be done like so:
+
 ```c++
-bool is_human = entity1.HasComponent<HumanComponent>();
-```
-Or for multiple checks at once with `HasComponents<>()`.
-```c++
-bool has_both = entity1.HasComponents<HumanComponent, OtherComponent>();
+bool is_human = entity.HasComponent<HumanComponent>();
+
+bool is_cyborg = entity.HasComponents<HumanComponent, RobotComponent>();
 ```
 
-`GetComponent<>()` returns a reference to the component. If the entity does not have the component a debug assertion will be called.
-```c++
-auto& human_component = entity1.GetComponent<HumanComponent>();
+Component(s) references can be retrieved from an entity using:
 
-human_component.age += 1;
-```
-And when retrieving multiple components at once with `GetComponents<>()`, a tuple is returned.
 ```c++
-auto tuple_of_components = entity1.GetComponents<HumanComponent, OtherComponent>();
-```
-The components can be accessed easily via a structured binding.
-```c++
-auto [human_component, other_component] = tuple_of_components;
+auto& human = entity.GetComponent<HumanComponent>();
+
+auto [robot, alien] = entity.GetComponents<RobotComponent, AlienComponent>();
+
+human.age += 1;
 ```
 
-Removing components is easy, simply call `RemoveComponent<>()`.
+If an entity does not have the requested component, a debug assertion is called. It is therefore advisable to wrap component retrieval in an if-statement such as:
+
 ```c++
-entity1.RemoveComponent<HumanComponent>();
+if (entity.HasComponent<HumanComponent>()) {
+    auto& human = entity.GetComponent<HumanComponent>();
+}
 ```
-Or for multiple removals at once `RemoveComponents<>()`.
+
+Components can be removed using:
+
 ```c++
-entity1.RemoveComponents<HumanComponent, OtherComponent>();
+entity.RemoveComponent<HumanComponent>();
+
+entity.RemoveComponents<RobotComponent, AlienComponent>();
 ```
+
+Nothing happens if the entity did not have the component type.
 
 ## Systems
 
-Systems contain only logic and no data (other than an internal cache of entities).
-Systems cache entities with matching components. When declaring a system, one must inherit from the templated `ecs::System<>` base class and pass the components which each entity in the system must contain. If no types are passed then the system will maintain a cache of all manager entities.
-The system class provides a virtual `Update()` function which can be overridden and called later via the manager.
+Systems represent the logic of how grouped entities are manipulated. In this implementation, they are simply lambdas whose arguments are filled with entity handles and components.
 
-`ecs::System` contains a cached variable called `entities` which is a vector of tuples containing an entity handle followed by references to the required components.
-The `entities` vector can be looped through using structured bindings and automatically adds / removes relevant entities when their component makeup changes.
+For instance, each entity can be looped through:
+
 ```c++
-struct MySystem : public ecs::System<HumanComponent, OtherComponent> {
-    void Update() {
-        // The order of the tuple always starts with an entity handle, followed by the template parameters.
-        for (auto [entity_handle, human_component, other_component] : entities) {
-        
-            // ... System logic here ....
-            
-            // For optional components, the following check will suffice.
-            if (entity_handle.HasComponent<OptionalComponent>() {
-                auto& optional_component = entity_handle.GetComponent<OptionalComponent>();
-                
-                // ... More logic here ...
-            }
-        }
+manager.ForEachEntity([](ecs::Entity entity) {
+    entity.AddComponent<ZombieComponent>();
+    entity.AddComponent<FoodComponent>();
+}
+```
+
+Or only entities with specific components:
+
+```c++
+manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
+    [&](ecs::Entity entity, auto& zombie, auto& food) {
+    if (food.amount < threshold) {
+        // ...
     }
 }
 ```
-If components are removed from an entity during the for-loop, the cache will be update accordingly after the `Update()` function has finished. This means that entities changed during the loop will still exist in the `entities` vector until the end of the `Update()` call.
-As mentioned previously, if a system destroys entitites, the user must call ```Refresh()``` on the manager in order for the manager to destruct the entities and their respective components.
 
-Systems can be registered with the manager as follows.
+Or only entities without specific components:
+
 ```c++
-struct MySystem : public ecs::System<HumanComponent, OtherComponent> { ... };
-
-ecs::Manager my_manager;
-
-my_manager.AddSystem<MySystem>();
-```
-Note that since systems exist purely for operating on components with logic, they should not have member variables. For this reason their addition to the manager only supports default construction (no additional arguments).
-
-And updated using the manager.
-```c++
-my_manager.UpdateSystem<MySystem>();
-```
-inside your game loop / wherever the manager exists.
-
-Systems can be removed from the manager using `RemoveSystem<>()` which will prevent their `Update<>()` call from passing.
-```c++
-my_manager.RemoveSystem<MySystem>();
-
-my_manager.UpdateSystem<MySystem>(); // debug assertion called, system has not been added to the manager.
-```
-In order to get around this one may use `HasSystem<>()`.
-```c++
-if (my_manager.HasSystem<MySystem>()) {
-    my_manager.UpdateSystem<MySystem>();
+manager.ForEachEntityWithout<FoodComponent>([&](ecs::Entity entity) {
+    entity.Destroy()
 }
+manager.Refresh();
 ```
 
-Additionally, one may be interested in accessing the parent manager from within the system class (perhaps to create additional entities). This can be done via the inherited `GetManager()` function which returns a reference to the parent manager.
+## Manager utility functions
+
+As copying entity handles does not create new entities, copying all of an entity's components to a new entity can be done via the manager:
+
 ```c++
-struct MySystem : public ecs::System<HumanComponent, OtherComponent> {
-  void Update() {
-      auto& manager = GetManager();
-      auto new_entity = manager.CreateEntity();
-  }
-}
+auto new_entity = manager.CopyEntity(entity);
+
+assert(new_entity.IsIdenticalTo(entity)); // passes
 ```
 
+This requires that all of the entity's components are copy-constructible. If the user wishes to copy only certain components they can do so using template parameters:
 
-## Useful manager utility functions
+```c++
+auto new_entity = manager.CopyEntity<ZombieComponent, FoodComponent>(entity);
 
-The manager supports a host of useful functions for manipulating specific entities.
+// new_entity now has the same ZombieComponent and FoodComponent as entity.
+```
 
-One may wish to access all live entities in the manager.
+The number of alive entities in the manager can be found using:
+
 ```c++
-auto vector_of_entities = my_manager.GetEntities();
+std::size_t entity_count = manager.GetEntityCount();
 ```
-Or only entities with given components.
+
+Or the number of destroyed entities:
+
 ```c++
-auto vector_of_human_entities = my_manager.GetEntitiesWith<HumanComponent, LifeComponent>();
+std::size_t dead_entity_count = manager.GetDeadEntityCount();
 ```
-Or without given components.
+
+Destroying all of the entities and components in a manager is similar to standard library containers:
+
 ```c++
-auto vector_of_aliens = my_manager.GetEntitiesWithout<HumanComponent>();
+manager.Clear();
 ```
-The number of live entities in the manager can also be found.
-```c++
-auto entity_count = my_manager.GetEntityCount();
-```
-Similarly, the number of dead entities in the manager.
-```c++
-auto dead_entity_count = my_manager.GetDeadEntityCount();
-```
-Clearing the manager of all entities and components is as easy as.
+
 Note that this maintains the manager entity capacity.
+
+The manager can be reset fully (including capacity) using:
+
 ```c++
-my_manager.Clear();
+manager.Reset();
 ```
-The manager can be reset fully (equivalent to calling destructor and constructor again) with the following.
+
+The user can reserve entity capacity in advance with:
+
 ```c++
-my_manager.Reset();
+manager.Reserve(5); // 5 entities.
 ```
-One can also reserve capacity for entities in the manager by passing the desired capacity like so.
+
+As mentioned previously, managers can only be duplicated like so:
+
 ```c++
-// This reserves space for at least 5 entities ahead of time (possibly saving on allocations).
-my_manager.Reserve(5);
-```
-A manager can be cloned to create an identical manager with equivalent entity and component composition using.
-```c++
-auto new_manager = my_manager.Clone();
-```
-All entities can be flagged for destruction with.
-```c++
-my_manager.DestroyEntities();
-```
-For more specific destruction, use.
-```c++
-my_manager.DestroyEntitiesWith<HumanComponent, OtherComponent>();
-my_manager.DestroyEntitiesWithout<HumanComponent, OtherComponent>();
-```
-`GetEntityComponents<>()` returns a vector of tuples where the first tuple element is the entity handle and the rest are references to the components in the order of the template parameter list. This is equivalent to the `entities` variable used in systems.
-```c++
-auto vector_of_tuples = my_manager.GetEntityComponents<HumanComponent, OtherComponent>();
-```
-Which can be cycled through easily using a structured binding as before.
-```c++
-for (auto [entity_handle, human_component, other_component] : vectors_of_tuples) {
-    // ... Code here ...
-}
+auto new_manager = manager.Clone();
+
+// manager comparison is slow and inadvisable for large managers.
+assert(new_manager == manager); 
 ```
 
 
@@ -258,6 +231,6 @@ for (auto [entity_handle, human_component, other_component] : vectors_of_tuples)
 
 Vittorio Romeo ([SuperV1234](https://github.com/SuperV1234/)) for his [brilliant talk at CppCon 2015](https://www.youtube.com/watch?v=NTWSeQtHZ9M) on entity component systems, which provided lots of useful ideas for my implementation.
 
-Michele Caini ([skypjack](https://github.com/skypjack/)) for his [series of articles](https://skypjack.github.io/2019-02-14-ecs-baf-part-1/) on efficient entity components systems.
+Michele Caini ([skypjack](https://github.com/skypjack/)) for his [series of articles](https://skypjack.github.io/2019-02-14-ecs-baf-part-1/) on efficient entity component systems.
 
-Adam ([T-Machine](http://t-machine.org/)) for his article on [data structures for entity systems](http://t-machine.org/index.php/2014/03/08/data-structures-for-entity-systems-contiguous-memory/), which inspired me to implement my own component pool memory allocator.
+Adam ([T-Machine](http://t-machine.org/)) for his article on [data structures for entity systems](http://t-machine.org/index.php/2014/03/08/data-structures-for-entity-systems-contiguous-memory/), which inspired me to implement my own component pool allocator.
