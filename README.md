@@ -19,7 +19,7 @@ The core storage unit of entities and components is the `ecs::Manager` class, cr
 ecs::Manager manager;
 ```
 
-Managers can be moved but no copied. This prevents accidental copying as it is expensive and some users may not used to move semantics. ```manager.Clone()``` should be used if the user wishes to duplicate a manager.
+Managers can be moved but not copied. This prevents accidental copying as it is expensive and some users may not used to move semantics. ```manager.Clone()``` should be used if the user wishes to duplicate a manager.
 
 Manager functions are explained at the end of this documentation.
 
