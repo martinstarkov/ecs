@@ -44,13 +44,13 @@ namespace ecs {
 // Forward declarations for user-accessible types.
 
 class Entity;
-class NullEntity;
 class Manager;
 
 namespace internal {
 
 // Forward declarations for internally used types.
 
+class NullEntity;
 class PoolInterface;
 
 template <typename TComponent>
@@ -1232,7 +1232,7 @@ private:
 	friend struct std::hash<Entity>;
 
 	// NullEntity comparison uses versions so it requires private access.
-	friend class NullEntity;
+	friend class internal::NullEntity;
 
 	// Actual constructor for creating entities through the manager.
 	Entity(const internal::Id entity, const internal::Version version, Manager* manager) :
@@ -1250,6 +1250,8 @@ private:
 	// Parent manager pointer for calling handle functions.
 	Manager* manager_{ nullptr };
 };
+
+namespace internal {
 
 /*
 * Null entity object.
@@ -1281,21 +1283,14 @@ public:
 	}
 };
 
-// Entity comparison with null entity.
-
-inline bool operator==(const Entity& entity, const NullEntity& null_entity) {
-	return null_entity == entity;
-}
-inline bool operator!=(const Entity& entity, const NullEntity& null_entity) {
-	return !(null_entity == entity);
-}
+} // namespace internal
 
 /*
 * Null entity.
 * Allows for comparing invalid / uninitialized 
 * entities with valid manager created entities.
 */
-inline constexpr NullEntity null{};
+inline constexpr internal::NullEntity null{};
 
 /*
 * Below are the definitions of functions which
@@ -1501,3 +1496,13 @@ struct hash<ecs::Entity> {
 };
 
 } // namespace std
+
+// Entity comparison with null entity.
+
+inline bool operator==(const ecs::Entity& entity, const ecs::internal::NullEntity& null_entity) {
+	return null_entity == entity;
+}
+
+inline bool operator!=(const ecs::Entity& entity, const ecs::internal::NullEntity& null_entity) {
+	return !(null_entity == entity);
+}
