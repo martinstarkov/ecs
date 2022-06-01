@@ -49,7 +49,7 @@ entity.Destroy();
 But will not be removed from the manager until a refresh is called. This prevents iterator invalidation if entities destroy each other during container loops.
 ```entity.IsAlive()``` can be called to check the state of validity of an entity in its parent manager.
 
-**TLDR;** Remember to call ```manager.Refresh()``` before looping through entities using the manager.
+**TLDR;** Remember to always call ```manager.Refresh()``` after an entity is created or destroyed.
 
 A null (invalid) entity can be represented using `ecs::null`.
 
