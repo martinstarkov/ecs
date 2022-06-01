@@ -53,7 +53,7 @@ But will not be removed from the manager until a refresh is called. This prevent
 
 A null (invalid) entity can be represented using `ecs::null`.
 
-Note: ```ecs::null``` is a constexpr instance of the ```ecs::NullEntity``` class, therefore the auto keyword should not be used if the entity will be set to a valid one later.
+Note: ```ecs::null``` is a constexpr instance of the ```ecs::internal::NullEntity``` class, therefore the auto keyword should not be used if the entity will be set to a valid one later.
 
 ```c++
 ecs::Entity initially_invalid_entity = ecs::null;
