@@ -80,7 +80,7 @@ struct HumanComponent {
     HumanComponent(int age, double height) : age{ age }, height{ height } {}
     int age;
     double height;
-}
+};
 ```
 
 The user can interact with an entity's components through the entity handle.
@@ -144,7 +144,7 @@ For instance, each entity can be looped through:
 manager.ForEachEntity([](ecs::Entity entity) {
     entity.AddComponent<ZombieComponent>();
     entity.AddComponent<FoodComponent>();
-}
+});
 ```
 
 Or only entities with specific components:
@@ -155,7 +155,7 @@ manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
     if (food.amount < threshold) {
         // ...
     }
-}
+});
 ```
 
 Or only entities without specific components:
@@ -163,7 +163,7 @@ Or only entities without specific components:
 ```c++
 manager.ForEachEntityWithout<FoodComponent>([&](ecs::Entity entity) {
     entity.Destroy()
-}
+});
 manager.Refresh();
 ```
 
