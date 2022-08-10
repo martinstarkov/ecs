@@ -1478,6 +1478,16 @@ inline void Manager::ForEachEntityWithout(T function) {
 	}
 }
 
+// Entity comparison with null entity.
+
+inline bool operator==(const Entity& entity, const impl::NullEntity& null_entity) {
+	return null_entity == entity;
+}
+
+inline bool operator!=(const Entity& entity, const impl::NullEntity& null_entity) {
+	return !(null_entity == entity);
+}
+
 } // namespace ecs
 
 namespace std {
@@ -1498,13 +1508,3 @@ struct hash<ecs::Entity> {
 };
 
 } // namespace std
-
-// Entity comparison with null entity.
-
-inline bool operator==(const ecs::Entity& entity, const ecs::impl::NullEntity& null_entity) {
-	return null_entity == entity;
-}
-
-inline bool operator!=(const ecs::Entity& entity, const ecs::impl::NullEntity& null_entity) {
-	return !(null_entity == entity);
-}
