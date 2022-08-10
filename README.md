@@ -49,11 +49,11 @@ entity.Destroy();
 But will not be removed from the manager until a refresh is called. This prevents iterator invalidation if entities destroy each other during container loops.
 ```entity.IsAlive()``` can be called to check the state of validity of an entity in its parent manager.
 
-**TLDR;** Remember to call ```manager.Refresh()``` before looping through entities using the manager.
+**TLDR;** Remember to always call ```manager.Refresh()``` after an entity is created or destroyed.
 
 A null (invalid) entity can be represented using `ecs::null`.
 
-Note: ```ecs::null``` is a constexpr instance of the ```ecs::NullEntity``` class, therefore the auto keyword should not be used if the entity will be set to a valid one later.
+Note: ```ecs::null``` is a constexpr instance of the ```ecs::internal::NullEntity``` class, therefore the auto keyword should not be used if the entity will be set to a valid one later.
 
 ```c++
 ecs::Entity initially_invalid_entity = ecs::null;
@@ -80,7 +80,7 @@ struct HumanComponent {
     HumanComponent(int age, double height) : age{ age }, height{ height } {}
     int age;
     double height;
-}
+};
 ```
 
 The user can interact with an entity's components through the entity handle.
@@ -144,7 +144,7 @@ For instance, each entity can be looped through:
 manager.ForEachEntity([](ecs::Entity entity) {
     entity.AddComponent<ZombieComponent>();
     entity.AddComponent<FoodComponent>();
-}
+});
 ```
 
 Or only entities with specific components:
@@ -155,7 +155,7 @@ manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
     if (food.amount < threshold) {
         // ...
     }
-}
+});
 ```
 
 Or only entities without specific components:
@@ -163,7 +163,7 @@ Or only entities without specific components:
 ```c++
 manager.ForEachEntityWithout<FoodComponent>([&](ecs::Entity entity) {
     entity.Destroy()
-}
+});
 manager.Refresh();
 ```
 
