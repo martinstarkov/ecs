@@ -33,9 +33,6 @@ SOFTWARE.
 #include <deque>       // std::deque
 #include <tuple>       // std::tuple
 #include <functional>  // std::hash
-#include <utility>     // std::function
-#include <algorithm>   // std::max_element
-#include <memory>      // std::allocator
 #include <type_traits> // std::is_destructible_v
 #include <cassert>     // assert
 
@@ -661,7 +658,7 @@ public:
 	* @return Handle to newly copied entity.
 	*/
 	template <typename ...TComponents>
-	Entity CopyEntity(const Entity& entity);
+	Entity CopyEntity(const Entity& e);
 
 	// Loop through each entity in the manager.
 	template <typename T>
@@ -1042,20 +1039,20 @@ public:
 	// Entity handle comparison operators.
 
 	// Returns true if entity handle is the same as the passed one.
-	bool operator==(const Entity& entity) const {
+	bool operator==(const Entity& e) const {
 		return
-			entity_ == entity.entity_ &&
-			version_ == entity.version_ &&
-			manager_ == entity.manager_;
+			entity_ == e.entity_ &&
+			version_ == e.version_ &&
+			manager_ == e.manager_;
 	}
 
 	// Returns true if entity handle is not the same as the passed one.
-	bool operator!=(const Entity& entity) const {
-		return !(*this == entity);
+	bool operator!=(const Entity& e) const {
+		return !(*this == e);
 	}
 
 	// Returns true if both entities have the same components.
-	bool IsIdenticalTo(const Entity& entity) const;
+	bool IsIdenticalTo(const Entity& e) const;
 
 	/*
 	* Retrieves const reference to the parent manager of the entity.
@@ -1261,11 +1258,11 @@ public:
 
 	// Comparison to entity objects.
 
-	bool operator==(const Entity& entity) const {
-		return entity.version_ == impl::null_version;
+	bool operator==(const Entity& e) const {
+		return e.version_ == impl::null_version;
 	}
-	bool operator!=(const Entity& entity) const {
-		return !(*this == entity);
+	bool operator!=(const Entity& e) const {
+		return !(*this == e);
 	}
 };
 
@@ -1289,17 +1286,17 @@ inline impl::Id impl::Pool<TComponent>::GetComponentId() const {
 	return ecs::Manager::GetComponentId<TComponent>();
 }
 
-inline bool Entity::IsIdenticalTo(const Entity& entity) const {
+inline bool Entity::IsIdenticalTo(const Entity& e) const {
 	return 
-		 *this == entity ||
+		 *this == e ||
 		 *this == ecs::null &&
-		 entity == ecs::null ||
+		 e == ecs::null ||
 		 *this != ecs::null && 
-		 entity != ecs::null &&
-		 manager_ == entity.manager_ &&
+		 e != ecs::null &&
+		 manager_ == e.manager_ &&
 		 manager_ &&
-		 entity_ != entity.entity_ &&
-		 manager_->HaveMatchingComponents(entity_, entity.entity_);
+		 entity_ != e.entity_ &&
+		 manager_->HaveMatchingComponents(entity_, e.entity_);
 }
 
 inline Entity Manager::CreateEntity() {
@@ -1328,10 +1325,10 @@ inline Entity Manager::CreateEntity() {
 }
 
 template <typename ...TComponents>
-inline Entity Manager::CopyEntity(const Entity& entity) {
+inline Entity Manager::CopyEntity(const Entity& e) {
 	// Create new entity in the manager to copy to.
 	auto copy_entity{ CreateEntity() };
-	auto from{ entity.entity_ };
+	auto from{ e.entity_ };
 	auto to{ copy_entity.entity_ };
 	if constexpr (sizeof...(TComponents) > 0) {
 		static_assert(std::conjunction_v<std::is_copy_constructible<TComponents>...>,
@@ -1464,12 +1461,12 @@ inline void Manager::ForEachEntityWithout(T function) {
 
 // Entity comparison with null entity.
 
-inline bool operator==(const Entity& entity, const impl::NullEntity& null_entity) {
-	return null_entity == entity;
+inline bool operator==(const Entity& e, const impl::NullEntity& null_e) {
+	return null_e == e;
 }
 
-inline bool operator!=(const Entity& entity, const impl::NullEntity& null_entity) {
-	return !(null_entity == entity);
+inline bool operator!=(const Entity& e, const impl::NullEntity& null_e) {
+	return !(null_e == e);
 }
 
 } // namespace ecs
