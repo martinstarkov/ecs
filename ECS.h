@@ -26,18 +26,18 @@ SOFTWARE.
 
 #pragma once
 
-#include <cstdlib> // std::size_t, std::malloc, std::realloc, std::free
-#include <cstdint> // std::uint32_t
-#include <vector> // std::vector
-#include <array> // std::array
-#include <deque> // std::deque
-#include <tuple> // std::tuple
-#include <functional> // std::hash
-#include <utility> // std::exchange, std::function
-#include <algorithm> // std::max_element
-#include <memory> // std::allocator
-#include <type_traits> // std::enable_if_t, std::is_destructible_v, std::is_base_of_v, etc
-#include <cassert> // assert
+#include <cstdlib>     // std::malloc
+#include <cstdint>     // std::uint32_t
+#include <vector>      // std::vector
+#include <array>       // std::array
+#include <deque>       // std::deque
+#include <tuple>       // std::tuple
+#include <functional>  // std::hash
+#include <utility>     // std::function
+#include <algorithm>   // std::max_element
+#include <memory>      // std::allocator
+#include <type_traits> // std::is_destructible_v
+#include <cassert>     // assert
 
 namespace ecs {
 
@@ -46,7 +46,7 @@ namespace ecs {
 class Entity;
 class Manager;
 
-namespace internal {
+namespace impl {
 
 // Forward declarations for internally used types.
 
@@ -447,7 +447,7 @@ private:
 	std::deque<Offset> freed_offsets_;
 };
 
-} // namespace internal
+} // namespace impl
 
 // Entity and component storage class for the ECS.
 class Manager {
@@ -506,9 +506,9 @@ public:
 			entities_ == other.entities_ &&
 			versions_ == other.versions_) {
 			// Compare manager component pools.
-			auto IdenticalComponentPools = [](const internal::PoolInterface* lhs,
-											  const internal::PoolInterface* rhs) {
-				return (lhs == rhs) || (lhs != nullptr && rhs != nullptr && lhs->Hash() == rhs->Hash());
+			auto IdenticalComponentPools = [](const impl::PoolInterface* lhs,
+											  const impl::PoolInterface* rhs) {
+				return lhs == rhs || lhs != nullptr && rhs != nullptr && lhs->Hash() == rhs->Hash();
 			};
 			return std::equal(std::begin(pools_),
 							  std::end(pools_),
@@ -591,9 +591,9 @@ public:
 				   "Refresh failed due to varying entity vector and refresh vector size");
 			assert(next_entity_ <= entities_.size() &&
 				   "Next available entity must not be out of bounds of entity vector");
-			internal::Id alive{ 0 };
-			internal::Id dead{ 0 };
-			for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+			impl::Id alive{ 0 };
+			impl::Id dead{ 0 };
+			for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
 				// Entity was marked for refresh.
 				if (refresh_[entity]) {
 					refresh_[entity] = false;
@@ -718,7 +718,7 @@ private:
 			Reserve(size);
 			entities_.resize(size, false);
 			refresh_.resize(size, false);
-			versions_.resize(size, internal::null_version);
+			versions_.resize(size, impl::null_version);
 		}
 		assert(entities_.size() == versions_.size() &&
 			   "Resize failed due to varying entity vector and version vector size");
@@ -731,7 +731,7 @@ private:
 	* @param entity Id of entity to mark for deletion.
 	* @param version Version of entity for handle comparison.
 	*/
-	void DestroyEntity(const internal::Id entity, const internal::Version version) {
+	void DestroyEntity(const impl::Id entity, const impl::Version version) {
 		assert(entity < versions_.size());
 		assert(entity < refresh_.size());
 		if (versions_[entity] == version) {
@@ -761,7 +761,7 @@ private:
 	* @param version Version of entity for handle comparison.
 	* @return True if entity is alive, false otherwise.
 	*/
-	bool IsAlive(const internal::Id entity, const internal::Version version) const {
+	bool IsAlive(const impl::Id entity, const impl::Version version) const {
 		return 
 			entity < versions_.size() &&
 			versions_[entity] == version &&
@@ -774,7 +774,7 @@ private:
 	* @param entity2 Second entity.
 	* @return True if both entities have all the same components, false otherwise.
 	*/
-	bool HaveMatchingComponents(const internal::Id entity1, const internal::Id entity2) {
+	bool HaveMatchingComponents(const impl::Id entity1, const impl::Id entity2) {
 		for (auto pool : pools_) {
 			if (pool != nullptr) {
 				bool has1{ pool->Has(entity1) };
@@ -796,13 +796,13 @@ private:
 	* @return Pointer to the component pool, nullptr if pool does not exist.
 	*/
 	template <typename TComponent>
-	internal::Pool<TComponent>* GetPool(const internal::Id component) const {
+	impl::Pool<TComponent>* GetPool(const impl::Id component) const {
 		assert(component == GetComponentId<TComponent>() &&
 			   "GetPool mismatch with component id");
 		if (component < pools_.size()) {
 			// Note that this could be nullptr if the 
 			// component pool does not exist in the manager.
-			return static_cast<internal::Pool<TComponent>*>(pools_[component]);
+			return static_cast<impl::Pool<TComponent>*>(pools_[component]);
 		}
 		return nullptr;
 	}
@@ -816,7 +816,7 @@ private:
 	* @return Const reference to the component.
 	*/
 	template <typename TComponent>
-	const TComponent& GetComponent(const internal::Id entity, const internal::Id component) const {
+	const TComponent& GetComponent(const impl::Id entity, const impl::Id component) const {
 		const auto pool{ GetPool<TComponent>(component) };
 		assert(pool != nullptr && "Cannot retrieve component which has not been added to manager");
 		const auto component_address{ pool->Get(entity) };
@@ -838,7 +838,7 @@ private:
 	* @return Reference to the component.
 	*/
 	template <typename TComponent>
-	TComponent& GetComponent(const internal::Id entity, const internal::Id component) {
+	TComponent& GetComponent(const impl::Id entity, const impl::Id component) {
 		return const_cast<TComponent&>(static_cast<const Manager&>(*this).GetComponent<TComponent>(entity, component));
 	}
 
@@ -850,9 +850,9 @@ private:
 	* @return True if entity has the component, false otherwise.
 	*/
 	template <typename TComponent>
-	bool HasComponent(const internal::Id entity, const internal::Id component) const {
+	bool HasComponent(const impl::Id entity, const impl::Id component) const {
 		const auto pool{ GetPool<TComponent>(component) };
-		return pool != nullptr && pool->internal::Pool<TComponent>::Has(entity);
+		return pool != nullptr && pool->impl::Pool<TComponent>::Has(entity);
 	}
 
 	/*
@@ -862,7 +862,7 @@ private:
 	* @return True if entity has each component, false otherwise.
 	*/
 	template <typename ...TComponents>
-	bool HasComponents(const internal::Id entity) const {
+	bool HasComponents(const impl::Id entity) const {
 		return { (HasComponent<TComponents>(entity, GetComponentId<TComponents>()) && ...) };
 	}
 
@@ -877,8 +877,8 @@ private:
 	* @return Reference to the newly added / replaced component.
 	*/
 	template <typename TComponent, typename ...TArgs>
-	TComponent& AddComponent(const internal::Id entity,
-							 const internal::Id component,
+	TComponent& AddComponent(const impl::Id entity,
+							 const impl::Id component,
 							 TArgs&&... constructor_args) {
 		static_assert(std::is_constructible_v<TComponent, TArgs...>,
 					  "Cannot add component which is not constructible from given arguments");
@@ -895,11 +895,11 @@ private:
 		// If component type has not been added to manager,
 		// generate a new pool for the given type.
 		if (new_pool) {
-			pool = new internal::Pool<TComponent>();
+			pool = new impl::Pool<TComponent>();
 			pools_[component] = pool;
 		}
 		assert(pool != nullptr && "Could not create new component pool correctly");
-		bool new_component{ !pool->internal::Pool<TComponent>::Has(entity) };
+		bool new_component{ !pool->impl::Pool<TComponent>::Has(entity) };
 		auto& component_reference{ pool->Add(entity, std::forward<TArgs>(constructor_args)...) };
 		// If component or pool is new, possibility to trigger events here in the future.
 		if (new_pool || new_component) {
@@ -916,11 +916,11 @@ private:
 	* @param component Id of component to remove.
 	*/
 	template <typename TComponent>
-	void RemoveComponent(const internal::Id entity, const internal::Id component) {
+	void RemoveComponent(const impl::Id entity, const impl::Id component) {
 		auto pool{ GetPool<TComponent>(component) };
 		if (pool != nullptr) {
 			// Static call to derived component pool class (no dynamic dispatch).
-			bool removed{ pool->internal::Pool<TComponent>::Remove(entity) };
+			bool removed{ pool->impl::Pool<TComponent>::Remove(entity) };
 			// If component was successfully removed, possibility to trigger event here in the future.
 			if (removed) {
 				// ComponentChange(entity, component);
@@ -935,7 +935,7 @@ private:
 	* @param entity Id of entity to remove components from.
 	*/
 	template <typename ...TComponents>
-	void RemoveComponents(const internal::Id entity) {
+	void RemoveComponents(const impl::Id entity) {
 		(RemoveComponent<TComponents>(entity, GetComponentId<TComponents>()), ...);
 	}
 
@@ -944,8 +944,8 @@ private:
 	* Results in virtual function call on each component pool.
 	* @param entity Id of entity to remove all components from.
 	*/
-	void RemoveComponents(const internal::Id entity) {
-		for (internal::Id i{ 0 }; i < pools_.size(); ++i) {
+	void RemoveComponents(const impl::Id entity) {
+		for (impl::Id i{ 0 }; i < pools_.size(); ++i) {
 			auto pool{ pools_[i] };
 			if (pool != nullptr) {
 				bool removed{ pool->Remove(entity) };
@@ -962,9 +962,9 @@ private:
 	* @return Unique id for the given component type.
 	*/
 	template <typename TComponent>
-	static internal::Id GetComponentId() {
+	static impl::Id GetComponentId() {
 		// Get the next available id save that id as static variable for the component type.
-		static internal::Id id{ ComponentCount()++ };
+		static impl::Id id{ ComponentCount()++ };
 		return id;
 	}
 
@@ -974,13 +974,13 @@ private:
 	* the order in which a component is first added to each manager.
 	* @return Next available component id.
 	*/
-	static internal::Id& ComponentCount() {
-		static internal::Id id{ 0 };
+	static impl::Id& ComponentCount() {
+		static impl::Id id{ 0 };
 		return id;
 	}
 
 	template <typename TComponent>
-	friend class internal::Pool;
+	friend class impl::Pool;
 
 	/*
 	* Entity handles must have access to internal functions.
@@ -989,10 +989,10 @@ private:
 	friend class Entity;
 
 	// Stores the next valid entity id. This will be incremented if no free id is found.
-	internal::Id next_entity_{ 0 };
+	impl::Id next_entity_{ 0 };
 
 	// Stores the current alive entity count (purely for retrieval).
-	internal::Id count_{ 0 };
+	impl::Id count_{ 0 };
 
 	// Stores whether or not a refresh is required in the manager.
 	bool refresh_required_{ false };
@@ -1011,7 +1011,7 @@ private:
 
 	// Vector index corresponds to the entity's id.
 	// Element corresponds to the current version of the id.
-	std::vector<internal::Version> versions_;
+	std::vector<impl::Version> versions_;
 
 	/*
 	* Vector index corresponds to the component's unique id.
@@ -1020,10 +1020,10 @@ private:
 	* Mutable because GetPool() is called in const and non-const
 	* methods and returns a pointer to a given pool.
 	*/
-	mutable std::vector<internal::PoolInterface*> pools_;
+	mutable std::vector<impl::PoolInterface*> pools_;
 
 	// Free list of entity ids to be used before incrementing next_entity_.
-	std::deque<internal::Id> free_entities_;
+	std::deque<impl::Id> free_entities_;
 };
 
 /*
@@ -1232,26 +1232,26 @@ private:
 	friend struct std::hash<Entity>;
 
 	// NullEntity comparison uses versions so it requires private access.
-	friend class internal::NullEntity;
+	friend class impl::NullEntity;
 
 	// Actual constructor for creating entities through the manager.
-	Entity(const internal::Id entity, const internal::Version version, Manager* manager) :
+	Entity(const impl::Id entity, const impl::Version version, Manager* manager) :
 		entity_{ entity },
 		version_{ version },
 		manager_{ manager } {
 	}
 
 	// Id associated with an entity in the manager.
-	internal::Id entity_{ 0 };
+	impl::Id entity_{ 0 };
 
 	// Version counter to check if handle has been invalidated.
-	internal::Version version_{ internal::null_version };
+	impl::Version version_{ impl::null_version };
 
 	// Parent manager pointer for calling handle functions.
 	Manager* manager_{ nullptr };
 };
 
-namespace internal {
+namespace impl {
 
 /*
 * Null entity object.
@@ -1276,21 +1276,21 @@ public:
 	// Comparison to entity objects.
 
 	bool operator==(const Entity& entity) const {
-		return entity.version_ == internal::null_version;
+		return entity.version_ == impl::null_version;
 	}
 	bool operator!=(const Entity& entity) const {
 		return !(*this == entity);
 	}
 };
 
-} // namespace internal
+} // namespace impl
 
 /*
 * Null entity.
 * Allows for comparing invalid / uninitialized 
 * entities with valid manager created entities.
 */
-inline constexpr internal::NullEntity null{};
+inline constexpr impl::NullEntity null{};
 
 /*
 * Below are the definitions of functions which
@@ -1299,25 +1299,25 @@ inline constexpr internal::NullEntity null{};
 */
 
 template <typename TComponent>
-inline internal::Id internal::Pool<TComponent>::GetComponentId() const {
+inline impl::Id impl::Pool<TComponent>::GetComponentId() const {
 	return ecs::Manager::GetComponentId<TComponent>();
 }
 
 inline bool Entity::IsIdenticalTo(const Entity& entity) const {
 	return 
-		*this == entity ||
-		(*this == ecs::null &&
-		 entity == ecs::null) ||
-		(*this != ecs::null && 
+		 *this == entity ||
+		 *this == ecs::null &&
+		 entity == ecs::null ||
+		 *this != ecs::null && 
 		 entity != ecs::null &&
 		 manager_ == entity.manager_ &&
 		 manager_ != nullptr &&
 		 entity_ != entity.entity_ &&
-		 manager_->HaveMatchingComponents(entity_, entity.entity_));
+		 manager_->HaveMatchingComponents(entity_, entity.entity_);
 }
 
 inline Entity Manager::CreateEntity() {
-	internal::Id entity{ 0 };
+	impl::Id entity{ 0 };
 	// Pick entity from free list before trying to increment entity counter.
 	if (free_entities_.size() > 0) {
 		entity = free_entities_.front();
@@ -1354,14 +1354,14 @@ inline Entity Manager::CopyEntity(const Entity& entity) {
 		auto pools{ 
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 		bool manager_has_components{
-			((std::get<internal::Pool<TComponents>*>(pools) != nullptr) && ...) };
+			((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
 		assert(manager_has_components && 
 			   "Cannot copy entity with a component that is not even in the manager");
 		bool has_components{
-			(std::get<internal::Pool<TComponents>*>(pools)->internal::Pool<TComponents>::Has(from) && ...) };
+			(std::get<impl::Pool<TComponents>*>(pools)->impl::Pool<TComponents>::Has(from) && ...) };
 		assert(has_components &&
 			   "Cannot copy entity with a component that it does not have");
-		(std::get<internal::Pool<TComponents>*>(pools)->internal::Pool<TComponents>::Copy(from, to), ...);
+		(std::get<impl::Pool<TComponents>*>(pools)->impl::Pool<TComponents>::Copy(from, to), ...);
 		(ComponentChange(to, GetComponentId<TComponents>()), ...);
 	} else {
 		// Copy all components.
@@ -1384,14 +1384,14 @@ inline bool Manager::EntityExists() const {
 	auto pools{
 		std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	bool manager_has_components{
-		((std::get<internal::Pool<TComponents>*>(pools) != nullptr) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
-		for (internal::Id entity_id{ 0 }; entity_id < next_entity_; ++entity_id) {
+		for (impl::Id entity_id{ 0 }; entity_id < next_entity_; ++entity_id) {
 			// If entity is alive, check for components.
 			if (entities_[entity_id]) {
 				bool has_components{
-					(std::get<internal::Pool<TComponents>*>(pools)->Has(entity_id) && ...) };
+					(std::get<impl::Pool<TComponents>*>(pools)->Has(entity_id) && ...) };
 				// If unique entity with components exists, return true.
 				if (has_components) {
 					return true;
@@ -1409,7 +1409,7 @@ inline void Manager::ForEachEntity(T function) {
 	assert(next_entity_ <= entities_.size() &&
 		   "Last entity must be within entity vector range");
 	// Cycle through all manager entities.
-	for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+	for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
 		// If entity is alive, call lambda on it.
 		if (entities_[entity]) {
 			function(Entity{ entity, versions_[entity], this });
@@ -1429,18 +1429,18 @@ inline void Manager::ForEachEntityWith(T function) {
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	// Check that none of the requested component pools are null.
 	bool manager_has_components{
-		((std::get<internal::Pool<TComponents>*>(pools) != nullptr) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
-		for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
 			// If entity is alive, call lambda on it.
 			if (entities_[entity]) {
 				bool has_components{
-					(std::get<internal::Pool<TComponents>*>(pools)->internal::Pool<TComponents>::Has(entity) && ...) };
+					(std::get<impl::Pool<TComponents>*>(pools)->impl::Pool<TComponents>::Has(entity) && ...) };
 				if (has_components) {
 					function(
 						Entity{ entity, versions_[entity], this },
-						(*std::get<internal::Pool<TComponents>*>(pools)->Get(entity))...
+						(*std::get<impl::Pool<TComponents>*>(pools)->Get(entity))...
 					);
 				}
 			
@@ -1459,14 +1459,14 @@ inline void Manager::ForEachEntityWithout(T function) {
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	// Check that none of the requested component pools are null.
 	bool manager_has_components{
-		((std::get<internal::Pool<TComponents>*>(pools) != nullptr) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
-		for (internal::Id entity{ 0 }; entity < next_entity_; ++entity) {
+		for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
 			// If entity is alive, call lambda on it.
 			if (entities_[entity]) {
 				bool doesnt_have_components{
-					(!std::get<internal::Pool<TComponents>*>(pools)->internal::Pool<TComponents>::Has(entity) || ...) };
+					(!std::get<impl::Pool<TComponents>*>(pools)->impl::Pool<TComponents>::Has(entity) || ...) };
 				if (doesnt_have_components) {
 					function(Entity{ entity, versions_[entity], this });
 				}
@@ -1489,8 +1489,8 @@ struct hash<ecs::Entity> {
 		// https://stackoverflow.com/a/17017281
 		std::size_t hash{ 17 };
 		hash = hash * 31 + std::hash<ecs::Manager*>()(k.manager_);
-		hash = hash * 31 + std::hash<ecs::internal::Id>()(k.entity_);
-		hash = hash * 31 + std::hash<ecs::internal::Version>()(k.version_);
+		hash = hash * 31 + std::hash<ecs::impl::Id>()(k.entity_);
+		hash = hash * 31 + std::hash<ecs::impl::Version>()(k.version_);
 		return hash;
 	}
 };
@@ -1499,10 +1499,10 @@ struct hash<ecs::Entity> {
 
 // Entity comparison with null entity.
 
-inline bool operator==(const ecs::Entity& entity, const ecs::internal::NullEntity& null_entity) {
+inline bool operator==(const ecs::Entity& entity, const ecs::impl::NullEntity& null_entity) {
 	return null_entity == entity;
 }
 
-inline bool operator!=(const ecs::Entity& entity, const ecs::internal::NullEntity& null_entity) {
+inline bool operator!=(const ecs::Entity& entity, const ecs::impl::NullEntity& null_entity) {
 	return !(null_entity == entity);
 }
