@@ -105,7 +105,7 @@ public:
 	virtual PoolInterface* Clone() const = 0;
 	virtual Id GetComponentId() const = 0;
 	virtual bool Has(Id entity) const = 0;
-	virtual void Copy(Id from, const Id to) = 0;
+	virtual void Copy(Id from, Id to) = 0;
 	virtual bool Remove(Id entity) = 0;
 	virtual void Clear() = 0;
 	virtual std::size_t Hash() const = 0;
@@ -341,8 +341,10 @@ public:
 
 private:
 	// Constructor used for cloning identical pools.
-	Pool(const Offset capacity, const Offset size,
-		 const std::vector<Offset>& offsets, const std::deque<Offset>& freed_offsets) :
+	Pool(Offset capacity,
+	     Offset size,
+		 const std::vector<Offset>& offsets,
+		 const std::deque<Offset>& freed_offsets) :
 		/*
 		* Allocate memory block before capacity is set
 		* as otherwise capacity == 0 assertion fails.
@@ -1484,13 +1486,13 @@ namespace std {
 // This allows for use of unordered maps and sets with entities as keys.
 template <>
 struct hash<ecs::Entity> {
-	std::size_t operator()(const ecs::Entity& k) const {
+	std::size_t operator()(const ecs::Entity& e) const {
 		// Hashing combination algorithm from:
 		// https://stackoverflow.com/a/17017281
 		std::size_t hash{ 17 };
-		hash = hash * 31 + std::hash<ecs::Manager*>()(k.manager_);
-		hash = hash * 31 + std::hash<ecs::impl::Id>()(k.entity_);
-		hash = hash * 31 + std::hash<ecs::impl::Version>()(k.version_);
+		hash = hash * 31 + std::hash<ecs::Manager*>()(e.manager_);
+		hash = hash * 31 + std::hash<ecs::impl::Id>()(e.entity_);
+		hash = hash * 31 + std::hash<ecs::impl::Version>()(e.version_);
 		return hash;
 	}
 };
