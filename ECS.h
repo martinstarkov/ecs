@@ -104,9 +104,9 @@ public:
 	virtual ~PoolInterface() = default;
 	virtual PoolInterface* Clone() const = 0;
 	virtual Id GetComponentId() const = 0;
-	virtual bool Has(const Id entity) const = 0;
-	virtual void Copy(const Id from, const Id to) = 0;
-	virtual bool Remove(const Id entity) = 0;
+	virtual bool Has(Id entity) const = 0;
+	virtual void Copy(Id from, const Id to) = 0;
+	virtual bool Remove(Id entity) = 0;
 	virtual void Clear() = 0;
 	virtual std::size_t Hash() const = 0;
 };
@@ -167,7 +167,7 @@ public:
 	* Creates a duplicate (copy) pool with all the same components and offsets.
 	* @return Pointer to an identical component pool.
 	*/
-	virtual PoolInterface* Clone() const override final {
+	virtual PoolInterface* Clone() const final {
 		static_assert(std::is_copy_constructible_v<TComponent>,
 					  "Cannot clone component pool with a non copy-constructible component");
 		// Empty memory block for clone is allocated in constructor.
@@ -192,7 +192,7 @@ public:
 	* @param from Entity id from which to copy a component.
 	* @param to Entity id to component will be copied.
 	*/
-	virtual void Copy(const Id from, const Id to) override final {
+	virtual void Copy(Id from, Id to) final {
 		static_assert(std::is_copy_constructible_v<TComponent>,
 					  "Cannot copy component in a pool of non copy constructible components");
 		auto offset{ GetAvailableOffset() };
@@ -221,7 +221,7 @@ public:
 	* @param entity Id of the entity to remove a component from.
 	* @return True if component was removed, false otherwise.
 	*/
-	virtual bool Remove(const Id entity) override final {
+	virtual bool Remove(Id entity) final {
 		if (entity < offsets_.size()) {
 			auto& offset{ offsets_[entity] };
 			if (offset != invalid_offset) {
@@ -242,7 +242,7 @@ public:
 	* Does not modify pool capacity.
 	* Equivalent to clearing a standard library container.
 	*/
-	virtual void Clear() override final {
+	virtual void Clear() final {
 		ComponentDestructors();
 		offsets_.clear();
 		freed_offsets_.clear();
@@ -258,7 +258,7 @@ public:
 	* @return Reference to the newly added / replaced component.
 	*/
 	template <typename ...TArgs>
-	TComponent& Add(const Id entity, TArgs&&... constructor_args) {
+	TComponent& Add(Id entity, TArgs&&... constructor_args) {
 		static_assert(std::is_constructible_v<TComponent, TArgs...>,
 					  "Cannot add component to pool which is not constructible from given arguments");
 		//"Cannot add component to pool which is not constructible from given arguments"
@@ -291,7 +291,7 @@ public:
 	* @param entity Id of the entity to check a component for.
 	* @return True if the pool contains a valid component offset, false otherwise.
 	*/
-	virtual bool Has(const Id entity) const override final {
+	virtual bool Has(Id entity) const final {
 		return entity < offsets_.size() && offsets_[entity] != invalid_offset;
 	}
 
@@ -300,7 +300,7 @@ public:
 	* @param entity Id of the entity to retrieve a component for.
 	* @return Const pointer to the component, nullptr if the component does not exist.
 	*/
-	const TComponent* Get(const Id entity) const {
+	const TComponent* Get(Id entity) const {
 		if (Pool<TComponent>::Has(entity)) {
 			return block_ + (offsets_[entity] - 1);
 		}
@@ -312,21 +312,21 @@ public:
 	* @param entity Id of the entity to retrieve a component for.
 	* @return Pointer to the component, nullptr if the component does not exist.
 	*/
-	TComponent* Get(const Id entity) {
+	TComponent* Get(Id entity) {
 		return const_cast<TComponent*>(static_cast<const Pool<TComponent>&>(*this).Get(entity));
 	}
 
 	/*
 	* @return Id of the pool's component type.
 	*/
-	virtual Id GetComponentId() const override final;
+	virtual Id GetComponentId() const final;
 
 	/*
 	* Generates a hash number using pool members.
 	* Useful for identifying if two pools are identical.
 	* @return Hash code for the pool.
 	*/
-	virtual std::size_t Hash() const override final {
+	virtual std::size_t Hash() const final {
 		/*
 		* Hashing combination algorithm from:
 		* https://stackoverflow.com/a/17017281
@@ -358,7 +358,7 @@ private:
 	* @param starting_capacity The starting capacity of the pool.
 	* (number of components it should support to begin with).
 	*/
-	void AllocateMemoryBlock(const Offset starting_capacity) {
+	void AllocateMemoryBlock(Offset starting_capacity) {
 		assert(block_ == nullptr &&
 			   "Cannot allocate memory block overtop existing block");
 		assert(capacity_ == 0 &&
@@ -389,7 +389,7 @@ private:
 	* Doubles the capacity of a pool if the current capacity is exceeded.
 	* @param new_size Desired size of the pool. (i.e. minimum number of components it should support).
 	*/
-	void ReallocateIfNeeded(const Offset new_size) {
+	void ReallocateIfNeeded(Offset new_size) {
 		if (new_size >= capacity_) {
 			// Double the capacity each time it is reached.
 			capacity_ = new_size * 2;
@@ -621,7 +621,7 @@ public:
 	* @param capacity Desired entity capacity of the manager.
 	* If smaller than current capacity, nothing happens.
 	*/
-	void Reserve(const std::size_t capacity) {
+	void Reserve(std::size_t capacity) {
 		entities_.reserve(capacity);
 		refresh_.reserve(capacity);
 		versions_.reserve(capacity);
@@ -713,7 +713,7 @@ private:
 	* If smaller than current size, nothing happens.
 	* @param size Desired size of the vectors.
 	*/
-	void Resize(const std::size_t size) {
+	void Resize(std::size_t size) {
 		if (size > entities_.size()) {
 			Reserve(size);
 			entities_.resize(size, false);
@@ -731,7 +731,7 @@ private:
 	* @param entity Id of entity to mark for deletion.
 	* @param version Version of entity for handle comparison.
 	*/
-	void DestroyEntity(const impl::Id entity, const impl::Version version) {
+	void DestroyEntity(impl::Id entity, impl::Version version) {
 		assert(entity < versions_.size());
 		assert(entity < refresh_.size());
 		if (versions_[entity] == version) {
@@ -761,7 +761,7 @@ private:
 	* @param version Version of entity for handle comparison.
 	* @return True if entity is alive, false otherwise.
 	*/
-	bool IsAlive(const impl::Id entity, const impl::Version version) const {
+	bool IsAlive(impl::Id entity, impl::Version version) const {
 		return 
 			entity < versions_.size() &&
 			versions_[entity] == version &&
@@ -774,7 +774,7 @@ private:
 	* @param entity2 Second entity.
 	* @return True if both entities have all the same components, false otherwise.
 	*/
-	bool HaveMatchingComponents(const impl::Id entity1, const impl::Id entity2) {
+	bool HaveMatchingComponents(impl::Id entity1, impl::Id entity2) {
 		for (auto pool : pools_) {
 			if (pool != nullptr) {
 				bool has1{ pool->Has(entity1) };
@@ -796,7 +796,7 @@ private:
 	* @return Pointer to the component pool, nullptr if pool does not exist.
 	*/
 	template <typename TComponent>
-	impl::Pool<TComponent>* GetPool(const impl::Id component) const {
+	impl::Pool<TComponent>* GetPool(impl::Id component) const {
 		assert(component == GetComponentId<TComponent>() &&
 			   "GetPool mismatch with component id");
 		if (component < pools_.size()) {
@@ -816,7 +816,7 @@ private:
 	* @return Const reference to the component.
 	*/
 	template <typename TComponent>
-	const TComponent& GetComponent(const impl::Id entity, const impl::Id component) const {
+	const TComponent& GetComponent(impl::Id entity, impl::Id component) const {
 		const auto pool{ GetPool<TComponent>(component) };
 		assert(pool != nullptr && "Cannot retrieve component which has not been added to manager");
 		const auto component_address{ pool->Get(entity) };
@@ -838,7 +838,7 @@ private:
 	* @return Reference to the component.
 	*/
 	template <typename TComponent>
-	TComponent& GetComponent(const impl::Id entity, const impl::Id component) {
+	TComponent& GetComponent(impl::Id entity, impl::Id component) {
 		return const_cast<TComponent&>(static_cast<const Manager&>(*this).GetComponent<TComponent>(entity, component));
 	}
 
@@ -850,7 +850,7 @@ private:
 	* @return True if entity has the component, false otherwise.
 	*/
 	template <typename TComponent>
-	bool HasComponent(const impl::Id entity, const impl::Id component) const {
+	bool HasComponent(impl::Id entity, impl::Id component) const {
 		const auto pool{ GetPool<TComponent>(component) };
 		return pool != nullptr && pool->impl::Pool<TComponent>::Has(entity);
 	}
@@ -862,7 +862,7 @@ private:
 	* @return True if entity has each component, false otherwise.
 	*/
 	template <typename ...TComponents>
-	bool HasComponents(const impl::Id entity) const {
+	bool HasComponents(impl::Id entity) const {
 		return { (HasComponent<TComponents>(entity, GetComponentId<TComponents>()) && ...) };
 	}
 
@@ -877,8 +877,8 @@ private:
 	* @return Reference to the newly added / replaced component.
 	*/
 	template <typename TComponent, typename ...TArgs>
-	TComponent& AddComponent(const impl::Id entity,
-							 const impl::Id component,
+	TComponent& AddComponent(impl::Id entity,
+							 impl::Id component,
 							 TArgs&&... constructor_args) {
 		static_assert(std::is_constructible_v<TComponent, TArgs...>,
 					  "Cannot add component which is not constructible from given arguments");
@@ -916,7 +916,7 @@ private:
 	* @param component Id of component to remove.
 	*/
 	template <typename TComponent>
-	void RemoveComponent(const impl::Id entity, const impl::Id component) {
+	void RemoveComponent(impl::Id entity, impl::Id component) {
 		auto pool{ GetPool<TComponent>(component) };
 		if (pool != nullptr) {
 			// Static call to derived component pool class (no dynamic dispatch).
@@ -935,7 +935,7 @@ private:
 	* @param entity Id of entity to remove components from.
 	*/
 	template <typename ...TComponents>
-	void RemoveComponents(const impl::Id entity) {
+	void RemoveComponents(impl::Id entity) {
 		(RemoveComponent<TComponents>(entity, GetComponentId<TComponents>()), ...);
 	}
 
@@ -944,7 +944,7 @@ private:
 	* Results in virtual function call on each component pool.
 	* @param entity Id of entity to remove all components from.
 	*/
-	void RemoveComponents(const impl::Id entity) {
+	void RemoveComponents(impl::Id entity) {
 		for (impl::Id i{ 0 }; i < pools_.size(); ++i) {
 			auto pool{ pools_[i] };
 			if (pool != nullptr) {
@@ -1235,7 +1235,7 @@ private:
 	friend class impl::NullEntity;
 
 	// Actual constructor for creating entities through the manager.
-	Entity(const impl::Id entity, const impl::Version version, Manager* manager) :
+	Entity(impl::Id entity, impl::Version version, Manager* manager) :
 		entity_{ entity },
 		version_{ version },
 		manager_{ manager } {
