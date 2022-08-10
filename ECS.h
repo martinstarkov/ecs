@@ -139,8 +139,7 @@ public:
 		* Frees the allocated memory block associated with the pool.
 		* This must be called whenever destroying a pool.
 		*/
-		assert(block_ != nullptr &&
-			   "Do not free invalid component pools");
+		assert(block_ && "Do not free invalid component pools");
 		std::free(block_);
 		block_ = nullptr;
 	}
@@ -206,14 +205,12 @@ public:
 		}
 		// Check if component offset exists already.
 		bool replace{ offsets_[to_location] != invalid_offset };
-		assert(replace == false &&
-			   "Cannot overwrite existing component while copying entity");
+		assert(!replace && "Cannot overwrite existing component while copying entity");
 		offsets_[to_location] = offset;
 		TComponent* address{ block_ + (offset - 1) };
 		// Create the component into the new address with the given copy.
 		new(address) TComponent(*Get(from));
-		assert(address != nullptr &&
-			   "Failed to copy component to offset memory location");
+		assert(address && "Failed to copy component to offset memory location");
 	}
 
 	/*
@@ -281,8 +278,7 @@ public:
 		// Create the component into the new address with
 		// the given constructor arguments.
 		new(address) TComponent(std::forward<TArgs>(constructor_args)...);
-		assert(address != nullptr &&
-			   "Failed to create component at offset memory location");
+		assert(address && "Failed to create component at offset memory location");
 		return *address;
 	}
 
@@ -361,16 +357,12 @@ private:
 	* (number of components it should support to begin with).
 	*/
 	void AllocateMemoryBlock(Offset starting_capacity) {
-		assert(block_ == nullptr &&
-			   "Cannot allocate memory block overtop existing block");
-		assert(capacity_ == 0 &&
-			   "Memory block must be empty before allocation");
-		assert(size_ == 0 &&
-			   "Cannot allocate memory for occupied component pool");
+		assert(!block_ && "Cannot allocate memory block overtop existing block");
+		assert(!capacity_ && "Memory block must be empty before allocation");
+		assert(!size_ && "Cannot allocate memory for occupied component pool");
 		capacity_ = starting_capacity;
 		block_ = static_cast<TComponent*>(std::malloc(capacity_ * sizeof(TComponent)));
-		assert(block_ != nullptr &&
-			   "Could not properly allocate memory for component pool");
+		assert(block_ && "Could not properly allocate memory for component pool");
 	}
 
 	/*
@@ -395,12 +387,10 @@ private:
 		if (new_size >= capacity_) {
 			// Double the capacity each time it is reached.
 			capacity_ = new_size * 2;
-			assert(block_ != nullptr &&
-				   "Pool memory must be allocated before reallocation");
+			assert(block_ && "Pool memory must be allocated before reallocation");
 			auto new_block{ static_cast<TComponent*>(
 				std::realloc(block_, capacity_ * sizeof(TComponent))) };
-			assert(new_block != nullptr &&
-				   "Unable to reallocate sufficient memory for component pool");
+			assert(new_block && "Unable to reallocate sufficient memory for component pool");
 			block_ = new_block;
 		}
 	}
@@ -510,7 +500,7 @@ public:
 			// Compare manager component pools.
 			auto IdenticalComponentPools = [](const impl::PoolInterface* lhs,
 											  const impl::PoolInterface* rhs) {
-				return lhs == rhs || lhs != nullptr && rhs != nullptr && lhs->Hash() == rhs->Hash();
+				return lhs == rhs || lhs && rhs && lhs->Hash() == rhs->Hash();
 			};
 			return std::equal(std::begin(pools_),
 							  std::end(pools_),
@@ -548,7 +538,7 @@ public:
 		clone.pools_.resize(pools_.size(), nullptr);
 		for (std::size_t i{ 0 }; i < pools_.size(); ++i) {
 			auto pool{ pools_[i] };
-			if (pool != nullptr) {
+			if (pool) {
 				// Clone pools over to new manager.
 				clone.pools_[i] = pool->Clone();
 			}
@@ -573,7 +563,7 @@ public:
 		free_entities_.clear();
 
 		for (auto pool : pools_) {
-			if (pool != nullptr) {
+			if (pool) {
 				pool->Clear();
 			}
 		}
@@ -778,7 +768,7 @@ private:
 	*/
 	bool HaveMatchingComponents(impl::Id entity1, impl::Id entity2) {
 		for (auto pool : pools_) {
-			if (pool != nullptr) {
+			if (pool) {
 				bool has1{ pool->Has(entity1) };
 				bool has2{ pool->Has(entity2) };
 				// Check that one entity has a component while the other doesn't.
@@ -820,14 +810,14 @@ private:
 	template <typename TComponent>
 	const TComponent& GetComponent(impl::Id entity, impl::Id component) const {
 		const auto pool{ GetPool<TComponent>(component) };
-		assert(pool != nullptr && "Cannot retrieve component which has not been added to manager");
+		assert(pool && "Cannot retrieve component which has not been added to manager");
 		const auto component_address{ pool->Get(entity) };
 		/*
 		* Debug tip: 
 		* If you ended up here and want to find out which
 		* entity triggered this assertion, follow the call stack.
 		*/
-		assert(component_address != nullptr && "Cannot get a component which an entity does not have");
+		assert(component_address && "Cannot get a component which an entity does not have");
 		return *component_address;
 	}
 
@@ -854,7 +844,7 @@ private:
 	template <typename TComponent>
 	bool HasComponent(impl::Id entity, impl::Id component) const {
 		const auto pool{ GetPool<TComponent>(component) };
-		return pool != nullptr && pool->impl::Pool<TComponent>::Has(entity);
+		return pool && pool->impl::Pool<TComponent>::Has(entity);
 	}
 
 	/*
@@ -893,14 +883,14 @@ private:
 			pools_.resize(static_cast<std::size_t>(component) + 1, nullptr);
 		}
 		auto pool{ GetPool<TComponent>(component) };
-		bool new_pool{ pool == nullptr };
+		bool new_pool{ !pool };
 		// If component type has not been added to manager,
 		// generate a new pool for the given type.
 		if (new_pool) {
 			pool = new impl::Pool<TComponent>();
 			pools_[component] = pool;
 		}
-		assert(pool != nullptr && "Could not create new component pool correctly");
+		assert(pool && "Could not create new component pool correctly");
 		bool new_component{ !pool->impl::Pool<TComponent>::Has(entity) };
 		auto& component_reference{ pool->Add(entity, std::forward<TArgs>(constructor_args)...) };
 		// If component or pool is new, possibility to trigger events here in the future.
@@ -920,7 +910,7 @@ private:
 	template <typename TComponent>
 	void RemoveComponent(impl::Id entity, impl::Id component) {
 		auto pool{ GetPool<TComponent>(component) };
-		if (pool != nullptr) {
+		if (pool) {
 			// Static call to derived component pool class (no dynamic dispatch).
 			bool removed{ pool->impl::Pool<TComponent>::Remove(entity) };
 			// If component was successfully removed, possibility to trigger event here in the future.
@@ -949,7 +939,7 @@ private:
 	void RemoveComponents(impl::Id entity) {
 		for (impl::Id i{ 0 }; i < pools_.size(); ++i) {
 			auto pool{ pools_[i] };
-			if (pool != nullptr) {
+			if (pool) {
 				bool removed{ pool->Remove(entity) };
 				if (removed) {
 					// ComponentChange(entity, i);
@@ -1072,8 +1062,7 @@ public:
 	* @return Const reference to the parent manager.
 	*/
 	const Manager& GetManager() const {
-		assert(manager_ != nullptr &&
-			   "Cannot return parent manager of a null entity");
+		assert(manager_ && "Cannot return parent manager of a null entity");
 		return *manager_;
 	}
 
@@ -1093,8 +1082,7 @@ public:
 	*/
 	template <typename TComponent>
 	const TComponent& GetComponent() const {
-		assert(IsAlive() &&
-			   "Cannot retrieve component for dead or null entity");
+		assert(IsAlive() && "Cannot retrieve component for dead or null entity");
 		return manager_->GetComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
 	}
 
@@ -1147,8 +1135,7 @@ public:
 					  "Cannot add component which is not move constructible");
 		static_assert(std::is_destructible_v<TComponent>,
 					  "Cannot add component which is not destructible");
-		assert(IsAlive() &&
-			   "Cannot add component to dead or null entity");
+		assert(IsAlive() && "Cannot add component to dead or null entity");
 		return manager_->AddComponent<TComponent>(entity_,
 												  manager_->GetComponentId<TComponent>(),
 												  std::forward<TArgs>(constructor_args)...);
@@ -1183,8 +1170,7 @@ public:
 	*/
 	template <typename TComponent>
 	void RemoveComponent() {
-		assert(IsAlive() &&
-			   "Cannot remove component from dead or null entity");
+		assert(IsAlive() && "Cannot remove component from dead or null entity");
 		manager_->RemoveComponent<TComponent>(entity_, manager_->GetComponentId<TComponent>());
 	}
 
@@ -1195,15 +1181,13 @@ public:
 	*/
 	template <typename ...TComponents>
 	void RemoveComponents() {
-		assert(IsAlive() &&
-			   "Cannot remove components from dead or null entity");
+		assert(IsAlive() && "Cannot remove components from dead or null entity");
 		manager_->RemoveComponents<TComponents...>(entity_);
 	}
 
 	// Removes all components from the entity.
 	void RemoveComponents() {
-		assert(IsAlive() &&
-			   "Cannot remove all components from dead or null entity");
+		assert(IsAlive() && "Cannot remove all components from dead or null entity");
 		return manager_->RemoveComponents(entity_);
 	}
 
@@ -1224,7 +1208,7 @@ public:
 	* @return True if entity is alive, false otherwise.
 	*/
 	bool IsAlive() const {
-		return manager_ != nullptr && manager_->IsAlive(entity_, version_);
+		return manager_ && manager_->IsAlive(entity_, version_);
 	}
 private:
 	// Manager requires access to id and versions.
@@ -1313,7 +1297,7 @@ inline bool Entity::IsIdenticalTo(const Entity& entity) const {
 		 *this != ecs::null && 
 		 entity != ecs::null &&
 		 manager_ == entity.manager_ &&
-		 manager_ != nullptr &&
+		 manager_ &&
 		 entity_ != entity.entity_ &&
 		 manager_->HaveMatchingComponents(entity_, entity.entity_);
 }
@@ -1356,7 +1340,7 @@ inline Entity Manager::CopyEntity(const Entity& entity) {
 		auto pools{ 
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 		bool manager_has_components{
-			((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
+			((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
 		assert(manager_has_components && 
 			   "Cannot copy entity with a component that is not even in the manager");
 		bool has_components{
@@ -1368,7 +1352,7 @@ inline Entity Manager::CopyEntity(const Entity& entity) {
 	} else {
 		// Copy all components.
 		for (auto pool : pools_) {
-			if (pool != nullptr) {
+			if (pool) {
 				if (pool->Has(from)) {
 					pool->Copy(from, to);
 					// Trigger component change event (possibly in the future?).
@@ -1386,7 +1370,7 @@ inline bool Manager::EntityExists() const {
 	auto pools{
 		std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	bool manager_has_components{
-		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
 		for (impl::Id entity_id{ 0 }; entity_id < next_entity_; ++entity_id) {
@@ -1431,7 +1415,7 @@ inline void Manager::ForEachEntityWith(T function) {
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	// Check that none of the requested component pools are null.
 	bool manager_has_components{
-		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
 		for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
@@ -1461,7 +1445,7 @@ inline void Manager::ForEachEntityWithout(T function) {
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	// Check that none of the requested component pools are null.
 	bool manager_has_components{
-		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
 		for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
