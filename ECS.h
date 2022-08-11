@@ -1370,11 +1370,11 @@ inline bool Manager::EntityExists() const {
 		((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
-		for (impl::Id entity_id{ 0 }; entity_id < next_entity_; ++entity_id) {
+		for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
 			// If entity is alive, check for components.
-			if (entities_[entity_id]) {
+			if (entities_[entity]) {
 				bool has_components{
-					(std::get<impl::Pool<TComponents>*>(pools)->Has(entity_id) && ...) };
+					(std::get<impl::Pool<TComponents>*>(pools)->impl::Pool<TComponents>::Has(entity) && ...) };
 				// If unique entity with components exists, return true.
 				if (has_components) {
 					return true;
@@ -1423,7 +1423,7 @@ inline void Manager::ForEachEntityWith(T function) {
 				if (has_components) {
 					function(
 						Entity{ entity, versions_[entity], this },
-						(*std::get<impl::Pool<TComponents>*>(pools)->Get(entity))...
+						(*std::get<impl::Pool<TComponents>*>(pools)->impl::Pool<TComponents>::Get(entity))...
 					);
 				}
 			
