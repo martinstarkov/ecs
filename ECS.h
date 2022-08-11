@@ -455,6 +455,7 @@ public:
 	Manager(const Manager&) = delete;
 
 	Manager(Manager&& obj) noexcept :
+		count_{ obj.count_ },
 		next_entity_{ obj.next_entity_ },
 		refresh_required_{ obj.refresh_required_ },
 		entities_{ std::exchange(obj.entities_, {}) },
@@ -462,6 +463,8 @@ public:
 		versions_{ std::exchange(obj.versions_, {}) },
 		pools_{ std::exchange(obj.pools_, {}) },
 		free_entities_{ std::exchange(obj.free_entities_, {}) } {
+		obj.refresh_required_ = false;
+		obj.count_ = 0;
 		obj.next_entity_ = 0;
 	}
 
@@ -469,6 +472,7 @@ public:
 		// Destroy previous manager internals.
 		DestroyPools();
 		// Move manager into current manager.
+		count_ = obj.count_;
 		next_entity_ = obj.next_entity_;
 		refresh_required_ = obj.refresh_required_;
 		entities_ = std::exchange(obj.entities_, {});
@@ -477,7 +481,9 @@ public:
 		pools_ = std::exchange(obj.pools_, {});
 		free_entities_ = std::exchange(obj.free_entities_, {});
 		// Reset state of other manager.
+		obj.count_ = 0;
 		obj.next_entity_ = 0;
+		obj.refresh_required_ = false;
 		return *this;
 	}
 
@@ -488,12 +494,13 @@ public:
 	* @return True if manager composition is identical, false otherwise.
 	*/
 	bool operator==(const Manager& other) const {
-		if (next_entity_ == other.next_entity_ &&
+		if (count_            == other.count_            &&
+		    next_entity_      == other.next_entity_      &&
 			refresh_required_ == other.refresh_required_ &&
-			free_entities_ == other.free_entities_ &&
-			refresh_ == other.refresh_ &&
-			entities_ == other.entities_ &&
-			versions_ == other.versions_) {
+			free_entities_    == other.free_entities_    &&
+			refresh_          == other.refresh_          &&
+			entities_         == other.entities_         &&
+			versions_         == other.versions_) {
 			// Compare manager component pools.
 			auto IdenticalComponentPools = [](const impl::PoolInterface* lhs,
 											  const impl::PoolInterface* rhs) {
@@ -525,6 +532,7 @@ public:
 	*/
 	Manager Clone() const {
 		Manager clone;
+		clone.count_ = count_;
 		clone.next_entity_ = next_entity_;
 		clone.entities_ = entities_;
 		clone.refresh_ = refresh_;
@@ -540,17 +548,16 @@ public:
 				clone.pools_[i] = pool->Clone();
 			}
 		}
-		assert(clone == *this &&
-			   "Cloning manager failed");
+		assert(clone == *this && "Cloning manager failed");
 		return clone;
 	}
 
 	/* 
 	* Clears entity cache and reset component pools to empty ones.
 	* Keeps entity capacity unchanged.
-	* Systems are not removed but caches are flagged for reset.
 	*/
 	void Clear() {
+		count_ = 0;
 		next_entity_ = 0;
 		refresh_required_ = false;
 
@@ -624,8 +631,9 @@ public:
 	* Resets all capacities to 0.
 	*/
 	void Reset() {
+		count_ = 0;
 		next_entity_ = 0;
-		refresh_required_ = 0;
+		refresh_required_ = false;
 
 		entities_.clear();
 		refresh_.clear();
@@ -675,11 +683,6 @@ public:
 	// @return The number of entities currently live in the manager.
 	std::size_t GetEntityCount() const {
 		return count_;
-	}
-
-	// @return The number of entities currently not live in the manager.
-	std::size_t GetDeadEntityCount() const {
-		return free_entities_.size();
 	}
 private:
 	/*
@@ -1337,7 +1340,7 @@ inline Entity Manager::CopyEntity(const Entity& e) {
 		auto pools{ 
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 		bool manager_has_components{
-			((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
+			((std::get<impl::Pool<TComponents>*>(pools) != nullptr)  && ...) };
 		assert(manager_has_components && 
 			   "Cannot copy entity with a component that is not even in the manager");
 		bool has_components{
@@ -1345,7 +1348,7 @@ inline Entity Manager::CopyEntity(const Entity& e) {
 		assert(has_components &&
 			   "Cannot copy entity with a component that it does not have");
 		(std::get<impl::Pool<TComponents>*>(pools)->impl::Pool<TComponents>::Copy(from, to), ...);
-		(ComponentChange(to, GetComponentId<TComponents>()), ...);
+		//(ComponentChange(to, GetComponentId<TComponents>()), ...);
 	} else {
 		// Copy all components.
 		for (auto pool : pools_) {
@@ -1367,7 +1370,7 @@ inline bool Manager::EntityExists() const {
 	auto pools{
 		std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	bool manager_has_components{
-		((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
 		for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
@@ -1412,7 +1415,7 @@ inline void Manager::ForEachEntityWith(T function) {
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	// Check that none of the requested component pools are null.
 	bool manager_has_components{
-		((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
 		for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
@@ -1442,7 +1445,7 @@ inline void Manager::ForEachEntityWithout(T function) {
 			std::make_tuple(GetPool<TComponents>(GetComponentId<TComponents>())...) };
 	// Check that none of the requested component pools are null.
 	bool manager_has_components{
-		((std::get<impl::Pool<TComponents>*>(pools)) && ...) };
+		((std::get<impl::Pool<TComponents>*>(pools) != nullptr) && ...) };
 	if (manager_has_components) {
 		// Cycle through all manager entities.
 		for (impl::Id entity{ 0 }; entity < next_entity_; ++entity) {
