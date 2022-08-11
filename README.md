@@ -162,7 +162,7 @@ Or only entities without specific components:
 
 ```c++
 manager.ForEachEntityWithout<FoodComponent>([&](ecs::Entity entity) {
-    entity.Destroy()
+    entity.Destroy();
 });
 manager.Refresh();
 ```
