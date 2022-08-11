@@ -175,6 +175,9 @@ As copying entity handles does not create new entities, copying all of an entity
 auto new_entity = manager.CopyEntity(entity);
 
 assert(new_entity.IsIdenticalTo(entity)); // passes
+
+manager.Refresh() // still required as with CreateEntity()
+// new_entity now detected when looping through manager entities. 
 ```
 
 This requires that all of the entity's components are copy-constructible. If the user wishes to copy only certain components they can do so using template parameters:
@@ -182,19 +185,14 @@ This requires that all of the entity's components are copy-constructible. If the
 ```c++
 auto new_entity = manager.CopyEntity<ZombieComponent, FoodComponent>(entity);
 
-// new_entity now has the same ZombieComponent and FoodComponent as entity.
-```
+// new_entity now has only the same ZombieComponent and FoodComponent as entity.
+assert(!new_entity.IsIdenticalTo(entity)); // passes
+``` 
 
 The number of alive entities in the manager can be found using:
 
 ```c++
 std::size_t entity_count = manager.GetEntityCount();
-```
-
-Or the number of destroyed entities:
-
-```c++
-std::size_t dead_entity_count = manager.GetDeadEntityCount();
 ```
 
 Destroying all of the entities and components in a manager is similar to standard library containers:
