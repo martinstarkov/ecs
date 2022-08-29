@@ -5,9 +5,27 @@ This library aims to be cache-friendly by storing components contiguously in mem
 
 ## Usage
 
-1. Acquire the ```ecs.h``` file from this repository.
+1. Acquire the ```include/ecs/ecs.h``` file from this repository (using CMake or manually).
 
-2. Add `#include "path/to/ecs.h"` in files which utilize the entity component system.
+2. Add `#include "ecs/ecs.h"` (or wherever it is kept) to files which utilize the entity component system.
+
+## CMake 
+
+Pasting the following code into a CMake file (minimum version: 3.14) will allow one to use `#include "ecs/ecs.h"` inside their specified CMake target project.
+
+```cmake
+
+include(FetchContent)
+
+FetchContent_Declare(ecs 
+					 GIT_REPOSITORY https://github.com/martinstarkov/ecs.git
+					 GIT_TAG main)
+FetchContent_MakeAvailable(ecs)
+
+set(ECS_INCLUDE_DIR "${ecs_SOURCE_DIR}/include")
+
+target_include_directories(<target_name> PRIVATE ${ECS_INCLUDE_DIR})
+```
 
 ## Manager
 
@@ -49,7 +67,7 @@ entity.Destroy();
 But will not be removed from the manager until a refresh is called. This prevents iterator invalidation if entities destroy each other during container loops.
 ```entity.IsAlive()``` can be called to check the state of validity of an entity in its parent manager.
 
-**TLDR;** Remember to always call ```manager.Refresh()``` after an entity is created or destroyed.
+**TLDR;** Remember to always call ```manager.Refresh()``` after an entity is created, destroyed or copied.
 
 A null (invalid) entity can be represented using `ecs::null`.
 
