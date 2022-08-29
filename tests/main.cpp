@@ -3,6 +3,6 @@
 #include "test_ecs.h"
 
 int main(int argc, char* argv[]) {
-	assert(TestECS());
+	TestECS();
 	return 0;
 }

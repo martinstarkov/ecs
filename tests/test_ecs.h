@@ -32,7 +32,7 @@ struct FoodComponent {
 };
 
 bool TestECS() {
-	std::cout << "Starting tests..." << std::endl;
+	std::cout << "Starting ECS tests..." << std::endl;
 
 	ecs::Manager manager;
 	ecs::Entity e1 = manager.CreateEntity();
@@ -184,6 +184,6 @@ bool TestECS() {
 	assert(manager.GetEntityCount() == 3);
 	assert(new_manager.GetEntityCount() == 3);
 
-	std::cout << "All tests passed!" << std::endl;
+	std::cout << "All ECS tests passed!" << std::endl;
 	return true;
 }
