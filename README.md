@@ -5,16 +5,16 @@ This library aims to be cache-friendly by storing components contiguously in mem
 
 ## Usage
 
-1. Acquire the ```ECS.h``` file from this repository.
+1. Acquire the ```ecs.h``` file from this repository.
 
-2. Add `#include "path/to/ECS.h"` in files which utilize the entity component system.
+2. Add `#include "path/to/ecs.h"` in files which utilize the entity component system.
 
 ## Manager
 
 The core storage unit of entities and components is the `ecs::Manager` class, created like so:
 
 ```c++
-#include "ECS.h"
+#include "ecs.h"
 
 ecs::Manager manager;
 ```
