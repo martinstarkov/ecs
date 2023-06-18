@@ -669,14 +669,17 @@ public:
 	Entity CopyEntity(const Entity& e);
 
 	// Loop through each entity in the manager.
+	// Populates the lambda argument list with an Entity object.
 	template <typename T>
 	void ForEachEntity(T function);
 
 	// Loop through each entity in the manager with the given components.
+	// Populates the lambda argument list with an Entity object followed by references to each component respectively as listed in the template types.
 	template <typename ...TComponents, typename T>
 	void ForEachEntityWith(T function);
 
 	// Loop through each entity in the manager without the given components.
+	// Populates the lambda argument list with an Entity object.
 	template <typename ...TComponents, typename T>
 	void ForEachEntityWithout(T function);
 
