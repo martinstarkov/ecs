@@ -804,7 +804,7 @@ private:
 
 	/*
 	* Retrieves a const reference to the specified component type.
-	* If entity does not have component, debug assertion is called.
+	* If entity does not have the component, a debug assertion is called.
 	* @tparam TComponent Type of component to retrieve.
 	* @param entity Id of entity to retrieve component for.
 	* @param component Id of component to retrieve.
@@ -826,7 +826,7 @@ private:
 
 	/*
 	* Retrieves a reference to the specified component type.
-	* If entity does not have component, debug assertion is called.
+	* If entity does not have the component, a debug assertion is called.
 	* @tparam TComponent Type of component to retrieve.
 	* @param entity Id of entity to retrieve component for.
 	* @param component Id of component to retrieve.
@@ -925,7 +925,7 @@ private:
 
 	/*
 	* Removes multiple components from the specified entity.
-	* If entity does not a component type, it is ignored.
+	* If entity does not have a component type, it is ignored.
 	* @tparam TComponents Types of components to remove.
 	* @param entity Id of entity to remove components from.
 	*/
@@ -1079,7 +1079,7 @@ public:
 
 	/*
 	* Retrieves a const reference to the specified component type.
-	* If entity does not have component, debug assertion is called.
+	* If entity does not have the component, a debug assertion is called.
 	* @tparam TComponent Type of component.
 	* @return Const reference to the component.
 	*/
@@ -1091,7 +1091,7 @@ public:
 
 	/*
 	* Retrieves a reference to the specified component type.
-	* If entity does not have component, debug assertion is called.
+	* If entity does not have the component, a debug assertion is called.
 	* @tparam TComponent Type of component.
 	* @return Reference to the component.
 	*/
@@ -1102,7 +1102,7 @@ public:
 
 	/*
 	* Retrieves a tuple of const references to the specified component types.
-	* If entity does not have components, debug assertion is called.
+	* If entity does not have the components, a debug assertion is called.
 	* @tparam TComponent Types of components.
 	* @return Tuple of const references to the requested components.
 	*/
@@ -1113,7 +1113,7 @@ public:
 
 	/*
 	* Retrieves a tuple of references to the specified component types.
-	* If entity does not have components, debug assertion is called.
+	* If entity does not have the components, a debug assertion is called.
 	* @tparam TComponent Types of components.
 	* @return Tuple of references to the requested components.
 	*/
@@ -1168,7 +1168,7 @@ public:
 
 	/*
 	* Removes a component from the entity.
-	* If entity does not have component type, nothing happens.
+	* If entity does not have the component type, nothing happens.
 	* @tparam TComponent Type of component to remove.
 	*/
 	template <typename TComponent>
