@@ -27,6 +27,7 @@ inline constexpr Version null_version{ 0 };
 class PoolInterface {
 public:
 	virtual ~PoolInterface() = default;
+	virtual PoolInterface* Clone() const = 0;
 	virtual void Copy(Index from_entity, Index to_entity) = 0;
 	virtual void Clear() = 0;
 	virtual void Reset() = 0;
@@ -38,6 +39,16 @@ public:
 template <typename T>
 class Pool : public PoolInterface {
 public:
+	Pool() = default;
+	Pool(const std::vector<T>& components,
+		 const std::vector<Index>& dense,
+		 const std::vector<Index>& sparse);
+	~Pool() = default;
+	Pool(Pool&&) = default;
+	Pool& operator=(Pool&&) = default;
+	Pool(const Pool&) = delete;
+	Pool& operator=(const Pool&) = delete;
+	virtual PoolInterface* Clone() const final;
 	virtual void Copy(Index from_entity, Index to_entity) final;
 	virtual void Clear() final;
 	virtual void Reset() final;
@@ -60,10 +71,10 @@ class Manager {
 public:
 	Manager();
 	~Manager();
-	Manager& operator=(const Manager&) = delete;
+	Manager(Manager&&) = default;
+	Manager& operator=(Manager&&) = default;
 	Manager(const Manager&) = delete;
-	Manager(Manager&& obj) noexcept;
-	Manager& operator=(Manager&& obj) noexcept;
+	Manager& operator=(const Manager&) = delete;
 	bool operator==(const Manager& other) const;
 	bool operator!=(const Manager& other) const;
 	Manager Clone() const;
@@ -83,13 +94,11 @@ public:
 	std::size_t GetEntityCount() const;
 private:
 	void Clear(impl::Index entity);
-	template <typename ...Ts>
-	bool EntityExists() const;
 	void DestroyPools();
 	void Resize(std::size_t size);
 	void DestroyEntity(impl::Index entity, impl::Version version);
 	bool IsAlive(impl::Index entity, impl::Version version) const;
-	bool HaveMatching(impl::Index entity1, impl::Index entity2);
+	bool Match(impl::Index entity1, impl::Index entity2);
 	template <typename T>
 	const impl::Pool<T>* GetPool(impl::Index component) const;
 	template <typename T>
@@ -116,6 +125,7 @@ private:
 	std::vector<bool> entities_;
 	std::vector<bool> refresh_;
 	std::vector<impl::Version> versions_;
+	// TODO: Move to using smart pointers.
 	std::vector<impl::PoolInterface*> pools_;
 	std::deque<impl::Index> free_entities_;
 };
@@ -148,11 +158,12 @@ public:
 	bool IsAlive() const;
 private:
 	friend class Manager;
-	friend struct std::hash<Entity>;
 	friend class impl::NullEntity;
+	friend struct std::hash<Entity>;
 	Entity(impl::Index entity, impl::Version version, Manager* manager);
 	impl::Index entity_{ 0 };
 	impl::Version version_{ impl::null_version };
+	// TODO: Move to using smart pointers.
 	Manager* manager_{ nullptr };
 };
 
@@ -168,6 +179,21 @@ public:
 };
 
 } // namespace impl
+
+inline constexpr impl::NullEntity null{};
+
+template <typename T>
+inline impl::Pool<T>::Pool(const std::vector<T>& components,
+		                   const std::vector<Index>& dense,
+		                   const std::vector<Index>& sparse) :
+	components{ components }, dense{ dense }, sparse{ sparse } {}
+
+template <typename T>
+inline impl::PoolInterface* impl::Pool<T>::Clone() const {
+	static_assert(std::is_copy_constructible_v<T>,
+				  "Cannot clone component pool with a non copy-constructible component");
+	return new Pool<T>(components, dense, sparse);
+}
 
 template <typename T>
 inline void impl::Pool<T>::Copy(Index from_entity, Index to_entity) {
@@ -270,8 +296,48 @@ inline T& impl::Pool<T>::Add(Index entity, Ts&&... constructor_args) {
 	return components.emplace_back(std::forward<Ts>(constructor_args)...);
 }
 
+inline Manager::Manager() {
+	// Reserve capacity for 1 entity so that manager size will double in powers of 2.
+	Reserve(1);
+}
+
+inline Manager::~Manager() {
+	DestroyPools();
+}
+
+inline bool Manager::operator==(const Manager& other) const {
+	// TODO: Check this to be accurate comparison.
+	return next_entity_ == other.next_entity_ &&
+		   count_ == other.count_ &&
+		   refresh_required_ == other.refresh_required_ &&
+		   entities_ == other.entities_ &&
+		   refresh_ == other.refresh_ &&
+		   versions_ == other.versions_ &&
+		   pools_ == other.pools_ &&
+		   free_entities_ == other.free_entities_;
+}
+
 inline bool Manager::operator!=(const Manager& other) const {
 	return !operator==(other);
+}
+
+inline Manager Manager::Clone() const {
+	Manager clone;
+	clone.count_ = count_;
+	clone.next_entity_ = next_entity_;
+	clone.entities_ = entities_;
+	clone.refresh_ = refresh_;
+	clone.refresh_required_ = refresh_required_;
+	clone.versions_ = versions_;
+	clone.free_entities_ = free_entities_;
+	clone.pools_.resize(pools_.size(), nullptr);
+	for (std::size_t i{ 0 }; i < pools_.size(); ++i) {
+		auto pool{ pools_[i] };
+		if (pool != nullptr)
+			clone.pools_[i] = pool->Clone();
+	}
+	assert(clone == *this && "Cloning manager failed");
+	return clone;
 }
 
 template <typename T>
@@ -366,34 +432,291 @@ inline decltype(auto) Manager::Get(impl::Index entity) {
 	}
 }
 
+inline Entity Manager::CreateEntity() {
+	impl::Index entity{ 0 };
+	// Pick entity from free list before trying to increment entity counter.
+	if (free_entities_.size() > 0) {
+		entity = free_entities_.front();
+		free_entities_.pop_front();
+	} else
+		entity = next_entity_++;
+	// Double the size of the manager if capacity is reached.
+	if (entity >= entities_.size())
+		Resize(versions_.capacity() * 2);
+	assert(entity < entities_.size() &&
+		   "Created entity is outside of manager entity vector range");
+	assert(!entities_[entity] &&
+		   "Cannot create new entity from live entity");
+	assert(!refresh_[entity] &&
+		   "Cannot create new entity from refresh marked entity");
+	// Mark entity for refresh.
+	refresh_[entity] = true;
+	refresh_required_ = true;
+	return Entity{ entity, ++versions_[entity], this };
+}
+
+template <typename ...Ts>
+inline Entity Manager::CopyEntity(const Entity& e) {
+	// Create new entity in the manager to copy to.
+	// TODO: Consider making this creation optional as sometimes it 
+	// is more intuitive to create the entity outside this function.
+	Entity copy_entity{ CreateEntity() };
+	impl::Index from{ e.entity_ };
+	impl::Index to{ copy_entity.entity_ };
+	if constexpr (sizeof...(Ts) > 0) { // Copy only specific components.
+		static_assert(std::conjunction_v<std::is_copy_constructible<Ts>...>,
+					  "Cannot copy entity with a component that is not copy constructible");
+		auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
+		bool manager_has{ ((std::get<impl::Pool<Ts>*>(pools) != nullptr)  && ...) };
+		assert(manager_has &&
+			   "Cannot copy entity with a component that is not even in the manager");
+		bool entity_has{ (std::get<impl::Pool<Ts>*>(pools)->impl::Pool<Ts>::Has(from) && ...) };
+		assert(entity_has &&
+			   "Cannot copy entity with a component that it does not have");
+		(std::get<impl::Pool<Ts>*>(pools)->impl::Pool<Ts>::Copy(from, to), ...);
+	} else // Copy all components.
+		for (auto pool : pools_)
+			if (pool != nullptr && pool->Has(from))
+				pool->Copy(from, to);
+	return copy_entity;
+}
+
+inline void Manager::Refresh() {
+	if (refresh_required_) {
+		// This must be set before refresh starts.
+		refresh_required_ = false;
+		assert(entities_.size() == versions_.size() &&
+			   "Refresh failed due to varying entity vector and version vector size");
+		assert(entities_.size() == refresh_.size() &&
+			   "Refresh failed due to varying entity vector and refresh vector size");
+		assert(next_entity_ <= entities_.size() &&
+			   "Next available entity must not be out of bounds of entity vector");
+		impl::Index alive{ 0 };
+		impl::Index dead{ 0 };
+		for (impl::Index entity{ 0 }; entity < next_entity_; ++entity) {
+			// Entity was marked for refresh.
+			if (refresh_[entity]) {
+				refresh_[entity] = false;
+				if (entities_[entity]) { // Marked for deletion.
+					Clear(entity);
+					entities_[entity] = false;
+					++versions_[entity];
+					free_entities_.emplace_back(entity);
+					++dead;
+				} else { // Marked for 'creation'.
+					entities_[entity] = true;
+					++alive;
+				}
+			}
+		}
+		assert(alive >= 0 && dead >= 0);
+		// Update entity count with net change.
+		count_ += alive - dead;
+		assert(count_ >= 0);
+	}
+}
+
+inline void Manager::Reserve(std::size_t capacity) {
+	entities_.reserve(capacity);
+	refresh_.reserve(capacity);
+	versions_.reserve(capacity);
+	assert(entities_.capacity() == refresh_.capacity() &&
+		   "Entity vector and refresh vector must have the same capacity");
+}
+
+inline void Manager::Resize(std::size_t size) {
+	if (size > entities_.size()) {
+		Reserve(size);
+		entities_.resize(size, false);
+		refresh_.resize(size, false);
+		versions_.resize(size, impl::null_version);
+	}
+	assert(entities_.size() == versions_.size() &&
+		   "Resize failed due to varying entity vector and version vector size");
+	assert(entities_.size() == refresh_.size() &&
+		   "Resize failed due to varying entity vector and refresh vector size");
+}
+
+inline void Manager::Clear() {
+	count_ = 0;
+	next_entity_ = 0;
+	refresh_required_ = false;
+
+	entities_.clear();
+	refresh_.clear();
+	versions_.clear();
+	free_entities_.clear();
+
+	for (auto pool : pools_) {
+		if (pool != nullptr) {
+			pool->Clear();
+		}
+	}
+}
+
+inline void Manager::DestroyPools() {
+	for (auto& pool : pools_) {
+		delete pool;
+		pool = nullptr;
+	}
+}
+
+inline void Manager::Reset() {
+	Clear();
+
+	entities_.shrink_to_fit();
+	refresh_.shrink_to_fit();
+	versions_.shrink_to_fit();
+	free_entities_.shrink_to_fit();
+
+	DestroyPools();
+	pools_.clear();
+	pools_.shrink_to_fit();
+
+	Reserve(1);
+}
+
+inline void Manager::DestroyEntity(impl::Index entity, impl::Version version) {
+	assert(entity < versions_.size());
+	assert(entity < refresh_.size());
+	if (versions_[entity] == version)
+		if (!refresh_[entity] || entities_[entity]) {
+			refresh_[entity] = true;
+			refresh_required_ = true;
+		} else {
+			/*
+			* Edge case where entity is created and marked
+			* for deletion before a Refresh() has been called.
+			* In this case, destroy and invalidate the entity
+			* without a Refresh() call. This is equivalent to
+			* an entity which never 'officially' existed in the manager.
+			*/
+			Clear(entity);
+			refresh_[entity] = false;
+			++versions_[entity];
+			free_entities_.emplace_back(entity);
+		}
+}
+
+inline bool Manager::Match(impl::Index entity1, impl::Index entity2) {
+	for (auto pool : pools_)
+		if (pool != nullptr) {
+			bool has1{ pool->Has(entity1) };
+			bool has2{ pool->Has(entity2) };
+			// Check that one entity has a component while the other doesn't.
+			if ((has1 || has2) && (!has1 || !has2))
+				// Exit early if one non-matching component is found.
+				return false;
+		}
+	return true;
+}
+
+inline std::size_t Manager::GetEntityCount() const {
+	return count_;
+}
+
+template <typename T>
+inline void Manager::ForEachEntity(T function) {
+	assert(entities_.size() == versions_.size() &&
+		   "Cannot loop through manager entities if and version and entity vectors differ in size");
+	assert(next_entity_ <= entities_.size() &&
+		   "Last entity must be within entity vector range");
+	for (impl::Index entity{ 0 }; entity < next_entity_; ++entity)
+		if (entities_[entity])
+			function(Entity{ entity, versions_[entity], this });
+}
+
+template <typename ...Ts, typename T>
+inline void Manager::ForEachEntityWith(T function) {
+	static_assert(sizeof ...(Ts) > 0,
+				  "Cannot loop through each entity without providing at least one component type");
+	assert(entities_.size() == versions_.size() &&
+		   "Cannot loop through manager entities if and version and entity vectors differ in size");
+	assert(next_entity_ <= entities_.size() &&
+		   "Last entity must be within entity vector range");
+	auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
+	// Check that none of the requested component pools are nullptrs.
+	if (((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...))
+		for (impl::Index entity{ 0 }; entity < next_entity_; ++entity)
+			// If entity is alive and has the components, call lambda on it.
+			if (entities_[entity] && (std::get<impl::Pool<Ts>*>(pools)->impl::Pool<Ts>::Has(entity) && ...))
+					function(Entity{ entity, versions_[entity], this },
+						     (std::get<impl::Pool<Ts>*>(pools)->impl::Pool<Ts>::Get(entity))...);
+}
+
+template <typename ...Ts, typename T>
+inline void Manager::ForEachEntityWithout(T function) {
+	assert(entities_.size() == versions_.size() &&
+		   "Cannot loop through manager entities if and version and entity vectors differ in size");
+	assert(next_entity_ <= entities_.size() &&
+		   "Last entity must be within entity vector range");
+	auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
+	// Check that none of the requested component pools are nullptrs.
+	if (((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...))
+		for (impl::Index entity{ 0 }; entity < next_entity_; ++entity)
+			// If entity is alive and does not have one of the components, call lambda on it.
+			if (entities_[entity] && (!std::get<impl::Pool<Ts>*>(pools)->impl::Pool<Ts>::Has(entity) || ...))
+				function(Entity{ entity, versions_[entity], this });
+}
+
 template <typename T, typename ...Ts>
 inline T& Entity::Add(Ts&&... constructor_args) {
-	assert(manager_->IsAlive(entity_, version_) && "Cannot add component to dead or null entity");
+	assert(IsAlive() && "Cannot add component to dead or null entity");
 	return manager_->Add<T>(entity_, manager_->GetId<T>(), std::forward<Ts>(constructor_args)...);
 }
 
 template <typename ...Ts>
 inline void Entity::Remove() {
+	assert(IsAlive() && "Cannot remove component(s) from dead or null entity");
 	(manager_->Remove<Ts>(entity_, manager_->GetId<Ts>()), ...);
 }
 
 template <typename ...Ts>
 inline bool Entity::Has() const {
-	return (manager_->Has<Ts>(entity_, manager_->GetId<Ts>()) && ...);
-}
-
-inline void Entity::Clear() {
-	manager_->Clear(entity_);
+	assert(IsAlive() && "Cannot check if dead or null entity has component(s)");
+	return IsAlive() && (manager_->Has<Ts>(entity_, manager_->GetId<Ts>()) && ...);
 }
 
 template <typename ...Ts>
 inline decltype(auto) Entity::Get() const {
+	assert(IsAlive() && "Cannot get component(s) from dead or null entity");
 	return manager_->Get<Ts...>(entity_);
 }
 
 template <typename ...Ts>
 inline decltype(auto) Entity::Get() {
+	assert(IsAlive() && "Cannot get component(s) from dead or null entity");
 	return manager_->Get<Ts...>(entity_);
+}
+
+inline void Entity::Clear() {
+	assert(IsAlive() && "Cannot clear components of dead or null entity");
+	manager_->Clear(entity_);
+}
+
+inline bool Entity::IsAlive() const {
+	return manager_ != nullptr && manager_->IsAlive(entity_, version_);
+}
+
+inline void Entity::Destroy() {
+	if (IsAlive())
+		manager_->DestroyEntity(entity_, version_);
+}
+
+inline const Manager& Entity::GetManager() const {
+	assert(manager_ != nullptr && "Cannot return parent manager of a null entity");
+	return *manager_;
+}
+
+inline Manager& Entity::GetManager() {
+	return const_cast<Manager&>(static_cast<const Entity&>(*this).GetManager());
+}
+
+inline bool Entity::operator==(const Entity& e) const {
+	return
+		entity_ == e.entity_ &&
+		version_ == e.version_ &&
+		manager_ == e.manager_;
 }
 
 inline bool Entity::operator!=(const Entity& e) const {
@@ -404,6 +727,14 @@ inline Entity::Entity(impl::Index entity, impl::Version version, Manager* manage
 	entity_{ entity },
 	version_{ version },
 	manager_{ manager } {}
+
+inline bool Entity::IsIdenticalTo(const Entity& e) const {
+	return
+		*this == e ||
+		(*this == ecs::null && e == ecs::null) ||
+		(*this != ecs::null && e != ecs::null && manager_ == e.manager_ && manager_ != nullptr && entity_ != e.entity_ &&
+		manager_->Match(entity_, e.entity_));
+}
 
 inline impl::NullEntity::operator Entity() const {
 	return Entity{};
@@ -417,11 +748,13 @@ inline constexpr bool impl::NullEntity::operator!=(const impl::NullEntity&) cons
 	return false;
 }
 
+inline bool impl::NullEntity::operator==(const Entity& e) const {
+	return e.version_ == impl::null_version;
+}
+
 inline bool impl::NullEntity::operator!=(const Entity& e) const {
 	return !(*this == e);
 }
-
-inline constexpr impl::NullEntity null{};
 
 inline bool operator==(const Entity& e, const impl::NullEntity& null_e) {
 	return null_e == e;

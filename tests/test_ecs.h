@@ -98,7 +98,6 @@ bool TestECS() {
 	auto entity4 = manager.CreateEntity();
 
 	manager.Refresh();
-
 	manager.ForEachEntity([](ecs::Entity entity) {
 		entity.Add<ZombieComponent>(1);
 		entity.Add<FoodComponent>(1);
@@ -186,11 +185,12 @@ bool TestECS() {
 	manager.Refresh();
 	assert(manager.GetEntityCount() == 3);
 	// TODO: Fix..
-	//auto new_manager = manager.Clone();
-	//assert(new_manager == manager);
-	//assert(new_manager.GetEntityCount() == 3);
+	auto new_manager = manager.Clone();
+	assert(new_manager == manager);
+	assert(new_manager.GetEntityCount() == 3);
 	assert(manager.GetEntityCount() == 3);
 
 	std::cout << "All ECS tests passed!" << std::endl;
+	
 	return true;
 }
