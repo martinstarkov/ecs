@@ -52,7 +52,7 @@ ecs::Manager manager;
 auto entity = manager.CreateEntity();
 ```
 
-Calling ```manager.CreateEntity()``` will create an entity but it will not be considered alive until the manager is refreshed. Entities must be alive to be detected in the manager. The memory associated with the entity is, however, stored in the manager and therefore components can be added or removed to/from the entity before refreshing.
+Calling ```manager.CreateEntity()``` will create an entity but it will not be considered alive until the manager is refreshed. Entities must be alive to be detected in the manager (for instance when looping through entities with specific components). The memory associated with the entity is, however, stored in the manager and therefore components can be added or removed to/from the entity before refreshing.
 
 ```c++
 manager.Refresh();
@@ -64,7 +64,7 @@ Entities can be marked for destruction using:
 entity.Destroy();
 ```
 
-But will not be removed from the manager until a refresh is called. This prevents iterator invalidation if entities destroy each other during container loops.
+But will not be removed from the manager until a refresh is called. This prevents iterator invalidation if entities destroy each other while looping through a container of them.
 ```entity.IsAlive()``` can be called to check the state of validity of an entity in its parent manager.
 
 **TLDR;** Remember to always call ```manager.Refresh()``` after an entity is created, destroyed or copied.
@@ -103,7 +103,7 @@ struct HumanComponent {
 
 The user can interact with an entity's components through the entity handle.
 
-`AddComponent<Type>(constructor_args...)` requires you to pass the component type as a template parameter and the component constructor arguments as function parameters. If the entity already has the component type, it will be replaced.
+`Add<ComponentType>(constructor_args...)` requires you to pass the component type as a template parameter and the component constructor arguments as function parameters. If the entity already has the component type, it will be replaced.
 A reference to the newly created component is returned.
 
 ```c++
@@ -112,24 +112,24 @@ auto entity = manager.CreateEntity();
 int age = 22;
 double height = 180.5;
 
-auto& human = entity.AddComponent<HumanComponent>(age, height);
+auto& human = entity.Add<HumanComponent>(age, height);
 human.height += 0.5;
 ```
 
 Checking if an entity has component(s) can be done like so:
 
 ```c++
-bool is_human = entity.HasComponent<HumanComponent>();
+bool is_human = entity.Has<HumanComponent>();
 
-bool is_cyborg = entity.HasComponents<HumanComponent, RobotComponent>();
+bool is_cyborg = entity.Has<HumanComponent, RobotComponent>();
 ```
 
 Component(s) references can be retrieved from an entity using:
 
 ```c++
-auto& human = entity.GetComponent<HumanComponent>();
+auto& human = entity.Get<HumanComponent>();
 
-auto [robot, alien] = entity.GetComponents<RobotComponent, AlienComponent>();
+auto [robot, alien] = entity.Get<RobotComponent, AlienComponent>();
 
 human.age += 1;
 ```
@@ -137,17 +137,17 @@ human.age += 1;
 If an entity does not have the requested component, a debug assertion is called. It is therefore advisable to wrap component retrieval in an if-statement such as:
 
 ```c++
-if (entity.HasComponent<HumanComponent>()) {
-    auto& human = entity.GetComponent<HumanComponent>();
+if (entity.Has<HumanComponent>()) {
+    auto& human = entity.Get<HumanComponent>();
 }
 ```
 
 Components can be removed using:
 
 ```c++
-entity.RemoveComponent<HumanComponent>();
+entity.Remove<HumanComponent>();
 
-entity.RemoveComponents<RobotComponent, AlienComponent>();
+entity.Remove<RobotComponent, AlienComponent>();
 ```
 
 Nothing happens if the entity did not have the component type.
@@ -160,8 +160,8 @@ For instance, each entity can be looped through:
 
 ```c++
 manager.ForEachEntity([](ecs::Entity entity) {
-    entity.AddComponent<ZombieComponent>();
-    entity.AddComponent<FoodComponent>();
+    entity.Add<ZombieComponent>();
+    entity.Add<FoodComponent>();
 });
 ```
 
@@ -187,7 +187,7 @@ manager.Refresh();
 
 ## Manager utility functions
 
-As copying entity handles does not create new entities, copying all of an entity's components to a new entity can be done via the manager:
+As copying entity handles does not create new entities, copying all of an entity's components to a new entity can be done via the manager. Note that the `CopyEntity()` function creates a new manager entity inside of itself, therefore a `manager.Refresh()` must be called afterward for the entity to be detected.
 
 ```c++
 auto new_entity = manager.CopyEntity(entity);
@@ -210,7 +210,13 @@ assert(!new_entity.IsIdenticalTo(entity)); // passes
 The number of alive entities in the manager can be found using:
 
 ```c++
-std::size_t entity_count = manager.GetEntityCount();
+std::size_t entity_count = manager.Size();
+```
+
+And the internal capacity of the manager is retrieved using:
+
+```c++
+std::size_t entity_capacity = manager.Capacity();
 ```
 
 Destroying all of the entities and components in a manager is similar to standard library containers:
@@ -221,7 +227,7 @@ manager.Clear();
 
 Note that this maintains the manager entity capacity.
 
-The manager can be reset fully (including capacity) using:
+The manager can be reset fully (including freeing allocated capacity) using:
 
 ```c++
 manager.Reset();
