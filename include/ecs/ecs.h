@@ -170,8 +170,10 @@ public:
 	bool IsIdenticalTo(const Entity& e) const;
 	const Manager& GetManager() const;
 	Manager& GetManager();
+	// @return Tuple of references to requested components, or a single reference if only one component is requested.
 	template <typename ...Ts>
 	decltype(auto) Get() const;
+	// @return Tuple of references to requested components, or a single reference if only one component is requested.
 	template <typename ...Ts>
 	decltype(auto) Get();
 	template <typename T, typename ...Ts>
