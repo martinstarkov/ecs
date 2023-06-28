@@ -91,9 +91,10 @@ public:
 	void ForEachEntityWith(T function);
 	template <typename ...Ts, typename T>
 	void ForEachEntityWithout(T function);
-	std::size_t GetEntityCount() const;
+	std::size_t Size() const;
+	std::size_t Capacity() const;
 private:
-	void Clear(impl::Index entity);
+	void ClearEntity(impl::Index entity);
 	void DestroyPools();
 	void Resize(std::size_t size);
 	void DestroyEntity(impl::Index entity, impl::Version version);
@@ -382,10 +383,12 @@ inline impl::Index& Manager::ComponentCount() {
 inline bool Manager::IsAlive(impl::Index entity, impl::Version version) const {
 	return version != impl::null_version && entity < versions_.size() &&
 		   versions_[entity] == version  && entity < entities_.size() &&
+		   // Entity considered currently alive or entity marked 
+		   // for creation/deletion but not yet created/deleted.
 		   (entities_[entity] || refresh_[entity]);
 }
 
-inline void Manager::Clear(impl::Index entity) {
+inline void Manager::ClearEntity(impl::Index entity) {
 	for (auto pool : pools_)
 		if (pool != nullptr)
 			pool->Remove(entity);
@@ -452,6 +455,7 @@ inline Entity Manager::CreateEntity() {
 	// Mark entity for refresh.
 	refresh_[entity] = true;
 	refresh_required_ = true;
+	// Entity version incremented here.
 	return Entity{ entity, ++versions_[entity], this };
 }
 
@@ -483,7 +487,8 @@ inline Entity Manager::CopyEntity(const Entity& e) {
 
 inline void Manager::Refresh() {
 	if (refresh_required_) {
-		// This must be set before refresh starts.
+		// This must be set before refresh starts in case 
+		// events are called (for instance during entity deletion).
 		refresh_required_ = false;
 		assert(entities_.size() == versions_.size() &&
 			   "Refresh failed due to varying entity vector and version vector size");
@@ -498,7 +503,7 @@ inline void Manager::Refresh() {
 			if (refresh_[entity]) {
 				refresh_[entity] = false;
 				if (entities_[entity]) { // Marked for deletion.
-					Clear(entity);
+					ClearEntity(entity);
 					entities_[entity] = false;
 					++versions_[entity];
 					free_entities_.emplace_back(entity);
@@ -521,12 +526,11 @@ inline void Manager::Reserve(std::size_t capacity) {
 	refresh_.reserve(capacity);
 	versions_.reserve(capacity);
 	assert(entities_.capacity() == refresh_.capacity() &&
-		   "Entity vector and refresh vector must have the same capacity");
+		   "Entity and refresh vectors must have the same capacity");
 }
 
 inline void Manager::Resize(std::size_t size) {
 	if (size > entities_.size()) {
-		Reserve(size);
 		entities_.resize(size, false);
 		refresh_.resize(size, false);
 		versions_.resize(size, impl::null_version);
@@ -580,18 +584,18 @@ inline void Manager::DestroyEntity(impl::Index entity, impl::Version version) {
 	assert(entity < versions_.size());
 	assert(entity < refresh_.size());
 	if (versions_[entity] == version)
-		if (!refresh_[entity] || entities_[entity]) {
+		if (entities_[entity]) {
 			refresh_[entity] = true;
 			refresh_required_ = true;
-		} else {
+		} else if (refresh_[entity]) {
 			/*
-			* Edge case where entity is created and marked
-			* for deletion before a Refresh() has been called.
-			* In this case, destroy and invalidate the entity
-			* without a Refresh() call. This is equivalent to
-			* an entity which never 'officially' existed in the manager.
+			* Edge case where entity is created and marked for deletion
+			* before a Refresh() has been called.
+			* In this case, destroy and invalidate the entity without
+			* a Refresh() call. This is equivalent to an entity which
+			* never 'officially' existed in the manager.
 			*/
-			Clear(entity);
+			ClearEntity(entity);
 			refresh_[entity] = false;
 			++versions_[entity];
 			free_entities_.emplace_back(entity);
@@ -611,8 +615,12 @@ inline bool Manager::Match(impl::Index entity1, impl::Index entity2) {
 	return true;
 }
 
-inline std::size_t Manager::GetEntityCount() const {
+inline std::size_t Manager::Size() const {
 	return count_;
+}
+
+inline std::size_t Manager::Capacity() const {
+	return versions_.capacity();
 }
 
 template <typename T>
@@ -691,7 +699,7 @@ inline decltype(auto) Entity::Get() {
 
 inline void Entity::Clear() {
 	assert(IsAlive() && "Cannot clear components of dead or null entity");
-	manager_->Clear(entity_);
+	manager_->ClearEntity(entity_);
 }
 
 inline bool Entity::IsAlive() const {

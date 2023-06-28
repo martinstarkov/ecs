@@ -58,8 +58,6 @@ bool TestECS() {
 	assert(e2 == permanently_invalid_entity);
 	assert(permanently_invalid_entity == e2);
 	ecs::Entity entity = manager.CreateEntity();
-	// Note that the Refresh() comes much later.
-	// TODO: Fix comparison.
 	assert(manager == entity.GetManager());
 	
 	int age = 22;
@@ -110,7 +108,7 @@ bool TestECS() {
 	int threshold = 100;
 
 	manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
-		[&](ecs::Entity e, auto& zombie, auto& food) {
+		[&](ecs::Entity e, ZombieComponent& zombie, FoodComponent& food) {
 		if (food.hunger < threshold) {
 			e.Destroy();
 		}
@@ -164,33 +162,32 @@ bool TestECS() {
 
 	manager.Refresh();
 
-	assert(manager.GetEntityCount() == 3); // entity, new_entity, new_entity2.
+	assert(manager.Size() == 3); // entity, new_entity, new_entity2.
 	new_entity.Destroy();
-	assert(manager.GetEntityCount() == 3); // entity, new_entity, new_entity2.
+	assert(manager.Size() == 3); // entity, new_entity, new_entity2.
 	manager.Refresh();
-	assert(manager.GetEntityCount() == 2); // entity, new_entity2.
+	assert(manager.Size() == 2); // entity, new_entity2.
 	auto new_entity3 = manager.CreateEntity();
-	assert(manager.GetEntityCount() == 2); // entity, new_entity2, new_entity3.
+	assert(manager.Size() == 2); // entity, new_entity2, new_entity3.
 	manager.Refresh();
-	assert(manager.GetEntityCount() == 3); // entity, new_entity2, new_entity3.
+	assert(manager.Size() == 3); // entity, new_entity2, new_entity3.
 
 	manager.Clear();
-	assert(manager.GetEntityCount() == 0);
+	assert(manager.Size() == 0);
 	manager.Reset();
 	manager.Reserve(5);
 	manager.CreateEntity();
 	manager.CreateEntity();
 	manager.CreateEntity();
-	assert(manager.GetEntityCount() == 0);
+	assert(manager.Size() == 0);
 	manager.Refresh();
-	assert(manager.GetEntityCount() == 3);
-	// TODO: Fix..
+	assert(manager.Size() == 3);
 	auto new_manager = manager.Clone();
 	assert(new_manager == manager);
-	assert(new_manager.GetEntityCount() == 3);
-	assert(manager.GetEntityCount() == 3);
+	assert(new_manager.Size() == 3);
+	assert(manager.Size() == 3);
 
 	std::cout << "All ECS tests passed!" << std::endl;
-	
+
 	return true;
 }
