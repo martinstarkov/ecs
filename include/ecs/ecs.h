@@ -137,7 +137,7 @@ public:
 		* This must be called whenever destroying a pool.
 		*/
 		assert(block_ && "Do not free invalid component pools");
-		std::free(block_);
+		operator delete[](block_);
 		block_ = nullptr;
 	}
 
@@ -174,8 +174,8 @@ public:
 		for (auto offset : offsets_) {
 			if (offset != invalid_offset) {
 				auto adjusted_offset{ (offset - 1) };
-				TComponent* component{ block_ + adjusted_offset };
-				TComponent* address{ clone->block_ + adjusted_offset };
+				TComponent* component{ &block_[adjusted_offset] };
+				TComponent* address{ &clone->block_[adjusted_offset] };
 				// Copy component from current pool to 
 				// other pool using copy constructor.
 				new(address) TComponent(*component);
@@ -204,7 +204,7 @@ public:
 		bool replace{ offsets_[to_location] != invalid_offset };
 		assert(!replace && "Cannot overwrite existing component while copying entity");
 		offsets_[to_location] = offset;
-		TComponent* address{ block_ + (offset - 1) };
+		TComponent* address{ &block_[offset - 1] };
 		// Create the component into the new address with the given copy.
 		new(address) TComponent(*Get(from));
 		assert(address && "Failed to copy component to offset memory location");
@@ -219,8 +219,7 @@ public:
 		if (entity < offsets_.size()) {
 			auto& offset{ offsets_[entity] };
 			if (offset != invalid_offset) {
-				TComponent* address{ block_ + (offset - 1) };
-				// Call destructor on component memory location.
+				TComponent* address{ &block_[offset - 1] };
 				address->~TComponent();
 				freed_offsets_.emplace_back(offset);
 				offset = invalid_offset;
@@ -266,7 +265,7 @@ public:
 		// Check if component offset exists already.
 		bool replace{ offsets_[location] != invalid_offset };
 		offsets_[location] = offset;
-		TComponent* address{ block_ + (offset - 1) };
+		TComponent* address{ &block_[offset - 1] };
 		if (replace) {
 			// Call destructor on potential previous components
 			// at the address.
@@ -295,7 +294,7 @@ public:
 	*/
 	const TComponent* Get(Id entity) const {
 		if (Pool<TComponent>::Has(entity)) {
-			return block_ + (offsets_[entity] - 1);
+			return &block_[offsets_[entity] - 1];
 		}
 		return nullptr;
 	}
@@ -358,7 +357,7 @@ private:
 		assert(!capacity_ && "Memory block must be empty before allocation");
 		assert(!size_ && "Cannot allocate memory for occupied component pool");
 		capacity_ = starting_capacity;
-		block_ = static_cast<TComponent*>(std::malloc(capacity_ * sizeof(TComponent)));
+		block_ = static_cast<TComponent*>(operator new[](capacity_ * sizeof(TComponent)));
 		assert(block_ && "Could not properly allocate memory for component pool");
 	}
 
@@ -367,10 +366,9 @@ private:
 	* Note: valid offsets are not refreshed afterward.
 	*/
 	void ComponentDestructors() {
-		for (auto offset : offsets_) {
-			// Only consider valid offsets.
+		for (auto& offset : offsets_) {
 			if (offset != invalid_offset) {
-				TComponent* address{ block_ + (offset - 1) };
+				TComponent* address{ &block_[offset - 1] };
 				address->~TComponent();
 			}
 		}
@@ -385,10 +383,14 @@ private:
 			// Double the capacity each time it is reached.
 			capacity_ = new_size * 2;
 			assert(block_ && "Pool memory must be allocated before reallocation");
-			auto new_block{ static_cast<TComponent*>(
-				std::realloc(block_, capacity_ * sizeof(TComponent))) };
-			assert(new_block && "Unable to reallocate sufficient memory for component pool");
+			TComponent* new_block = static_cast<TComponent*>(operator new[](capacity_ * sizeof(TComponent)));
+			for (auto& offset : offsets_)
+				if (offset != invalid_offset)
+					new(&new_block[offset - 1]) TComponent(std::move(block_[offset - 1]));
+			// TODO:/ CONSIDER: Calling destructors on old memory block objects using ComponentDestructors().
+			operator delete[](block_);
 			block_ = new_block;
+			assert(block_ && "Unable to reallocate sufficient memory for component pool");
 		}
 	}
 
