@@ -17,9 +17,8 @@ Pasting the following code into a CMake file (minimum version: 3.14) will allow 
 
 include(FetchContent)
 
-FetchContent_Declare(ecs 
-					 GIT_REPOSITORY https://github.com/martinstarkov/ecs.git
-					 GIT_TAG main)
+FetchContent_Declare(ecs GIT_REPOSITORY https://github.com/martinstarkov/ecs.git
+                         GIT_TAG main)
 FetchContent_MakeAvailable(ecs)
 
 set(ECS_INCLUDE_DIR "${ecs_SOURCE_DIR}/include")
