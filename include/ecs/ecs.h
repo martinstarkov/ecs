@@ -181,6 +181,8 @@ public:
 	template <typename ...Ts>
 	bool Has() const;
 	template <typename ...Ts>
+	bool HasAny() const;
+	template <typename ...Ts>
 	void Remove();
 	void Clear();
 	void Destroy();
@@ -711,6 +713,12 @@ template <typename ...Ts>
 inline bool Entity::Has() const {
 	assert(IsAlive() && "Cannot check if dead or null entity has component(s)");
 	return IsAlive() && (manager_->Has<Ts>(entity_, manager_->GetId<Ts>()) && ...);
+}
+
+template <typename ...Ts>
+inline bool Entity::HasAny() const {
+	assert(IsAlive() && "Cannot check if dead or null entity has any component(s)");
+	return IsAlive() && (manager_->Has<Ts>(entity_, manager_->GetId<Ts>()) || ...);
 }
 
 template <typename ...Ts>
