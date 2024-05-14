@@ -53,8 +53,8 @@ inline constexpr Version null_version{ 0 };
 class PoolInterface {
 public:
     virtual ~PoolInterface() = default;
-    virtual PoolInterface* Clone() const = 0;
-    virtual void Copy(Index from_entity, Index to_entity) = 0;
+    //virtual PoolInterface* Clone() const = 0;
+    //virtual void Copy(Index from_entity, Index to_entity) = 0;
     virtual void Clear() = 0;
     virtual void Reset() = 0;
     virtual bool Remove(Index entity) = 0;
@@ -74,8 +74,8 @@ public:
     Pool& operator=(Pool&&) = default;
     Pool(const Pool&) = delete;
     Pool& operator=(const Pool&) = delete;
-    virtual PoolInterface* Clone() const final;
-    virtual void Copy(Index from_entity, Index to_entity) final;
+    //virtual PoolInterface* Clone() const final;
+    //virtual void Copy(Index from_entity, Index to_entity) final;
     virtual void Clear() final;
     virtual void Reset() final;
     virtual bool Remove(Index entity) final;
@@ -103,7 +103,7 @@ public:
     Manager& operator=(const Manager&) = delete;
     bool operator==(const Manager& other) const;
     bool operator!=(const Manager& other) const;
-    Manager Clone() const;
+    //Manager Clone() const;
     void Clear();
     void Refresh();
     void Reserve(std::size_t capacity);
@@ -219,23 +219,23 @@ inline impl::Pool<T>::Pool(const std::vector<T>& components,
                            const std::vector<Index>& sparse) :
     components{ components }, dense{ dense }, sparse{ sparse } {}
 
-template <typename T>
-inline impl::PoolInterface* impl::Pool<T>::Clone() const {
-    static_assert(std::is_copy_constructible_v<T>,
-                  "Cannot clone component pool with a non copy-constructible component");
-    return new Pool<T>(components, dense, sparse);
-}
+//template <typename T>
+//inline impl::PoolInterface* impl::Pool<T>::Clone() const {
+//    static_assert(std::is_copy_constructible_v<T>,
+//                  "Cannot clone component pool with a non copy-constructible component");
+//    return new Pool<T>(components, dense, sparse);
+//}
 
-template <typename T>
-inline void impl::Pool<T>::Copy(Index from_entity, Index to_entity) {
-    static_assert(std::is_copy_constructible_v<T>,
-                  "Cannot copy component in a pool of non copy constructible components");
-    assert(Has(from_entity));
-    if (Has(to_entity))
-        components[sparse[to_entity]] = components[sparse[from_entity]];
-    else
-        Add(to_entity, components[sparse[from_entity]]);
-}
+//template <typename T>
+//inline void impl::Pool<T>::Copy(Index from_entity, Index to_entity) {
+//    static_assert(std::is_copy_constructible_v<T>,
+//                  "Cannot copy component in a pool of non copy constructible components");
+//    assert(Has(from_entity));
+//    if (Has(to_entity))
+//        components[sparse[to_entity]] = components[sparse[from_entity]];
+//    else
+//        Add(to_entity, components[sparse[from_entity]]);
+//}
 
 template <typename T>
 inline void impl::Pool<T>::Clear() {
@@ -352,24 +352,24 @@ inline bool Manager::operator!=(const Manager& other) const {
     return !operator==(other);
 }
 
-inline Manager Manager::Clone() const {
-    Manager clone;
-    clone.count_ = count_;
-    clone.next_entity_ = next_entity_;
-    clone.entities_ = entities_;
-    clone.refresh_ = refresh_;
-    clone.refresh_required_ = refresh_required_;
-    clone.versions_ = versions_;
-    clone.free_entities_ = free_entities_;
-    clone.pools_.resize(pools_.size(), nullptr);
-    for (std::size_t i{ 0 }; i < pools_.size(); ++i) {
-        auto pool{ pools_[i] };
-        if (pool != nullptr)
-            clone.pools_[i] = pool->Clone();
-    }
-    assert(clone == *this && "Cloning manager failed");
-    return clone;
-}
+//inline Manager Manager::Clone() const {
+//    Manager clone;
+//    clone.count_ = count_;
+//    clone.next_entity_ = next_entity_;
+//    clone.entities_ = entities_;
+//    clone.refresh_ = refresh_;
+//    clone.refresh_required_ = refresh_required_;
+//    clone.versions_ = versions_;
+//    clone.free_entities_ = free_entities_;
+//    clone.pools_.resize(pools_.size(), nullptr);
+//    for (std::size_t i{ 0 }; i < pools_.size(); ++i) {
+//        auto pool{ pools_[i] };
+//        if (pool != nullptr)
+//            clone.pools_[i] = pool->Clone();
+//    }
+//    assert(clone == *this && "Cloning manager failed");
+//    return clone;
+//}
 
 template <typename T>
 inline const impl::Pool<T>* Manager::GetPool(impl::Index component) const {
@@ -489,31 +489,31 @@ inline Entity Manager::CreateEntity() {
     return Entity{ entity, ++versions_[entity], this };
 }
 
-template <typename ...Ts>
-inline Entity Manager::CopyEntity(const Entity& e) {
-    // Create new entity in the manager to copy to.
-    // TODO: Consider making this creation optional as sometimes it
-    // is more intuitive to create the entity outside this function.
-    Entity copy_entity{ CreateEntity() };
-    impl::Index from{ e.entity_ };
-    impl::Index to{ copy_entity.entity_ };
-    if constexpr (sizeof...(Ts) > 0) { // Copy only specific components.
-        static_assert(std::conjunction_v<std::is_copy_constructible<Ts>...>,
-                      "Cannot copy entity with a component that is not copy constructible");
-        auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
-        bool manager_has{ ((std::get<impl::Pool<Ts>*>(pools) != nullptr)  && ...) };
-        assert(manager_has &&
-               "Cannot copy entity with a component that is not even in the manager");
-        bool entity_has{ (std::get<impl::Pool<Ts>*>(pools)->impl::template Pool<Ts>::Has(from) && ...) };
-        assert(entity_has &&
-               "Cannot copy entity with a component that it does not have");
-        (std::get<impl::Pool<Ts>*>(pools)->impl::template Pool<Ts>::Copy(from, to), ...);
-    } else // Copy all components.
-        for (auto pool : pools_)
-            if (pool != nullptr && pool->Has(from))
-                pool->Copy(from, to);
-    return copy_entity;
-}
+//template <typename ...Ts>
+//inline Entity Manager::CopyEntity(const Entity& e) {
+//    // Create new entity in the manager to copy to.
+//    // TODO: Consider making this creation optional as sometimes it
+//    // is more intuitive to create the entity outside this function.
+//    Entity copy_entity{ CreateEntity() };
+//    impl::Index from{ e.entity_ };
+//    impl::Index to{ copy_entity.entity_ };
+//    if constexpr (sizeof...(Ts) > 0) { // Copy only specific components.
+//        static_assert(std::conjunction_v<std::is_copy_constructible<Ts>...>,
+//                      "Cannot copy entity with a component that is not copy constructible");
+//        auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
+//        bool manager_has{ ((std::get<impl::Pool<Ts>*>(pools) != nullptr)  && ...) };
+//        assert(manager_has &&
+//               "Cannot copy entity with a component that is not even in the manager");
+//        bool entity_has{ (std::get<impl::Pool<Ts>*>(pools)->impl::template Pool<Ts>::Has(from) && ...) };
+//        assert(entity_has &&
+//               "Cannot copy entity with a component that it does not have");
+//        (std::get<impl::Pool<Ts>*>(pools)->impl::template Pool<Ts>::Copy(from, to), ...);
+//    } else // Copy all components.
+//        for (auto pool : pools_)
+//            if (pool != nullptr && pool->Has(from))
+//                pool->Copy(from, to);
+//    return copy_entity;
+//}
 
 inline void Manager::Refresh() {
     if (refresh_required_) {
