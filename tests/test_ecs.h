@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cassert>  // assert
-#include <iostream> // std::cout
+#include <cassert>
+#include <iostream>
 
 #include "ecs/ecs.h"
 

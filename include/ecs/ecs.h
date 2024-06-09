@@ -26,15 +26,15 @@ SOFTWARE.
 
 #pragma once
 
-#include <cstdlib>     // std::size_t
-#include <cstdint>     // std::uint32_t
-#include <vector>      // std::vector
-#include <limits>      // std::numeric_limits
-#include <type_traits> // std::enable_if_t
-#include <functional>  // std::hash
-#include <deque>       // std::deque
-#include <memory>      // std::shared_ptr
-#include <cassert>     // assert
+#include <cstdlib>
+#include <cstdint>
+#include <vector>
+#include <limits>
+#include <type_traits>
+#include <functional>
+#include <deque>
+#include <memory>
+#include <cassert>
 
 namespace ecs {
 
@@ -107,8 +107,8 @@ public:
 
     void Set(std::size_t index, bool value = true) {
         std::size_t byte_index{ index / 8 };
-        std::uint8_t offset{ index % 8 };
-        std::uint8_t bitfield = std::uint8_t(1 << offset);
+        std::uint8_t offset{ static_cast<std::uint8_t>(index % 8) };
+        std::uint8_t bitfield = static_cast<std::uint8_t>(1 << offset);
 
         assert(byte_index < data_.size());
 
@@ -202,6 +202,8 @@ public:
     std::size_t Size() const;
     std::size_t Capacity() const;
 private:
+    template <typename T>
+    friend class impl::Pool;
     friend class Manager;
     friend class Entity;
     void ClearEntity(impl::Index entity);
@@ -226,9 +228,6 @@ private:
     template <typename T>
     static impl::Index GetId();
     static impl::Index& ComponentCount();
-    template <typename T>
-    friend class impl::Pool;
-    friend class Entity;
     impl::Index next_entity_{ 0 };
     impl::Index count_{ 0 };
     bool refresh_required_{ false };
