@@ -1,192 +1,209 @@
 #pragma once
 
-#include <cassert>
-#include <iostream>
+#include <cassert>   // assert
+#include <iostream>  // std::cout
 
 #include "ecs/ecs.h"
 
 struct HumanComponent {
-	HumanComponent(int age, double height) : age{ age }, height{ height } {}
-	int age{};
-	double height{};
+  HumanComponent(int age, double height) : age{age}, height{height} {}
+
+  int age{};
+  double height{};
 };
 
 struct RobotComponent {
-	RobotComponent(int id) : id{ id } {}
-	int id{};
+  RobotComponent(int id) : id{id} {}
+
+  int id{};
 };
 
 struct AlienComponent {
-	AlienComponent(int planet) : planet{ planet } {}
-	int planet{};
+  AlienComponent(int planet) : planet{planet} {}
+
+  int planet{};
 };
 
 struct ZombieComponent {
-	ZombieComponent(int number) : number{ number } {}
-	int number{};
+  ZombieComponent(int number) : number{number} {}
+
+  int number{};
 };
 
 struct FoodComponent {
-	FoodComponent(int hunger) : hunger{ hunger } {}
-	int hunger{};
+  FoodComponent(int hunger) : hunger{hunger} {}
+
+  int hunger{};
 };
 
 bool TestECS() {
-	std::cout << "Starting ECS tests..." << std::endl;
+  std::cout << "Starting ECS tests..." << std::endl;
 
-	ecs::Manager manager;
-	ecs::Entity e1 = manager.CreateEntity();
-	ecs::Entity from = manager.CreateEntity();
-	manager.Refresh();
-	ecs::Entity to = manager.CreateEntity();
+  ecs::Manager manager;
+  ecs::Entity e1 = manager.CreateEntity();
+  ecs::Entity from = manager.CreateEntity();
+  manager.Refresh();
+  ecs::Entity to = manager.CreateEntity();
 
-	manager.Refresh();
-	ecs::Entity e2 = e1;
-	assert(e2.IsIdenticalTo(e1));
-	assert(e1.IsAlive());
-	assert(e2.IsAlive());
-	e1.Destroy();
-	assert(e1.IsAlive());
-	assert(e2.IsAlive());
-	manager.Refresh();
-	assert(!e1.IsAlive());
-	assert(!e2.IsAlive());
-	auto permanently_invalid_entity = ecs::null;
-	assert(e2 != permanently_invalid_entity);
-	e2 = ecs::null;
-	assert(e2 == permanently_invalid_entity);
-	assert(permanently_invalid_entity == e2);
-	ecs::Entity entity = manager.CreateEntity();
-	assert(manager == entity.GetManager());
-	
-	int age = 22;
-	double height = 180.5;
+  manager.Refresh();
+  ecs::Entity e2 = e1;
+  assert(e2.IsIdenticalTo(e1));
+  assert(e1.IsAlive());
+  assert(e2.IsAlive());
+  e1.Destroy();
+  assert(e1.IsAlive());
+  assert(e2.IsAlive());
+  manager.Refresh();
+  assert(!e1.IsAlive());
+  assert(!e2.IsAlive());
+  assert(from.IsAlive());
+  assert(to.IsAlive());
+  auto permanently_invalid_entity = ecs::null;
+  assert(e2 != permanently_invalid_entity);
+  e2 = ecs::null;
+  assert(e2 == permanently_invalid_entity);
+  assert(permanently_invalid_entity == e2);
+  ecs::Entity entity = manager.CreateEntity();
+  assert(manager == entity.GetManager());
 
-	HumanComponent& human = entity.Add<HumanComponent>(age, height);
-	human.height += 0.5;
+  int age = 22;
+  double height = 180.5;
 
-	bool is_human = entity.Has<HumanComponent>();
-	assert(is_human);
-	bool is_cyborg = entity.Has<HumanComponent, RobotComponent>();
-	assert(!is_cyborg);
-	entity.Add<RobotComponent>(33);
-	is_cyborg = entity.Has<HumanComponent, RobotComponent>();
-	assert(is_cyborg);
+  HumanComponent& human = entity.Add<HumanComponent>(age, height);
+  human.height += 0.5;
 
-	HumanComponent& human5 = entity.Get<HumanComponent>();
-	human5.age += 1;
-	assert(human5.age == 22 + 1);
+  bool is_human = entity.Has<HumanComponent>();
+  assert(is_human);
+  bool is_cyborg = entity.Has<HumanComponent, RobotComponent>();
+  assert(!is_cyborg);
+  entity.Add<RobotComponent>(33);
+  is_cyborg = entity.Has<HumanComponent, RobotComponent>();
+  assert(is_cyborg);
 
-	assert((entity.Has<RobotComponent, HumanComponent>()));
-	auto [robot, h] = entity.Get<RobotComponent, HumanComponent>();
-	assert(robot.id == 33);
-	assert(h.age == 22 + 1);
-	entity.Remove<HumanComponent>();
-	assert(!entity.Has<HumanComponent>());
+  HumanComponent& human5 = entity.Get<HumanComponent>();
+  human5.age += 1;
+  assert(human5.age == 22 + 1);
 
-	assert(!entity.Has<AlienComponent>());
-	entity.Remove<RobotComponent, AlienComponent>();
-	assert(!entity.Has<RobotComponent>());
-	assert(!entity.Has<AlienComponent>());
-	assert(!(entity.Has<RobotComponent, AlienComponent>()));
+  assert((entity.Has<RobotComponent, HumanComponent>()));
+  auto [robot, h] = entity.Get<RobotComponent, HumanComponent>();
+  assert(robot.id == 33);
+  assert(h.age == 22 + 1);
+  entity.Remove<HumanComponent>();
+  assert(!entity.Has<HumanComponent>());
 
-	auto entity2 = manager.CreateEntity();
-	auto entity3 = manager.CreateEntity();
-	auto entity4 = manager.CreateEntity();
+  assert(!entity.Has<AlienComponent>());
+  entity.Remove<RobotComponent, AlienComponent>();
+  assert(!entity.Has<RobotComponent>());
+  assert(!entity.Has<AlienComponent>());
+  assert(!(entity.Has<RobotComponent, AlienComponent>()));
 
-	manager.Refresh();
-	manager.ForEachEntity([](ecs::Entity entity) {
-		entity.Add<ZombieComponent>(1);
-		entity.Add<FoodComponent>(1);
-	});
+  auto entity2 = manager.CreateEntity();
+  auto entity3 = manager.CreateEntity();
+  auto entity4 = manager.CreateEntity();
 
-	entity.Get<FoodComponent>().hunger = 101;
-	entity.Get<ZombieComponent>().number = 99;
-	entity2.Get<FoodComponent>().hunger = 101;
+  manager.Refresh();
+  manager.ForEachEntity([](ecs::Entity entity) {
+    entity.Add<ZombieComponent>(1);
+    entity.Add<FoodComponent>(1);
+  });
 
-	int threshold = 100;
+  assert(entity.Has<FoodComponent>());
+  assert(entity.Has<ZombieComponent>());
+  assert(entity2.Has<FoodComponent>());
+  assert(entity2.Has<ZombieComponent>());
+  assert(entity3.Has<FoodComponent>());
+  assert(entity3.Has<ZombieComponent>());
+  assert(entity4.Has<FoodComponent>());
+  assert(entity4.Has<ZombieComponent>());
 
-	manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
-		[&](ecs::Entity e, ZombieComponent& zombie, FoodComponent& food) {
-		if (food.hunger < threshold) {
-			e.Destroy();
-		}
-	});
-	assert(entity.IsAlive());
-	assert(entity2.IsAlive());
-	assert(entity3.IsAlive());
-	assert(entity4.IsAlive());
-	manager.Refresh();
-	assert(entity.IsAlive());
-	assert(entity2.IsAlive());
-	assert(!entity3.IsAlive());
-	assert(!entity4.IsAlive());
+  entity.Get<FoodComponent>().hunger = 101;
+  entity.Get<ZombieComponent>().number = 99;
+  entity2.Get<FoodComponent>().hunger = 102;
 
-	entity2.Remove<FoodComponent>();
+  int threshold = 100;
 
-	manager.ForEachEntityWithout<FoodComponent>([&](ecs::Entity e) {
-		e.Destroy();
-	});
-	assert(entity.IsAlive());
-	assert(entity2.IsAlive());
-	manager.Refresh();
-	assert(entity.IsAlive());
-	assert(!entity2.IsAlive());
+  auto s111 = manager.EntitiesWith<ZombieComponent, FoodComponent>();
 
-	auto new_entity = manager.CopyEntity(entity);
-	// Note the late manager.Refresh() call.
+  for (auto [e, zombie, food] : s111) {
+    if (food.hunger < threshold) {
+      e.Destroy();
+    }
+  }
 
-	assert(new_entity.IsIdenticalTo(entity));
-	assert((entity.Has<FoodComponent, ZombieComponent>()));
-	assert((new_entity.Has<FoodComponent, ZombieComponent>()));
+  assert(entity.IsAlive());
+  assert(entity2.IsAlive());
+  assert(entity3.IsAlive());
+  assert(entity4.IsAlive());
+  manager.Refresh();
+  assert(entity.IsAlive());
+  assert(entity2.IsAlive());
+  assert(!entity3.IsAlive());
+  assert(!entity4.IsAlive());
 
-	auto [f1, z1] = entity.Get<FoodComponent, ZombieComponent>();
-	auto [f2, z2] = new_entity.Get<FoodComponent, ZombieComponent>();
-	assert(f1.hunger == f2.hunger);
-	assert(z1.number == 99);
-	assert(z1.number == z2.number);
+  entity2.Remove<FoodComponent>();
 
-	ecs::Entity new_entity2 = manager.CopyEntity<ZombieComponent>(entity);
-	// Note the late manager.Refresh() call.
-	assert(!new_entity2.IsIdenticalTo(entity));
-	assert((entity.Has<FoodComponent, ZombieComponent>()));
-	assert(new_entity2.Has<ZombieComponent>());
-	assert(!new_entity2.Has<FoodComponent>());
-	auto z4 = entity.Get<ZombieComponent>();
-	auto z5 = new_entity2.Get<ZombieComponent>();
-	auto& z6 = new_entity2.Get<ZombieComponent>();
-	assert(z4.number == 99);
-	assert(z4.number == z5.number);
-	assert(z5.number == z6.number);
+  manager.ForEachEntityWithout<FoodComponent>(
+      [&](ecs::Entity e) { e.Destroy(); });
+  assert(entity.IsAlive());
+  assert(entity2.IsAlive());
+  manager.Refresh();
+  assert(entity.IsAlive());
+  assert(!entity2.IsAlive());
 
-	manager.Refresh();
+  auto new_entity = manager.CopyEntity(entity);
+  // Note the late manager.Refresh() call.
 
-	assert(manager.Size() == 3); // entity, new_entity, new_entity2.
-	new_entity.Destroy();
-	assert(manager.Size() == 3); // entity, new_entity, new_entity2.
-	manager.Refresh();
-	assert(manager.Size() == 2); // entity, new_entity2.
-	auto new_entity3 = manager.CreateEntity();
-	assert(manager.Size() == 2); // entity, new_entity2, new_entity3.
-	manager.Refresh();
-	assert(manager.Size() == 3); // entity, new_entity2, new_entity3.
+  assert(new_entity.IsIdenticalTo(entity));
+  assert((entity.Has<FoodComponent, ZombieComponent>()));
+  assert((new_entity.Has<FoodComponent, ZombieComponent>()));
 
-	manager.Clear();
-	assert(manager.Size() == 0);
-	manager.Reset();
-	manager.Reserve(5);
-	manager.CreateEntity();
-	manager.CreateEntity();
-	manager.CreateEntity();
-	assert(manager.Size() == 0);
-	manager.Refresh();
-	assert(manager.Size() == 3);
-	auto new_manager = manager.Clone();
-	assert(new_manager == manager);
-	assert(new_manager.Size() == 3);
-	assert(manager.Size() == 3);
+  auto [f1, z1] = entity.Get<FoodComponent, ZombieComponent>();
+  auto [f2, z2] = new_entity.Get<FoodComponent, ZombieComponent>();
+  assert(f1.hunger == f2.hunger);
+  assert(z1.number == 99);
+  assert(z1.number == z2.number);
 
-	std::cout << "All ECS tests passed!" << std::endl;
+  ecs::Entity new_entity2 = manager.CopyEntity<ZombieComponent>(entity);
+  // Note the late manager.Refresh() call.
+  assert(!new_entity2.IsIdenticalTo(entity));
+  assert((entity.Has<FoodComponent, ZombieComponent>()));
+  assert(new_entity2.Has<ZombieComponent>());
+  assert(!new_entity2.Has<FoodComponent>());
+  auto z4 = entity.Get<ZombieComponent>();
+  auto z5 = new_entity2.Get<ZombieComponent>();
+  auto& z6 = new_entity2.Get<ZombieComponent>();
+  assert(z4.number == 99);
+  assert(z4.number == z5.number);
+  assert(z5.number == z6.number);
 
-	return true;
+  manager.Refresh();
+
+  assert(manager.Size() == 3);  // entity, new_entity, new_entity2.
+  new_entity.Destroy();
+  assert(manager.Size() == 3);  // entity, new_entity, new_entity2.
+  manager.Refresh();
+  assert(manager.Size() == 2);  // entity, new_entity2.
+  auto new_entity3 = manager.CreateEntity();
+  assert(manager.Size() == 2);  // entity, new_entity2, new_entity3.
+  manager.Refresh();
+  assert(manager.Size() == 3);  // entity, new_entity2, new_entity3.
+
+  manager.Clear();
+  assert(manager.Size() == 0);
+  manager.Reset();
+  manager.Reserve(5);
+  manager.CreateEntity();
+  manager.CreateEntity();
+  manager.CreateEntity();
+  assert(manager.Size() == 0);
+  manager.Refresh();
+  assert(manager.Size() == 3);
+  auto new_manager = manager.Clone();
+  assert(new_manager != manager);
+  assert(new_manager.Size() == 3);
+  assert(manager.Size() == 3);
+
+  std::cout << "All ECS tests passed!" << std::endl;
+
+  return true;
 }
