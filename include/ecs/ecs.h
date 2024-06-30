@@ -27,78 +27,118 @@ SOFTWARE.
 #pragma once
 
 #include <cassert>
-#include <cstdint>
 #include <deque>
 #include <memory>
 #include <type_traits>
 #include <vector>
+#include <tuple>
+#include <cstdint>
+#include <iterator>
+#include <utility>
+#include <stdexcept>
 
 namespace ecs {
 
 class Entity;
 class Manager;
 
-template <typename... Ts>
-class System;
-template <typename... Ts>
-class SystemIterator;
-
 namespace impl {
+
+namespace detail {
+template <typename Struct, typename = void, typename... T>
+struct is_direct_list_initializable_impl : std::false_type {};
+
+template <typename Struct, typename... T>
+struct is_direct_list_initializable_impl < Struct, std::void_t<decltype(Struct{ std::declval<T>()... }) > , T... > : std::true_type {};
+} // namespace detail
+
+template <typename Struct, typename... T>
+using is_direct_list_initializable = detail::is_direct_list_initializable_impl<Struct, void, T...>;
+
+template<typename Struct, typename... T>
+constexpr bool is_direct_list_initializable_v = is_direct_list_initializable<Struct, T...>::value;
+
+template <typename Struct, typename... T>
+using is_aggregate_initializable = std::conjunction<std::is_aggregate<Struct>, is_direct_list_initializable<Struct, T...>, std::negation<std::conjunction<std::bool_constant<sizeof...(T) == 1>, std::is_same<std::decay_t<std::tuple_element_t<0, std::tuple<T...>>>, Struct>>>>;
+
+template<typename Struct, typename... T>
+constexpr bool is_aggregate_initializable_v = is_aggregate_initializable<Struct, T...>::value;
+
+enum class LoopCriterion {
+	NONE,
+	WITH_COMPONENTS,
+	WITHOUT_COMPONENTS
+};
+
+template <LoopCriterion C, typename... Ts>
+class EntityContainer;
+template <LoopCriterion C, typename... Ts>
+class EntityContainerIterator;
 
 class NullEntity;
 
-using Index	  = std::size_t;
+using Index = std::uint32_t;
 using Version = std::uint32_t;
 
 inline constexpr Version null_version{ 0 };
 
-class PoolInterface {
+class AbstractPool {
 public:
-	virtual ~PoolInterface()								   = default;
-	virtual std::shared_ptr<impl::PoolInterface> Clone() const = 0;
-	virtual void Copy(Index from_entity, Index to_entity)	   = 0;
-	virtual void Clear()									   = 0;
-	virtual void Reset()									   = 0;
-	virtual bool Remove(Index entity)						   = 0;
-	virtual bool Has(Index entity) const					   = 0;
-	virtual Index GetId() const								   = 0;
+	virtual ~AbstractPool() = default;
+	virtual std::shared_ptr<AbstractPool> Clone() const = 0;
+	virtual void Copy(Index from_entity, Index to_entity) = 0;
+	virtual void Clear() = 0;
+	virtual void Reset() = 0;
+	virtual bool Remove(Index entity) = 0;
+	virtual bool Has(Index entity) const = 0;
+	virtual Index GetId() const = 0;
 };
 
 template <typename T>
-class Pool : public PoolInterface {
+class Pool : public AbstractPool {
 public:
 	Pool() = default;
 
+	// Constructor used for cloning pools
 	Pool(
-		const std::vector<T>& components, const std::vector<Index>& dense,
+		const std::vector<T>& components,
+		const std::vector<Index>& dense,
 		const std::vector<Index>& sparse
 	) :
-		components{ components }, dense{ dense }, sparse{ sparse } {}
-
-	~Pool()						 = default;
-	Pool(Pool&&)				 = default;
-	Pool& operator=(Pool&&)		 = default;
-	Pool(const Pool&)			 = default;
-	Pool& operator=(const Pool&) = default;
-
-	virtual std::shared_ptr<impl::PoolInterface> Clone() const final {
+		components{ components }, dense{ dense }, sparse{ sparse } {
 		static_assert(
 			std::is_copy_constructible_v<T>,
-			"Cannot clone component pool with a non copy-constructible component"
-		);
-		return std::make_shared<Pool<T>>(components, dense, sparse);
+			"Cannot create existing component pool with a non copy-constructible component"
+			);
+	}
+
+	~Pool() = default;
+	Pool(Pool&&) = default;
+	Pool& operator=(Pool&&) = default;
+	Pool(const Pool&) = default;
+	Pool& operator=(const Pool&) = default;
+
+	virtual std::shared_ptr<AbstractPool> Clone() const final {
+		if constexpr (std::is_copy_constructible_v<T>) {
+			return std::make_shared<Pool<T>>(components, dense, sparse);
+		} else {
+			assert(!"Cannot clone component pool with a non copy constructible component");
+			throw std::runtime_error("Cannot clone component pool with a non copy constructible component");
+			return nullptr;
+		}
 	}
 
 	virtual void Copy(Index from_entity, Index to_entity) final {
-		static_assert(
-			std::is_copy_constructible_v<T>,
-			"Cannot copy component in a pool of non copy constructible components"
-		);
-		assert(Has(from_entity));
-		if (Has(to_entity)) {
-			components[sparse[to_entity]] = components[sparse[from_entity]];
+		if constexpr (std::is_copy_constructible_v<T>) {
+			assert(Has(from_entity));
+			if (Has(to_entity)) {
+				components.emplace(components.begin() + sparse[to_entity], components[sparse[from_entity]]);
+			} else {
+				Add(to_entity, components[sparse[from_entity]]);
+			}
 		} else {
-			Add(to_entity, components[sparse[from_entity]]);
+			assert(!"Cannot copy an entity with a non copy constructible component");
+			throw std::runtime_error("Cannot copy an entity with a non copy constructible component");
 		}
 	}
 
@@ -147,11 +187,6 @@ public:
 	virtual Index GetId() const final;
 
 	const T& Get(Index entity) const {
-		/*
-		 * Debug tip:
-		 * If you ended up here and want to find out which entity triggered
-		 * this assertion, set breakpoints or follow the call stack.
-		 */
 		assert(Has(entity) && "Cannot get a component which an entity does not have");
 		return components[sparse[entity]];
 	}
@@ -163,33 +198,41 @@ public:
 	template <typename... Ts>
 	T& Add(Index entity, Ts&&... constructor_args) {
 		static_assert(
-			std::is_constructible_v<T, Ts...>,
+			std::is_constructible_v<T, Ts...> || impl::is_aggregate_initializable_v<T, Ts...>,
 			"Cannot add component which is not constructible from given arguments"
-		);
+			);
 		static_assert(
 			std::is_move_constructible_v<T>, "Cannot add component which is not move constructible"
-		);
+			);
 		static_assert(std::is_destructible_v<T>, "Cannot add component which is not destructible");
 		if (entity < sparse.size()) {			   // Entity has had the component before.
 			if (sparse[entity] < dense.size() &&
 				dense[sparse[entity]] == entity) { // Entity currently has the component.
 				// Replace the current component with a new component.
 				T& component{ components[sparse[entity]] };
-				// This approach prevents the creation of a temporary component
-				// object.
+				// This approach prevents the creation of a temporary component object.
 				component.~T();
-				new (&component) T(std::forward<Ts>(constructor_args)...);
+				if constexpr (std::is_aggregate_v<T>) {
+					new (&component) T{ std::forward<Ts>(constructor_args)... };
+				} else {
+					new (&component) T(std::forward<Ts>(constructor_args)...);
+				}
+
 				return component;
 			}
 			// Entity currently does not have the component.
 			sparse[entity] = dense.size();
 		} else {
 			// Entity has never had the component.
-			sparse.resize(entity + 1, dense.size());
+			sparse.resize(static_cast<std::size_t>(entity) + 1, dense.size());
 		}
 		// Add new component to the entity.
 		dense.push_back(entity);
-		return components.emplace_back(std::forward<Ts>(constructor_args)...);
+		if constexpr (std::is_aggregate_v<T>) {
+			return components.emplace_back(std::move(T{ std::forward<Ts>(constructor_args)... }));
+		} else {
+			return components.emplace_back(std::forward<Ts>(constructor_args)...);
+		}
 	}
 
 private:
@@ -203,11 +246,11 @@ private:
 
 class DynamicBitset {
 public:
-	DynamicBitset()								   = default;
-	~DynamicBitset()							   = default;
-	DynamicBitset(DynamicBitset&&)				   = default;
-	DynamicBitset& operator=(DynamicBitset&&)	   = default;
-	DynamicBitset(const DynamicBitset&)			   = default;
+	DynamicBitset() = default;
+	~DynamicBitset() = default;
+	DynamicBitset(DynamicBitset&&) = default;
+	DynamicBitset& operator=(DynamicBitset&&) = default;
+	DynamicBitset(const DynamicBitset&) = default;
 	DynamicBitset& operator=(const DynamicBitset&) = default;
 
 	void Set(std::size_t index, bool value = true) {
@@ -286,7 +329,7 @@ struct ManagerInstance {
 	impl::DynamicBitset entities_;
 	impl::DynamicBitset refresh_;
 	std::vector<impl::Version> versions_;
-	std::vector<std::shared_ptr<impl::PoolInterface>> pools_;
+	std::vector<std::shared_ptr<impl::AbstractPool>> pools_;
 	std::deque<impl::Index> free_entities_;
 };
 
@@ -303,10 +346,10 @@ public:
 
 	constexpr Manager([[maybe_unused]] bool initialize) {}
 
-	~Manager()						   = default;
-	Manager(Manager&&)				   = default;
-	Manager& operator=(Manager&&)	   = default;
-	Manager(const Manager&)			   = default;
+	~Manager() = default;
+	Manager(Manager&&) = default;
+	Manager& operator=(Manager&&) = default;
+	Manager(const Manager&) = default;
 	Manager& operator=(const Manager&) = default;
 
 	bool operator==(const Manager& other) const {
@@ -319,18 +362,19 @@ public:
 
 	Manager Clone() const {
 		Manager clone;
-		clone.instance_->count_			   = instance_->count_;
-		clone.instance_->next_entity_	   = instance_->next_entity_;
-		clone.instance_->entities_		   = instance_->entities_;
-		clone.instance_->refresh_		   = instance_->refresh_;
+		clone.instance_->count_ = instance_->count_;
+		clone.instance_->next_entity_ = instance_->next_entity_;
+		clone.instance_->entities_ = instance_->entities_;
+		clone.instance_->refresh_ = instance_->refresh_;
 		clone.instance_->refresh_required_ = instance_->refresh_required_;
-		clone.instance_->versions_		   = instance_->versions_;
-		clone.instance_->free_entities_	   = instance_->free_entities_;
+		clone.instance_->versions_ = instance_->versions_;
+		clone.instance_->free_entities_ = instance_->free_entities_;
 		clone.instance_->pools_.resize(instance_->pools_.size(), nullptr);
 		for (std::size_t i{ 0 }; i < instance_->pools_.size(); ++i) {
 			auto& pool{ instance_->pools_[i] };
 			if (pool != nullptr) {
-				clone.instance_->pools_[i] = pool->Clone();
+				pool = pool->Clone();
+				assert(pool != nullptr && "Cloning manager failed");
 			}
 		}
 		return clone;
@@ -375,7 +419,7 @@ public:
 			}
 			// Update entity count with net change.
 			instance_->count_ += alive;
-			instance_->count_  = instance_->count_ > dead ? instance_->count_ - dead : 0;
+			instance_->count_ = instance_->count_ > dead ? instance_->count_ - dead : 0;
 		}
 	}
 
@@ -410,9 +454,18 @@ public:
 	void ForEachEntityWithout(T function);
 
 	template <typename... Ts>
-	System<Ts...> EntitiesWith() {
-		return System<Ts...>{ *this, instance_->next_entity_,
-							  std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
+	impl::EntityContainer<impl::LoopCriterion::WITH_COMPONENTS, Ts...> EntitiesWith() {
+		return { *this, instance_->next_entity_, std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
+	}
+
+	template <typename... Ts>
+	impl::EntityContainer<impl::LoopCriterion::WITHOUT_COMPONENTS, Ts...> EntitiesWithout() {
+		return { *this, instance_->next_entity_, std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
+	}
+
+	template <typename... Ts>
+	impl::EntityContainer<impl::LoopCriterion::NONE, Ts...> Entities() {
+		return { *this, instance_->next_entity_, std::make_tuple() };
 	}
 
 	std::size_t Size() const {
@@ -428,8 +481,8 @@ public:
 	}
 
 	void Clear() {
-		instance_->count_			 = 0;
-		instance_->next_entity_		 = 0;
+		instance_->count_ = 0;
+		instance_->next_entity_ = 0;
 		instance_->refresh_required_ = false;
 
 		instance_->entities_.Clear();
@@ -459,10 +512,8 @@ public:
 	}
 
 private:
-	template <typename... Ts>
-	friend class System;
-	template <typename... Ts>
-	friend class SystemIterator;
+	template <impl::LoopCriterion C, typename... Ts>
+	friend class impl::EntityContainer;
 	friend class Entity;
 
 	template <typename... Ts>
@@ -483,24 +534,24 @@ private:
 			static_assert(
 				std::conjunction_v<std::is_copy_constructible<Ts>...>,
 				"Cannot copy entity with a component that is not copy constructible"
-			);
+				);
 			auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 			bool manager_has{
-				((std::get<std::shared_ptr<impl::Pool<Ts>>>(pools) != nullptr) && ...)
+				((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...)
 			};
 			assert(
 				manager_has && "Cannot copy entity with a component that is not "
-							   "even in the manager"
+				"even in the manager"
 			);
 			bool entity_has{ (
-				std::get<std::shared_ptr<impl::Pool<Ts>>>(pools)->template Pool<Ts>::Has(from_id) &&
+				std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Has(from_id) &&
 				...
 			) };
 			assert(entity_has && "Cannot copy entity with a component that it does not have");
-			(std::get<std::shared_ptr<impl::Pool<Ts>>>(pools)->template Pool<Ts>::Copy(
-				 from_id, to_id
-			 ),
-			 ...);
+			(std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Copy(
+				from_id, to_id
+			),
+				...);
 		} else { // Copy all components.
 			for (auto& pool : instance_->pools_) {
 				if (pool != nullptr && pool->Has(from_id)) {
@@ -564,10 +615,10 @@ private:
 
 	bool IsAlive(impl::Index entity, impl::Version version) const {
 		return version != impl::null_version && entity < instance_->versions_.size() &&
-			   instance_->versions_[entity] == version && entity < instance_->entities_.Size() &&
-			   // Entity considered currently alive or entity marked
-			   // for creation/deletion but not yet created/deleted.
-			   (instance_->entities_[entity] || instance_->refresh_[entity]);
+			instance_->versions_[entity] == version && entity < instance_->entities_.Size() &&
+			// Entity considered currently alive or entity marked
+			// for creation/deletion but not yet created/deleted.
+			(instance_->entities_[entity] || instance_->refresh_[entity]);
 	}
 
 	bool IsActivated(impl::Index entity) const {
@@ -619,23 +670,23 @@ private:
 	}
 
 	template <typename T>
-	const std::shared_ptr<impl::Pool<T>> GetPool(impl::Index component) const {
+	const impl::Pool<T>* GetPool(impl::Index component) const {
 		assert(component == GetId<T>() && "GetPool mismatch with component id");
 		if (component < instance_->pools_.size()) {
 			const auto& pool = instance_->pools_[component];
 			// This is nullptr if the pool does not exist in the manager.
-			return std::shared_ptr<impl::Pool<T>>{ pool, static_cast<impl::Pool<T>*>(pool.get()) };
+			return static_cast<impl::Pool<T>*>(pool.get());
 		}
 		return nullptr;
 	}
 
 	template <typename T>
-	std::shared_ptr<impl::Pool<T>> GetPool(impl::Index component) {
+	impl::Pool<T>* GetPool(impl::Index component) {
 		assert(component == GetId<T>() && "GetPool mismatch with component id");
 		if (component < instance_->pools_.size()) {
 			auto& pool = instance_->pools_[component];
 			// This is nullptr if the pool does not exist in the manager.
-			return std::shared_ptr<impl::Pool<T>>{ pool, static_cast<impl::Pool<T>*>(pool.get()) };
+			return static_cast<impl::Pool<T>*>(pool.get());
 		}
 		return nullptr;
 	}
@@ -657,12 +708,12 @@ private:
 		} else {
 			const auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 			assert(
-				((std::get<std::shared_ptr<impl::Pool<Ts>>>(pools) != nullptr) && ...) &&
+				((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...) &&
 				"Manager does not have at least one of the requested components"
 			);
 			return std::forward_as_tuple<const Ts&...>((
-				std::get<std::shared_ptr<impl::Pool<Ts>>>(pools)->template Pool<Ts>::Get(entity)
-			)...);
+				std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity)
+				)...);
 		}
 	}
 
@@ -675,12 +726,12 @@ private:
 		} else {
 			auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 			assert(
-				((std::get<std::shared_ptr<impl::Pool<Ts>>>(pools) != nullptr) && ...) &&
+				((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...) &&
 				"Manager does not have at least one of the requested components"
 			);
 			return std::forward_as_tuple<Ts&...>((
-				std::get<std::shared_ptr<impl::Pool<Ts>>>(pools)->template Pool<Ts>::Get(entity)
-			)...);
+				std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity)
+				)...);
 		}
 	}
 
@@ -695,10 +746,12 @@ private:
 		if (component >= instance_->pools_.size()) {
 			instance_->pools_.resize(static_cast<std::size_t>(component) + 1, nullptr);
 		}
-		std::shared_ptr<impl::Pool<T>> pool{ GetPool<T>(component) };
+		impl::Pool<T>* pool{ GetPool<T>(component) };
 		if (pool == nullptr) {
-			pool						 = std::make_shared<impl::Pool<T>>();
-			instance_->pools_[component] = pool;
+			std::shared_ptr<impl::Pool<T>> new_pool = std::make_shared<impl::Pool<T>>();
+			assert(component < instance_->pools_.size() && "Component index out of range");
+			instance_->pools_[component] = new_pool;
+			pool = new_pool.get();
 		}
 		assert(pool != nullptr && "Could not create new component pool correctly");
 		return pool->Add(entity, std::forward<Ts>(constructor_args)...);
@@ -723,161 +776,179 @@ private:
 	std::shared_ptr<impl::ManagerInstance> instance_;
 };
 
-template <typename... Ts>
-class SystemIterator {
+namespace impl {
+
+template <LoopCriterion CRITERION, typename... Ts>
+class EntityContainerIterator {
 public:
 	using iterator_category = std::forward_iterator_tag;
-	// TODO: Check that this is the case since entities do not have regular
-	// distance
-	using difference_type  = std::ptrdiff_t;
-	using value_type	   = impl::Index;
-	using dereference_type = std::tuple<Entity, Ts&...>;
-	using access_type	   = value_type;
+	using difference_type = std::ptrdiff_t;
+	using value_type = Index;
+	using access_type = value_type;
 
-	dereference_type operator*() {
-		assert(!IncorrectEntity() && "No entity with given components");
-		assert(WithinEntityLimit() && "Out-of-range entity index");
-		assert(!IsMaxEntity() && "Cannot dereference system iterator end");
-		return GetComponentTuple();
+	auto operator*() {
+		return entity_container_.GetComponentTuple(entity_);
 	}
 
 	access_type operator->() {
-		assert(!IncorrectEntity() && "No entity with given components");
-		assert(WithinEntityLimit() && "Out-of-range entity index");
-		assert(!IsMaxEntity() && "Cannot dereference system iterator end");
+		assert(entity_container_.EntityMeetsCriteria(entity_) && "No entity with given components");
+		assert(entity_container_.EntityWithinLimit(entity_) && "Out-of-range entity index");
+		assert(!entity_container_.IsMaxEntity(entity_) && "Cannot dereference entity container iterator end");
 		return entity_;
 	}
 
-	SystemIterator& operator++() {
+	EntityContainerIterator& operator++() {
 		do {
 			entity_++;
 		} while (ShouldIncrement());
 		return *this;
 	}
 
-	SystemIterator operator++(int) {
-		SystemIterator tmp = *this;
+	EntityContainerIterator operator++(int) {
+		EntityContainerIterator tmp = *this;
 		++(*this);
 		return tmp;
 	}
 
-	friend bool operator==(const SystemIterator& a, const SystemIterator& b) {
+	friend bool operator==(const EntityContainerIterator& a, const EntityContainerIterator& b) {
 		return a.entity_ == b.entity_;
 	};
 
-	friend bool operator!=(const SystemIterator& a, const SystemIterator& b) {
+	friend bool operator!=(const EntityContainerIterator& a, const EntityContainerIterator& b) {
 		return a.entity_ != b.entity_;
 	};
 
 private:
-	SystemIterator(
-		impl::Index entity, const Manager& manager, impl::Index max_entity,
-		std::tuple<std::shared_ptr<impl::Pool<Ts>>...>& pools
+	bool ShouldIncrement() const {
+		return entity_container_.EntityWithinLimit(entity_) && !entity_container_.EntityMeetsCriteria(entity_);
+	}
+
+	EntityContainerIterator(
+		Index entity, EntityContainer<CRITERION, Ts...>& entity_container
 	) :
-		entity_(entity), manager_{ manager }, max_entity_{ max_entity }, pools_{ pools } {
+		entity_(entity), entity_container_{ entity_container } {
 		if (ShouldIncrement()) {
 			this->operator++();
 		}
-		if (!IsMaxEntity()) {
+		if (!entity_container_.IsMaxEntity(entity_)) {
 			assert(
-				WithinEntityLimit() &&
-				"Cannot create system iterator with out-of-range entity index"
+				entity_container_.EntityWithinLimit(entity_) &&
+				"Cannot create entity container iterator with out-of-range entity index"
 			);
 		}
 	}
-
-	bool ShouldIncrement() const {
-		return IncorrectEntity() && WithinEntityLimit();
-	}
-
-	bool IsMaxEntity() const {
-		return entity_ == max_entity_;
-	}
-
-	bool WithinEntityLimit() const {
-		return entity_ < max_entity_;
-	}
-
-	dereference_type GetComponentTuple() {
-		using namespace impl;
-		assert(manager_.IsValid() && "Cannot deference system with destroyed manager");
-		assert(
-			((std::get<std::shared_ptr<impl::Pool<Ts>>>(pools_) != nullptr) && ...) &&
-			"Component pools cannot be destroyed while looping through entities"
-		);
-		return dereference_type(
-			Entity{ entity_, manager_.GetVersion(entity_), manager_ },
-			(std::get<std::shared_ptr<impl::Pool<Ts>>>(pools_)->template Pool<Ts>::Get(entity_))...
-		);
-	}
-
-	bool IncorrectEntity() const {
-		using namespace impl;
-		assert(manager_.IsValid() && "Manager cannot be destroyed while looping through entities");
-		bool pool_is_null{
-			((std::get<std::shared_ptr<impl::Pool<Ts>>>(pools_) == nullptr) || ...)
-		};
-		if (pool_is_null) {
-			return true;
-		}
-		bool activated{ manager_.IsActivated(entity_) };
-		if (!activated) {
-			return true;
-		}
-		bool missing_component{
-			(!std::get<std::shared_ptr<impl::Pool<Ts>>>(pools_)->template Pool<Ts>::Has(entity_) ||
-			 ...)
-		};
-		if (missing_component) {
-			return true;
-		}
-		return false;
-	}
-
 private:
-	template <typename... S>
-	friend class System;
+	template <LoopCriterion C, typename... S>
+	friend class EntityContainer;
 
-	impl::Index entity_{ 0 };
-	Manager manager_{ false };
-	impl::Index max_entity_{ 0 };
-	std::tuple<std::shared_ptr<impl::Pool<Ts>>...>& pools_;
+	Index entity_{ 0 };
+	EntityContainer<CRITERION, Ts...>& entity_container_;
 };
 
-template <typename... Ts>
-class System {
+template <LoopCriterion CRITERION, typename... Ts>
+class EntityContainer {
 public:
-	SystemIterator<Ts...> begin() {
-		return SystemIterator<Ts...>(0, manager_, max_entity_, pools_);
+	EntityContainerIterator<CRITERION, Ts...> begin() {
+		return { 0, *this };
 	}
 
-	SystemIterator<Ts...> end() {
-		return SystemIterator<Ts...>(max_entity_, manager_, max_entity_, pools_);
+	EntityContainerIterator<CRITERION, Ts...> end() {
+		return { max_entity_, *this };
 	}
 
 private:
 	friend class Manager;
+	template <LoopCriterion C, typename... S>
+	friend class EntityContainerIterator;
 
-	System(
-		const Manager& manager, impl::Index next_entity,
-		std::tuple<std::shared_ptr<impl::Pool<Ts>>...>&& pools
-	) :
-		manager_{ manager }, max_entity_{ next_entity }, pools_{ pools } {}
+	bool EntityMeetsCriteria(Index entity) const {
+		assert(manager_.IsValid() && "Manager cannot be destroyed while looping through entities");
+		bool activated{ manager_.IsActivated(entity) };
+
+		if (!activated) {
+			return false;
+		}
+
+		if constexpr (CRITERION == LoopCriterion::NONE) {
+			return true;
+		}
+
+		bool pool_is_null{
+			((std::get<Pool<Ts>*>(pools_) == nullptr) || ...)
+		};
+
+		if constexpr (CRITERION == LoopCriterion::WITH_COMPONENTS) {
+			if (pool_is_null) {
+				return false;
+			}
+		} else if constexpr (CRITERION == LoopCriterion::WITHOUT_COMPONENTS) {
+			if (pool_is_null) {
+				return true;
+			}
+		}
+
+		bool missing_component{
+			(!std::get<Pool<Ts>*>(pools_)->template Pool<Ts>::Has(entity) ||
+			 ...)
+		};
+
+		bool meets_criterion = false;
+
+		if constexpr (CRITERION == LoopCriterion::WITH_COMPONENTS) {
+			meets_criterion = !missing_component;
+		} else if constexpr (CRITERION == LoopCriterion::WITHOUT_COMPONENTS) {
+			meets_criterion = missing_component;
+		}
+
+		return meets_criterion;
+	}
+
+	bool IsMaxEntity(Index entity) const {
+		return entity == max_entity_;
+	}
+
+	bool EntityWithinLimit(Index entity) const {
+		return entity < max_entity_;
+	}
+
+	auto GetComponentTuple(Index entity) {
+		assert(EntityWithinLimit(entity) && "Out-of-range entity index");
+		assert(!IsMaxEntity(entity) && "Cannot dereference entity container iterator end");
+		assert(EntityMeetsCriteria(entity) && "No entity with given components");
+		assert(manager_.IsValid() && "Cannot deference entity container with destroyed manager");
+		if constexpr (CRITERION == LoopCriterion::WITH_COMPONENTS) {
+			assert(
+				((std::get<Pool<Ts>*>(pools_) != nullptr) && ...) &&
+				"Component pools cannot be destroyed while looping through entities"
+			);
+			return std::tuple<Entity, Ts&...>(
+				Entity{ entity, manager_.GetVersion(entity), &manager_ },
+				(std::get<Pool<Ts>*>(pools_)->template Pool<Ts>::Get(entity))...
+			);
+		} else {
+			return Entity{ entity, manager_.GetVersion(entity), &manager_ };
+		}
+	}
+
+	EntityContainer(Manager& manager, Index max_entity, std::tuple<Pool<Ts>*...>&& pools) :
+		manager_{ manager }, max_entity_{ max_entity }, pools_{ pools } {}
 
 	Manager manager_{ false };
-	impl::Index max_entity_{ 0 };
-	std::tuple<std::shared_ptr<impl::Pool<Ts>>...> pools_;
+	Index max_entity_{ 0 };
+	std::tuple<Pool<Ts>*...> pools_;
 };
+
+} // namespace impl
 
 class Entity {
 public:
 	constexpr Entity() = default;
-	~Entity()		   = default;
+	~Entity() = default;
 
 	Entity& operator=(const Entity&) = default;
-	Entity(const Entity&)			 = default;
-	Entity& operator=(Entity&&)		 = default;
-	Entity(Entity&&)				 = default;
+	Entity(const Entity&) = default;
+	Entity& operator=(Entity&&) = default;
+	Entity(Entity&&) = default;
 
 	bool operator==(const Entity& e) const {
 		return entity_ == e.entity_ && version_ == e.version_ && manager_ == e.manager_;
@@ -890,57 +961,68 @@ public:
 	template <typename T, typename... Ts>
 	T& Add(Ts&&... constructor_args) {
 		assert(IsAlive() && "Cannot add component to dead or null entity");
-		return manager_.Add<T>(entity_, manager_.GetId<T>(), std::forward<Ts>(constructor_args)...);
+		return manager_->Add<T>(entity_, manager_->GetId<T>(), std::forward<Ts>(constructor_args)...);
 	}
 
 	template <typename... Ts>
 	void Remove() {
 		assert(IsAlive() && "Cannot remove component(s) from dead or null entity");
-		(manager_.Remove<Ts>(entity_, manager_.GetId<Ts>()), ...);
+		(manager_->Remove<Ts>(entity_, manager_->GetId<Ts>()), ...);
 	}
 
 	template <typename... Ts>
 	bool Has() const {
 		assert(IsAlive() && "Cannot check if dead or null entity has component(s)");
-		return IsAlive() && (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) && ...);
+		return (manager_->Has<Ts>(entity_, manager_->GetId<Ts>()) && ...);
 	}
 
 	template <typename... Ts>
 	bool HasAny() const {
 		assert(IsAlive() && "Cannot check if dead or null entity has any component(s)");
-		return IsAlive() && (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) || ...);
+		return (manager_->Has<Ts>(entity_, manager_->GetId<Ts>()) || ...);
 	}
 
 	template <typename... Ts>
 	decltype(auto) Get() const {
 		assert(IsAlive() && "Cannot get component(s) from dead or null entity");
-		return manager_.Get<Ts...>(entity_);
+		return manager_->Get<Ts...>(entity_);
 	}
 
 	template <typename... Ts>
 	decltype(auto) Get() {
 		assert(IsAlive() && "Cannot get component(s) from dead or null entity");
-		return manager_.Get<Ts...>(entity_);
+		return manager_->Get<Ts...>(entity_);
 	}
 
 	void Clear() {
 		assert(IsAlive() && "Cannot clear components of dead or null entity");
-		manager_.ClearEntity(entity_);
+		manager_->ClearEntity(entity_);
 	}
 
 	bool IsAlive() const {
-		return manager_.IsValid() && manager_.IsAlive(entity_, version_);
+		return manager_ != nullptr &&
+			manager_->IsValid() &&
+			manager_->IsAlive(entity_, version_);
 	}
 
 	void Destroy() {
-		if (IsAlive()) {
-			manager_.DestroyEntity(entity_, version_);
+		assert(manager_ != nullptr);
+		assert(manager_->IsValid() && "Cannot destroy entity of invalid manager");
+		if (manager_->IsAlive(entity_, version_)) {
+			manager_->DestroyEntity(entity_, version_);
 		}
 	}
 
-	Manager GetManager() {
-		assert(manager_.IsValid() && "Cannot return parent manager of a null entity");
-		return manager_;
+	Manager& GetManager() {
+		assert(manager_ != nullptr);
+		assert(manager_->IsValid() && "Cannot return parent manager of a null entity");
+		return *manager_;
+	}
+
+	const Manager& GetManager() const {
+		assert(manager_ != nullptr);
+		assert(manager_->IsValid() && "Cannot return parent manager of a null entity");
+		return *manager_;
 	}
 
 	bool IsIdenticalTo(const Entity& e) const;
@@ -949,15 +1031,15 @@ private:
 	friend class Manager;
 	friend class impl::NullEntity;
 	friend struct std::hash<Entity>;
-	template <typename... Ts>
-	friend class SystemIterator;
+	template <impl::LoopCriterion C, typename... Ts>
+	friend class impl::EntityContainer;
 
-	Entity(impl::Index entity, impl::Version version, const Manager& manager) :
+	Entity(impl::Index entity, impl::Version version, Manager* manager) :
 		entity_{ entity }, version_{ version }, manager_{ manager } {}
 
 	impl::Index entity_{ 0 };
 	impl::Version version_{ impl::null_version };
-	Manager manager_{ false };
+	Manager* manager_{ nullptr };
 };
 
 inline const Entity null;
@@ -969,8 +1051,9 @@ inline impl::Index impl::Pool<T>::GetId() const {
 
 bool Entity::IsIdenticalTo(const Entity& e) const {
 	return *this == e || (*this == ecs::null && e == ecs::null) ||
-		   (*this != ecs::null && e != ecs::null && manager_ == e.manager_ && manager_.IsValid() &&
-			entity_ != e.entity_ && manager_.Match(entity_, e.entity_));
+		(*this != ecs::null && e != ecs::null && manager_ != nullptr &&
+			manager_ == e.manager_ && manager_->IsValid() &&
+			entity_ != e.entity_ && manager_->Match(entity_, e.entity_));
 }
 
 inline Entity Manager::CreateEntity() {
@@ -978,7 +1061,7 @@ inline Entity Manager::CreateEntity() {
 	impl::Version version{ impl::null_version };
 	GenerateEntity(entity, version);
 	assert(version != impl::null_version && "Failed to create new entity in manager");
-	return { entity, version, *this };
+	return { entity, version, this };
 }
 
 template <typename... Ts>
@@ -1006,7 +1089,7 @@ inline void Manager::ForEachEntity(T function) {
 	);
 	for (impl::Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
 		if (instance_->entities_[entity]) {
-			function(Entity{ entity, instance_->versions_[entity], *this });
+			function(Entity{ entity, instance_->versions_[entity], this });
 		}
 	}
 }
@@ -1015,8 +1098,8 @@ template <typename... Ts, typename T>
 inline void Manager::ForEachEntityWith(T function) {
 	static_assert(
 		sizeof...(Ts) > 0, "Cannot loop through each entity without providing "
-						   "at least one component type"
-	);
+		"at least one component type"
+		);
 	assert(
 		instance_->entities_.Size() == instance_->versions_.size() &&
 		"Cannot loop through manager entities if and version and entity "
@@ -1028,15 +1111,15 @@ inline void Manager::ForEachEntityWith(T function) {
 	);
 	auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 	// Check that none of the requested component pools are nullptrs.
-	if (((std::get<std::shared_ptr<impl::Pool<Ts>>>(pools) != nullptr) && ...)) {
+	if (((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...)) {
 		for (impl::Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
 			// If entity is alive and has the components, call lambda on it.
 			if (instance_->entities_[entity] &&
-				(std::get<std::shared_ptr<impl::Pool<Ts>>>(pools)->template Pool<Ts>::Has(entity) &&
-				 ...)) {
+				(std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Has(entity) &&
+					...)) {
 				function(
-					Entity{ entity, instance_->versions_[entity], *this },
-					(std::get<std::shared_ptr<impl::Pool<Ts>>>(pools)->template Pool<Ts>::Get(entity
+					Entity{ entity, instance_->versions_[entity], this },
+					(std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity
 					))...
 				);
 			}
@@ -1057,15 +1140,15 @@ inline void Manager::ForEachEntityWithout(T function) {
 	);
 	auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 	// Check that none of the requested component pools are nullptrs.
-	if (((std::get<std::shared_ptr<impl::Pool<Ts>>>(pools) != nullptr) && ...)) {
+	if (((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...)) {
 		for (impl::Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
 			// If entity is alive and does not have one of the components, call
 			// lambda on it.
 			if (instance_->entities_[entity] &&
-				(!std::get<std::shared_ptr<impl::Pool<Ts>>>(pools)->template Pool<Ts>::Has(entity
-				 ) ||
-				 ...)) {
-				function(Entity{ entity, instance_->versions_[entity], *this });
+				(!std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Has(entity
+				) ||
+					...)) {
+				function(Entity{ entity, instance_->versions_[entity], this });
 			}
 		}
 	}
@@ -1080,8 +1163,9 @@ struct hash<ecs::Entity> {
 	std::size_t operator()(const ecs::Entity& e) const {
 		// Source: https://stackoverflow.com/a/17017281
 		std::size_t hash{ 17 };
-		assert(e.manager_.IsValid() && "Cannot hash entity with manager that is nullptr");
-		hash = hash * 31 + std::hash<const ecs::Manager*>()(&e.manager_);
+		assert(e.manager_ != nullptr);
+		assert(e.manager_->IsValid() && "Cannot hash entity with manager that is nullptr");
+		hash = hash * 31 + std::hash<const ecs::Manager*>()(e.manager_);
 		hash = hash * 31 + std::hash<ecs::impl::Index>()(e.entity_);
 		hash = hash * 31 + std::hash<ecs::impl::Version>()(e.version_);
 		return hash;
