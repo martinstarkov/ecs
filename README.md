@@ -36,10 +36,12 @@ The core storage unit of entities and components is the `ecs::Manager` class, cr
 ecs::Manager manager;
 ```
 
-Managers can be moved but not copied. This prevents accidental copying as it is expensive and some users may not be used to move semantics. ```manager.Clone()``` should be used if the user wishes to duplicate a manager.
+Constructing a manager in this way allocates an internal manager instance (as a shared pointer). This means that copying a manager via traditional copy construction will simply create a new handle (strong reference) to the existing manager (i.e. they will share memory). This prevents accidental copying of managers, which can be expensive, and allows for non-copy constructible components to exist in a manager. ```manager.Clone()``` should be used if the user wishes to clone the contents of a manager. If one wishes to create a manager handle without allocating a new internal manager instance, simply use:
+```c++
+ecs::Manager manager{ false }; // no allocations: useful when storing manager handles in classes.
+```
 
-Manager functions are explained at the end of this documentation.
-
+The remaining manager utility functions are explained at the end of this documentation.
 
 ## Entities
 
@@ -155,9 +157,14 @@ Nothing happens if the entity did not have the component type.
 
 Systems represent the logic of how grouped entities are manipulated. In this implementation, they are simply lambdas whose arguments are filled with entity handles and components.
 
-For instance, each entity can be looped through:
+For instance, each entity can be looped through in two ways:
 
 ```c++
+for (auto entity : manager.Entities()) {
+    entity.Add<ZombieComponent>();
+    entity.Add<FoodComponent>();
+}
+// or alternatively:
 manager.ForEachEntity([](ecs::Entity entity) {
     entity.Add<ZombieComponent>();
     entity.Add<FoodComponent>();
@@ -167,6 +174,12 @@ manager.ForEachEntity([](ecs::Entity entity) {
 Or only entities with specific components:
 
 ```c++
+for (auto [entity, zombie, food] : manager.EntitiesWith<ZombieComponent, FoodComponent>()) {
+    if (food.amount < threshold) {
+        // ...
+    }
+}
+// or alternatively:
 manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
     [&](ecs::Entity entity, auto& zombie, auto& food) {
     if (food.amount < threshold) {
@@ -178,6 +191,10 @@ manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
 Or only entities without specific components:
 
 ```c++
+for (auto entity : manager.EntitiesWithout<FoodComponent>()) {
+    entity.Destroy();
+}
+// or alternatively:
 manager.ForEachEntityWithout<FoodComponent>([&](ecs::Entity entity) {
     entity.Destroy();
 });
@@ -238,7 +255,7 @@ The user can reserve entity capacity in advance with:
 manager.Reserve(5); // 5 entities.
 ```
 
-As mentioned previously, managers can only be duplicated like so:
+Managers can be duplicated as follows:
 
 ```c++
 auto new_manager = manager.Clone();
@@ -246,7 +263,6 @@ auto new_manager = manager.Clone();
 // manager comparison is slow and inadvisable for large managers.
 assert(new_manager == manager); 
 ```
-
 
 ## Thanks to
 
