@@ -27,6 +27,7 @@ struct AlienComponent {
 
 struct ZombieComponent {
 	ZombieComponent(int number) : number{ number } {}
+
 	/*ZombieComponent(ZombieComponent&&) = default;
 	ZombieComponent& operator=(ZombieComponent&&) = default;
 	ZombieComponent(const ZombieComponent&) = delete;
@@ -45,7 +46,7 @@ bool TestECS() {
 	std::cout << "Starting ECS tests..." << std::endl;
 
 	ecs::Manager manager;
-	ecs::Entity e1 = manager.CreateEntity();
+	ecs::Entity e1	 = manager.CreateEntity();
 	ecs::Entity from = manager.CreateEntity();
 	manager.Refresh();
 	ecs::Entity to = manager.CreateEntity();
@@ -71,11 +72,11 @@ bool TestECS() {
 	ecs::Entity entity = manager.CreateEntity();
 	assert(manager == entity.GetManager());
 
-	int age = 22;
+	int age		  = 22;
 	double height = 180.5;
 
-	HumanComponent& human = entity.Add<HumanComponent>(age, height);
-	human.height += 0.5;
+	HumanComponent& human  = entity.Add<HumanComponent>(age, height);
+	human.height		  += 0.5;
 
 	bool is_human = entity.Has<HumanComponent>();
 	assert(is_human);
@@ -85,8 +86,8 @@ bool TestECS() {
 	is_cyborg = entity.Has<HumanComponent, RobotComponent>();
 	assert(is_cyborg);
 
-	HumanComponent& human5 = entity.Get<HumanComponent>();
-	human5.age += 1;
+	HumanComponent& human5	= entity.Get<HumanComponent>();
+	human5.age			   += 1;
 	assert(human5.age == 22 + 1);
 
 	assert((entity.Has<RobotComponent, HumanComponent>()));
@@ -108,9 +109,9 @@ bool TestECS() {
 
 	manager.Refresh();
 
-	for (auto entity : manager.Entities()) {
-		entity.Add<ZombieComponent>(1);
-		entity.Add<FoodComponent>(1);
+	for (auto e : manager.Entities()) {
+		e.Add<ZombieComponent>(1);
+		e.Add<FoodComponent>(1);
 	}
 
 	assert(entity.Has<FoodComponent>());
@@ -122,9 +123,9 @@ bool TestECS() {
 	assert(entity4.Has<FoodComponent>());
 	assert(entity4.Has<ZombieComponent>());
 
-	entity.Get<FoodComponent>().hunger = 101;
+	entity.Get<FoodComponent>().hunger	 = 101;
 	entity.Get<ZombieComponent>().number = 99;
-	entity2.Get<FoodComponent>().hunger = 102;
+	entity2.Get<FoodComponent>().hunger	 = 102;
 
 	int threshold = 100;
 
@@ -191,15 +192,15 @@ bool TestECS() {
 
 	manager.Refresh();
 
-	assert(manager.Size() == 3);  // entity, new_entity, new_entity2.
+	assert(manager.Size() == 3); // entity, new_entity, new_entity2.
 	new_entity.Destroy();
-	assert(manager.Size() == 3);  // entity, new_entity, new_entity2.
+	assert(manager.Size() == 3); // entity, new_entity, new_entity2.
 	manager.Refresh();
-	assert(manager.Size() == 2);  // entity, new_entity2.
+	assert(manager.Size() == 2); // entity, new_entity2.
 	auto new_entity3 = manager.CreateEntity();
-	assert(manager.Size() == 2);  // entity, new_entity2, new_entity3.
+	assert(manager.Size() == 2); // entity, new_entity2, new_entity3.
 	manager.Refresh();
-	assert(manager.Size() == 3);  // entity, new_entity2, new_entity3.
+	assert(manager.Size() == 3); // entity, new_entity2, new_entity3.
 
 	manager.Clear();
 	assert(manager.Size() == 0);
@@ -238,39 +239,49 @@ void ProfileECS() {
 		ecs::Manager manager;
 
 		auto start = std::chrono::high_resolution_clock::now();
-		auto stop = std::chrono::high_resolution_clock::now();
+		auto stop  = std::chrono::high_resolution_clock::now();
 		for (std::size_t i = 0; i < entity_count; i++) {
 			manager.CreateEntity();
 		}
 
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Creating " << entity_count << " entities took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Creating " << entity_count << " entities took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
 		manager.Refresh();
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Refreshing " << entity_count << " entities took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Refreshing " << entity_count << " entities took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
 		for (auto e : manager.Entities()) {
 			e.Add<ProfileTestComponent>(3, 3);
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Adding (auto for loop) " << entity_count << " components took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Adding (auto for loop) " << entity_count << " components took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
 		for (auto [e, profile] : manager.EntitiesWith<ProfileTestComponent>()) {
 			profile.x += 1;
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Incrementing (auto for loop) " << entity_count << " component members took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Incrementing (auto for loop) " << entity_count << " component members took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
 		for (auto e : manager.Entities()) {
 			e.Remove<ProfileTestComponent>();
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Removing (auto for loop) " << entity_count << " components took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Removing (auto for loop) " << entity_count << " components took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
 		for (auto e : manager.Entities()) {
@@ -280,56 +291,60 @@ void ProfileECS() {
 			e.Add<ProfileTestComponent>(5, 5);
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "2x re-adding (auto for loop) " << entity_count << " components took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "2x re-adding (auto for loop) " << entity_count << " components took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 	} else {
 		std::cout << "Using for each functions for profiling" << std::endl;
 
 		ecs::Manager manager2;
 
 		auto start = std::chrono::high_resolution_clock::now();
-		auto stop = std::chrono::high_resolution_clock::now();
+		auto stop  = std::chrono::high_resolution_clock::now();
 		for (std::size_t i = 0; i < entity_count; i++) {
 			manager2.CreateEntity();
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Creating " << entity_count << " entities took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Creating " << entity_count << " entities took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
 		manager2.Refresh();
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Refreshing " << entity_count << " entities took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Refreshing " << entity_count << " entities took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) {
-			e.Add<ProfileTestComponent>(3, 3);
-		});
+		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(3, 3); });
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Adding (for each) " << entity_count << " components took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Adding (for each) " << entity_count << " components took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntityWith<ProfileTestComponent>(
-			[&](auto e, ProfileTestComponent& profile) {
-			profile.x += 1;
-		});
+		manager2.ForEachEntityWith<ProfileTestComponent>([&](auto e, ProfileTestComponent& profile
+														 ) { profile.x += 1; });
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Incrementing (for each) " << entity_count << " component members took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Incrementing (for each) " << entity_count << " component members took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) {
-			e.Remove<ProfileTestComponent>();
-		});
+		manager2.ForEachEntity([](auto e) { e.Remove<ProfileTestComponent>(); });
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Removing (for each) " << entity_count << " components took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "Removing (for each) " << entity_count << " components took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) {
-			e.Add<ProfileTestComponent>(4, 4);
-		});
-		manager2.ForEachEntity([](auto e) {
-			e.Add<ProfileTestComponent>(5, 5);
-		});
+		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(4, 4); });
+		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(5, 5); });
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "2x re-adding (for each) " << entity_count << " components took " << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+		std::cout << "2x re-adding (for each) " << entity_count << " components took "
+				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
+				  << " ms" << std::endl;
 	}
 
 	std::cout << "Stopping ECS profiling" << std::endl;
