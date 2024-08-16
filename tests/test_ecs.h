@@ -317,7 +317,7 @@ void ProfileECS() {
 				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(3, 3); });
+		manager2.ForEachEntity([](auto e) { e.template Add<ProfileTestComponent>(3, 3); });
 		stop = std::chrono::high_resolution_clock::now();
 		std::cout << "Adding (for each) " << entity_count << " components took "
 				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
@@ -332,15 +332,15 @@ void ProfileECS() {
 				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) { e.Remove<ProfileTestComponent>(); });
+		manager2.ForEachEntity([](auto e) { e.template Remove<ProfileTestComponent>(); });
 		stop = std::chrono::high_resolution_clock::now();
 		std::cout << "Removing (for each) " << entity_count << " components took "
 				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
 				  << " ms" << std::endl;
 
 		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(4, 4); });
-		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(5, 5); });
+		manager2.ForEachEntity([](auto e) { e.template Add<ProfileTestComponent>(4, 4); });
+		manager2.ForEachEntity([](auto e) { e.template Add<ProfileTestComponent>(5, 5); });
 		stop = std::chrono::high_resolution_clock::now();
 		std::cout << "2x re-adding (for each) " << entity_count << " components took "
 				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
