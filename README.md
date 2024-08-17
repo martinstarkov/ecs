@@ -171,7 +171,7 @@ manager.ForEachEntity([](ecs::Entity entity) {
 });
 ```
 
-Or only entities with specific components:
+Or only entities with specific components (i.e. an entity has all listed component types):
 
 ```c++
 for (auto [entity, zombie, food] : manager.EntitiesWith<ZombieComponent, FoodComponent>()) {
@@ -188,7 +188,7 @@ manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
 });
 ```
 
-Or only entities without specific components:
+Or only entities without specific components (i.e. an entity is missing all listed component types):
 
 ```c++
 for (auto entity : manager.EntitiesWithout<FoodComponent>()) {
