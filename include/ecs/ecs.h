@@ -57,14 +57,12 @@ template <LoopCriterion C, typename TC, typename... Ts>
 class EntityContainerIterator;
 
 namespace detail {
-
 template <typename Struct, typename = void, typename... T>
 struct is_direct_list_initializable_impl : std::false_type {};
 
 template <typename Struct, typename... T>
 struct is_direct_list_initializable_impl<
 	Struct, std::void_t<decltype(Struct{ std::declval<T>()... })>, T...> : std::true_type {};
-
 } // namespace detail
 
 template <typename Struct, typename... T>
@@ -80,8 +78,16 @@ using is_aggregate_initializable = std::conjunction<
 		std::bool_constant<sizeof...(T) == 1>,
 		std::is_same<std::decay_t<std::tuple_element_t<0, std::tuple<T...>>>, Struct>>>>;
 
+template <typename Struct, typename = void, typename... T>
+struct aggregate_initializable : std::false_type {};
+
 template <typename Struct, typename... T>
-constexpr bool is_aggregate_initializable_v = is_aggregate_initializable<Struct, T...>::value;
+struct aggregate_initializable<Struct, T...> {
+	constexpr static const bool value{ is_aggregate_initializable<Struct, T...>::value };
+};
+
+template <typename Struct, typename... T>
+constexpr bool is_aggregate_initializable_v = aggregate_initializable<Struct, T...>::value;
 
 class NullEntity;
 
@@ -210,7 +216,8 @@ public:
 	template <typename... Ts>
 	T& Add(Index entity, Ts&&... constructor_args) {
 		static_assert(
-			std::is_constructible_v<T, Ts...> || impl::is_aggregate_initializable_v<T, Ts...>,
+			std::is_constructible_v<T, Ts...> ||
+				(sizeof...(Ts) > 0 && impl::is_aggregate_initializable_v<T, Ts...>),
 			"Cannot add component which is not constructible from given arguments"
 		);
 		static_assert(
@@ -712,6 +719,7 @@ private:
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get(impl::Index entity) const {
+		using namespace impl;
 		if constexpr (sizeof...(Ts) == 1) {
 			const auto pool{ GetPool<Ts...>(GetId<Ts...>()) };
 			assert(pool != nullptr && "Manager does not have the requested component");
@@ -719,17 +727,18 @@ private:
 		} else {
 			const auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 			assert(
-				((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...) &&
+				((std::get<Pool<Ts>*>(pools) != nullptr) && ...) &&
 				"Manager does not have at least one of the requested components"
 			);
 			return std::forward_as_tuple<const Ts&...>(
-				(std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity))...
+				(std::get<Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity))...
 			);
 		}
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get(impl::Index entity) {
+		using namespace impl;
 		if constexpr (sizeof...(Ts) == 1) {
 			auto pool{ GetPool<Ts...>(GetId<Ts...>()) };
 			assert(pool != nullptr && "Manager does not have the requested component");
@@ -737,11 +746,11 @@ private:
 		} else {
 			auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 			assert(
-				((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...) &&
+				((std::get<Pool<Ts>*>(pools) != nullptr) && ...) &&
 				"Manager does not have at least one of the requested components"
 			);
 			return std::forward_as_tuple<Ts&...>(
-				(std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity))...
+				(std::get<Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity))...
 			);
 		}
 	}
@@ -979,28 +988,28 @@ private:
 
 		if constexpr (C == LoopCriterion::None) {
 			return true;
-		}
+		} else { // This else suppresses unreachable code warning.
+			bool pool_is_null{ ((std::get<Pool<Ts>*>(pools_) == nullptr) || ...) };
 
-		bool pool_is_null{ ((std::get<Pool<Ts>*>(pools_) == nullptr) || ...) };
-
-		if constexpr (C == LoopCriterion::WithComponents) {
-			if (pool_is_null) {
-				return false;
+			if constexpr (C == LoopCriterion::WithComponents) {
+				if (pool_is_null) {
+					return false;
+				}
+				bool has_all_components{
+					(std::get<Pool<Ts>*>(pools_)->template Pool<Ts>::Has(entity) && ...)
+				};
+				return has_all_components;
 			}
-			bool has_all_components{
-				(std::get<Pool<Ts>*>(pools_)->template Pool<Ts>::Has(entity) && ...)
-			};
-			return has_all_components;
-		}
 
-		if constexpr (C == LoopCriterion::WithoutComponents) {
-			if (pool_is_null) {
-				return true;
+			if constexpr (C == LoopCriterion::WithoutComponents) {
+				if (pool_is_null) {
+					return true;
+				}
+				bool missing_all_components{
+					(!std::get<Pool<Ts>*>(pools_)->template Pool<Ts>::Has(entity) && ...)
+				};
+				return missing_all_components;
 			}
-			bool missing_all_components{
-				(!std::get<Pool<Ts>*>(pools_)->template Pool<Ts>::Has(entity) && ...)
-			};
-			return missing_all_components;
 		}
 	}
 
@@ -1243,6 +1252,7 @@ inline void Manager::ForEachEntity(T function) {
 
 template <typename... Ts, typename T>
 inline void Manager::ForEachEntityWith(T function) {
+	using namespace impl;
 	static_assert(
 		sizeof...(Ts) > 0, "Cannot loop through each entity without providing "
 						   "at least one component type"
@@ -1258,14 +1268,14 @@ inline void Manager::ForEachEntityWith(T function) {
 	);
 	auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 	// Check that none of the requested component pools are nullptrs.
-	if (((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...)) {
-		for (impl::Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
+	if (((std::get<Pool<Ts>*>(pools) != nullptr) && ...)) {
+		for (Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
 			// If entity is alive and has the components, call lambda on it.
 			if (instance_->entities_[entity] &&
-				(std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Has(entity) && ...)) {
+				(std::get<Pool<Ts>*>(pools)->template Pool<Ts>::Has(entity) && ...)) {
 				function(
 					Entity{ entity, instance_->versions_[entity], std::make_shared<Manager>(this) },
-					(std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity))...
+					(std::get<Pool<Ts>*>(pools)->template Pool<Ts>::Get(entity))...
 				);
 			}
 		}
@@ -1274,6 +1284,7 @@ inline void Manager::ForEachEntityWith(T function) {
 
 template <typename... Ts, typename T>
 inline void Manager::ForEachEntityWithout(T function) {
+	using namespace impl;
 	assert(
 		instance_->entities_.Size() == instance_->versions_.size() &&
 		"Cannot loop through manager entities if and version and entity "
@@ -1285,12 +1296,12 @@ inline void Manager::ForEachEntityWithout(T function) {
 	);
 	auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 	// Check that none of the requested component pools are nullptrs.
-	if (((std::get<impl::Pool<Ts>*>(pools) != nullptr) && ...)) {
-		for (impl::Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
+	if (((std::get<Pool<Ts>*>(pools) != nullptr) && ...)) {
+		for (Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
 			// If entity is alive and does not have one of the components, call
 			// lambda on it.
 			if (instance_->entities_[entity] &&
-				(!std::get<impl::Pool<Ts>*>(pools)->template Pool<Ts>::Has(entity) || ...)) {
+				(!std::get<Pool<Ts>*>(pools)->template Pool<Ts>::Has(entity) && ...)) {
 				function(Entity{ entity, instance_->versions_[entity],
 								 std::make_shared<Manager>(this) });
 			}
