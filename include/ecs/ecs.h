@@ -29,6 +29,7 @@ SOFTWARE.
 #include <cassert>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
@@ -905,6 +906,16 @@ public:
 		return entity_;
 	}
 
+	pointer GetEntityId() const {
+		assert(entity_container_.EntityMeetsCriteria(entity_) && "No entity with given components");
+		assert(entity_container_.EntityWithinLimit(entity_) && "Out-of-range entity index");
+		assert(
+			!entity_container_.IsMaxEntity(entity_) &&
+			"Cannot dereference entity container iterator end"
+		);
+		return entity_;
+	}
+
 private:
 	[[nodiscard]] bool ShouldIncrement() const {
 		return entity_container_.EntityWithinLimit(entity_) &&
@@ -965,12 +976,34 @@ public:
 		return { max_entity_, *this };
 	}
 
+	void ForEach(const std::function<void(ecs::Entity)>& func) const {
+		for (auto it = begin(); it != end(); it++) {
+			func(GetEntity(it.GetEntityId()));
+		}
+	}
+
+	std::vector<ecs::Entity> GetVector() const {
+		std::vector<ecs::Entity> v;
+		v.reserve(max_entity_);
+		ForEach([&](auto e) { v.push_back(e); });
+		v.shrink_to_fit();
+		return v;
+	}
+
+	std::size_t Count() const {
+		std::size_t count{ 0 };
+		ForEach([&](auto e) { ++count; });
+		return count;
+	}
+
 	EntityContainer(
 		Manager& manager, impl::Index max_entity, std::tuple<impl::Pool<Ts>*...>&& pools
 	) :
 		manager_{ manager }, max_entity_{ max_entity }, pools_{ pools } {}
 
 private:
+	Entity GetEntity(impl::Index entity) const;
+
 	friend class Manager;
 	template <LoopCriterion U, typename TC, typename... S>
 	friend class impl::EntityContainerIterator;
@@ -1148,6 +1181,15 @@ inline const Entity null;
 template <typename T>
 inline impl::Index impl::Pool<T>::GetId() const {
 	return Manager::GetId<T>();
+}
+
+template <LoopCriterion C, typename... Ts>
+inline Entity EntityContainer<C, Ts...>::GetEntity(impl::Index entity) const {
+	assert(EntityWithinLimit(entity) && "Out-of-range entity index");
+	assert(!IsMaxEntity(entity) && "Cannot dereference entity container iterator end");
+	assert(EntityMeetsCriteria(entity) && "No entity with given components");
+	assert(manager_.IsValid() && "Cannot deference entity container with destroyed manager");
+	return Entity{ entity, manager_.GetVersion(entity), std::make_shared<Manager>(&manager_) };
 }
 
 template <LoopCriterion C, typename... Ts>
