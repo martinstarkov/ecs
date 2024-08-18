@@ -58,37 +58,37 @@ template <LoopCriterion C, typename TC, typename... Ts>
 class EntityContainerIterator;
 
 namespace detail {
-template <typename Struct, typename = void, typename... T>
+template <typename Struct, typename = void, typename... Ts>
 struct is_direct_list_initializable_impl : std::false_type {};
 
-template <typename Struct, typename... T>
+template <typename Struct, typename... Ts>
 struct is_direct_list_initializable_impl<
-	Struct, std::void_t<decltype(Struct{ std::declval<T>()... })>, T...> : std::true_type {};
+	Struct, std::void_t<decltype(Struct{ std::declval<Ts>()... })>, Ts...> : std::true_type {};
 } // namespace detail
 
-template <typename Struct, typename... T>
-using is_direct_list_initializable = detail::is_direct_list_initializable_impl<Struct, void, T...>;
+template <typename Struct, typename... Ts>
+using is_direct_list_initializable = detail::is_direct_list_initializable_impl<Struct, void, Ts...>;
 
-template <typename Struct, typename... T>
-constexpr bool is_direct_list_initializable_v = is_direct_list_initializable<Struct, T...>::value;
+template <typename Struct, typename... Ts>
+constexpr bool is_direct_list_initializable_v = is_direct_list_initializable<Struct, Ts...>::value;
 
-template <typename Struct, typename... T>
+template <typename Struct, typename... Ts>
 using is_aggregate_initializable = std::conjunction<
-	std::is_aggregate<Struct>, is_direct_list_initializable<Struct, T...>,
+	std::is_aggregate<Struct>, is_direct_list_initializable<Struct, Ts...>,
 	std::negation<std::conjunction<
-		std::bool_constant<sizeof...(T) == 1>,
-		std::is_same<std::decay_t<std::tuple_element_t<0, std::tuple<T...>>>, Struct>>>>;
+		std::bool_constant<sizeof...(Ts) == 1>,
+		std::is_same<std::decay_t<std::tuple_element_t<0, std::tuple<Ts...>>>, Struct>>>>;
 
-template <typename Struct, typename = void, typename... T>
-struct aggregate_initializable : std::false_type {};
-
-template <typename Struct, typename... T>
-struct aggregate_initializable<Struct, T...> {
-	constexpr static const bool value{ is_aggregate_initializable<Struct, T...>::value };
+template <typename S, typename... Ts>
+struct aggregate_initializable {
+	constexpr static const bool value{ is_aggregate_initializable<S, Ts...>::value };
 };
 
-template <typename Struct, typename... T>
-constexpr bool is_aggregate_initializable_v = aggregate_initializable<Struct, T...>::value;
+template <typename S>
+struct aggregate_initializable<S> : std::false_type {};
+
+template <typename Struct, typename... Ts>
+constexpr bool is_aggregate_initializable_v = aggregate_initializable<Struct, Ts...>::value;
 
 class NullEntity;
 
@@ -797,8 +797,6 @@ private:
 	std::shared_ptr<impl::ManagerInstance> instance_;
 };
 
-namespace impl {
-
 template <LoopCriterion C, typename container, typename... Ts>
 class EntityContainerIterator {
 public:
@@ -809,9 +807,12 @@ public:
 	// using reference			= std::tuple<Entity, Ts&...>|| Entity;
 
 public:
-	EntityContainerIterator(const EntityContainerIterator&)			   = default;
+	EntityContainerIterator()										   = default;
 	~EntityContainerIterator()										   = default;
+	EntityContainerIterator(const EntityContainerIterator&)			   = default;
 	EntityContainerIterator& operator=(const EntityContainerIterator&) = default;
+	EntityContainerIterator(EntityContainerIterator&&)				   = default;
+	EntityContainerIterator& operator=(EntityContainerIterator&&)	   = default;
 
 	EntityContainerIterator& operator=(pointer entity) {
 		entity_ = entity;
@@ -884,10 +885,6 @@ public:
 		return temp;
 	}*/
 
-	difference_type operator-(const EntityContainerIterator& iterator) {
-		return std::distance(iterator.entity_, entity_);
-	}
-
 	auto operator*() {
 		return entity_container_.GetComponentTuple(entity_);
 	}
@@ -943,14 +940,11 @@ private:
 	container& entity_container_;
 };
 
-} // namespace impl
-
 template <LoopCriterion C, typename... Ts>
 class EntityContainer {
 public:
-	using iterator = impl::EntityContainerIterator<C, EntityContainer<C, Ts...>, Ts...>;
-	using const_iterator =
-		impl::EntityContainerIterator<C, const EntityContainer<C, Ts...>, const Ts...>;
+	using iterator		 = EntityContainerIterator<C, EntityContainer<C, Ts...>, Ts...>;
+	using const_iterator = EntityContainerIterator<C, const EntityContainer<C, Ts...>, const Ts...>;
 
 	iterator begin() {
 		return { 0, *this };
@@ -1006,7 +1000,7 @@ private:
 
 	friend class Manager;
 	template <LoopCriterion U, typename TC, typename... S>
-	friend class impl::EntityContainerIterator;
+	friend class EntityContainerIterator;
 
 	[[nodiscard]] bool EntityMeetsCriteria(impl::Index entity) const {
 		assert(manager_.IsValid() && "Manager cannot be destroyed while looping through entities");
