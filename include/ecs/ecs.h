@@ -207,6 +207,9 @@ public:
 
 	[[nodiscard]] const T& Get(Index entity) const {
 		assert(Has(entity) && "Cannot get a component which an entity does not have");
+		assert(
+			sparse[entity] < components.size() && "Cannot get a component while constructing it"
+		);
 		return components[sparse[entity]];
 	}
 
