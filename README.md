@@ -164,11 +164,6 @@ for (auto entity : manager.Entities()) {
     entity.Add<ZombieComponent>();
     entity.Add<FoodComponent>();
 }
-// or alternatively:
-manager.ForEachEntity([](ecs::Entity entity) {
-    entity.Add<ZombieComponent>();
-    entity.Add<FoodComponent>();
-});
 ```
 
 Or only entities with specific components (i.e. an entity has all listed component types):
@@ -179,13 +174,6 @@ for (auto [entity, zombie, food] : manager.EntitiesWith<ZombieComponent, FoodCom
         // ...
     }
 }
-// or alternatively:
-manager.ForEachEntityWith<ZombieComponent, FoodComponent>(
-    [&](ecs::Entity entity, auto& zombie, auto& food) {
-    if (food.amount < threshold) {
-        // ...
-    }
-});
 ```
 
 Or only entities without specific components (i.e. an entity is missing all listed component types):
@@ -194,10 +182,6 @@ Or only entities without specific components (i.e. an entity is missing all list
 for (auto entity : manager.EntitiesWithout<FoodComponent>()) {
     entity.Destroy();
 }
-// or alternatively:
-manager.ForEachEntityWithout<FoodComponent>([&](ecs::Entity entity) {
-    entity.Destroy();
-});
 manager.Refresh();
 ```
 
