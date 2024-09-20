@@ -315,36 +315,6 @@ void ProfileECS() {
 		std::cout << "Refreshing " << entity_count << " entities took "
 				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
 				  << " ms" << std::endl;
-
-		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(3, 3); });
-		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Adding (for each) " << entity_count << " components took "
-				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
-				  << " ms" << std::endl;
-
-		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntityWith<ProfileTestComponent>([&](auto e, ProfileTestComponent& profile
-														 ) { profile.x += 1; });
-		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Incrementing (for each) " << entity_count << " component members took "
-				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
-				  << " ms" << std::endl;
-
-		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) { e.Remove<ProfileTestComponent>(); });
-		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Removing (for each) " << entity_count << " components took "
-				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
-				  << " ms" << std::endl;
-
-		start = std::chrono::high_resolution_clock::now();
-		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(4, 4); });
-		manager2.ForEachEntity([](auto e) { e.Add<ProfileTestComponent>(5, 5); });
-		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "2x re-adding (for each) " << entity_count << " components took "
-				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
-				  << " ms" << std::endl;
 	}
 
 	std::cout << "Stopping ECS profiling" << std::endl;
