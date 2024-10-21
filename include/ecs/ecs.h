@@ -139,6 +139,7 @@ public:
 			return pool;
 		} else {
 			assert(!"Cannot clone component pool with a non copy constructible component");
+			return nullptr;
 		}
 	}
 
@@ -146,12 +147,12 @@ public:
 		// Same reason as given in Clone() for why no static_assert.
 		if constexpr (std::is_copy_constructible_v<T>) {
 			assert(Has(from_entity));
-			if (Has(to_entity)) {
+			if (!Has(to_entity)) {
+				Add(to_entity, components_[sparse_[from_entity]]);
+			} else {
 				components_.emplace(
 					components_.begin() + sparse_[to_entity], components_[sparse_[from_entity]]
 				);
-			} else {
-				Add(to_entity, components_[sparse_[from_entity]]);
 			}
 		} else {
 			assert(!"Cannot copy an entity with a non copy constructible component");
@@ -380,10 +381,11 @@ public:
 		clone.instance_->pools_.resize(instance_->pools_.size(), nullptr);
 		for (std::size_t i{ 0 }; i < instance_->pools_.size(); ++i) {
 			auto& pool{ instance_->pools_[i] };
-			if (pool != nullptr) {
-				pool = pool->Clone();
-				assert(pool != nullptr && "Cloning manager failed");
+			if (pool == nullptr) {
+				continue;
 			}
+			pool = pool->Clone();
+			assert(pool != nullptr && "Cloning manager failed");
 		}
 		return clone;
 	}
