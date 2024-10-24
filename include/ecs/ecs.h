@@ -203,7 +203,11 @@ public:
 
 	[[nodiscard]] const T& Get(Index entity) const {
 		assert(Has(entity));
-		assert(sparse_[entity] < components_.size());
+		assert(
+			sparse_[entity] < components_.size() &&
+			"Likely attempting to retrieve a component before it has been fully added to the "
+			"entity, e.g. self-referencing Get() in the Add() constructor call"
+		);
 		return components_[sparse_[entity]];
 	}
 
@@ -1060,8 +1064,7 @@ public:
 
 	template <typename... Ts>
 	[[nodiscard]] bool Has() const {
-		assert(IsAlive() && "Cannot check if dead or null entity has component(s)");
-		return (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) && ...);
+		return IsAlive() && (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) && ...);
 	}
 
 	template <typename... Ts>
