@@ -52,6 +52,14 @@ enum class LoopCriterion {
 template <LoopCriterion C, typename... Ts>
 class EntityContainer;
 
+using Entities = EntityContainer<LoopCriterion::None>;
+
+template <typename... TComponents>
+using EntitiesWith = EntityContainer<LoopCriterion::WithComponents, TComponents...>;
+
+template <typename... TComponents>
+using EntitiesWithout = EntityContainer<LoopCriterion::WithoutComponents, TComponents...>;
+
 template <LoopCriterion C, typename TC, typename... Ts>
 class EntityContainerIterator;
 
@@ -458,13 +466,12 @@ public:
 	// TODO: Add const versions of the three functions below.
 
 	template <typename... Ts>
-	[[nodiscard]] EntityContainer<LoopCriterion::WithComponents, Ts...> EntitiesWith();
+	[[nodiscard]] ecs::EntitiesWith<Ts...> EntitiesWith();
 
 	template <typename... Ts>
-	[[nodiscard]] EntityContainer<LoopCriterion::WithoutComponents, Ts...> EntitiesWithout();
+	[[nodiscard]] ecs::EntitiesWithout<Ts...> EntitiesWithout();
 
-	template <typename... Ts>
-	[[nodiscard]] EntityContainer<LoopCriterion::None, Ts...> Entities();
+	[[nodiscard]] ecs::Entities Entities();
 
 	[[nodiscard]] std::size_t Size() const {
 		return instance_->count_;
@@ -1219,17 +1226,16 @@ inline Entity Manager::CopyEntity(const Entity& from) {
 }
 
 template <typename... Ts>
-inline EntityContainer<LoopCriterion::WithComponents, Ts...> Manager::EntitiesWith() {
+inline ecs::EntitiesWith<Ts...> Manager::EntitiesWith() {
 	return { *this, instance_->next_entity_, std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 }
 
 template <typename... Ts>
-inline EntityContainer<LoopCriterion::WithoutComponents, Ts...> Manager::EntitiesWithout() {
+inline ecs::EntitiesWithout<Ts...> Manager::EntitiesWithout() {
 	return { *this, instance_->next_entity_, std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 }
 
-template <typename... Ts>
-inline EntityContainer<LoopCriterion::None, Ts...> Manager::Entities() {
+inline ecs::Entities Manager::Entities() {
 	return { *this, instance_->next_entity_, std::make_tuple() };
 }
 
