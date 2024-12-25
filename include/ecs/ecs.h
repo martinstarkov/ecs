@@ -867,7 +867,7 @@ public:
 		return entity_container_.GetComponentTuple(entity_);
 	}
 
-	const auto operator*() const {
+	auto operator*() const {
 		return entity_container_.GetComponentTuple(entity_);
 	}
 
@@ -970,7 +970,7 @@ public:
 
 	[[nodiscard]] std::size_t Count() const {
 		std::size_t count{ 0 };
-		ForEach([&](auto e) { ++count; });
+		ForEach([&]([[maybe_unused]] auto e) { ++count; });
 		return count;
 	}
 
