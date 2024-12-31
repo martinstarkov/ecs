@@ -974,6 +974,8 @@ public:
 		return count;
 	}
 
+	EntityContainer() = default;
+
 	EntityContainer(
 		const Manager& manager, Index max_entity, std::tuple<impl::Pool<Ts>*...>&& pools
 	) :
