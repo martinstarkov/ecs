@@ -128,13 +128,12 @@ class Pool : public AbstractPool {
 	);
 
 public:
-	Pool() = default;
-
-	~Pool()						 = default;
-	Pool(Pool&&)				 = default;
-	Pool& operator=(Pool&&)		 = default;
-	Pool(const Pool&)			 = default;
-	Pool& operator=(const Pool&) = default;
+	Pool()							 = default;
+	Pool(Pool&&) noexcept			 = default;
+	Pool& operator=(Pool&&) noexcept = default;
+	Pool(const Pool&)				 = default;
+	Pool& operator=(const Pool&)	 = default;
+	~Pool() override				 = default;
 
 	[[nodiscard]] virtual std::shared_ptr<AbstractPool> Clone() const final {
 		// The reason this is not statically asserted is because it would disallow move-only
@@ -269,13 +268,6 @@ private:
 
 class DynamicBitset {
 public:
-	DynamicBitset()								   = default;
-	~DynamicBitset()							   = default;
-	DynamicBitset(DynamicBitset&&)				   = default;
-	DynamicBitset& operator=(DynamicBitset&&)	   = default;
-	DynamicBitset(const DynamicBitset&)			   = default;
-	DynamicBitset& operator=(const DynamicBitset&) = default;
-
 	void Set(std::size_t index, bool value = true) {
 		std::size_t byte_index{ index / 8 };
 		std::uint8_t offset{ static_cast<std::uint8_t>(index % 8) };
@@ -296,7 +288,7 @@ public:
 
 		assert(byte_index < data_.size());
 		int set{ (data_[byte_index] >> offset) & 0x1 };
-		return set;
+		return static_cast<bool>(set);
 	}
 
 	bool operator==(const DynamicBitset& other) const {
@@ -366,12 +358,6 @@ public:
 		// of 2.
 		Reserve(1);
 	}
-
-	~Manager()						   = default;
-	Manager(Manager&&)				   = default;
-	Manager& operator=(Manager&&)	   = default;
-	Manager(const Manager&)			   = default;
-	Manager& operator=(const Manager&) = default;
 
 	bool operator==(const Manager& other) const {
 		return instance_ == other.instance_;
@@ -784,13 +770,7 @@ public:
 	using pointer		  = Index;
 	// using reference			= std::tuple<Entity, Ts&...>|| Entity;
 
-public:
-	EntityContainerIterator()										   = default;
-	~EntityContainerIterator()										   = default;
-	EntityContainerIterator(const EntityContainerIterator&)			   = default;
-	EntityContainerIterator& operator=(const EntityContainerIterator&) = default;
-	EntityContainerIterator(EntityContainerIterator&&)				   = default;
-	EntityContainerIterator& operator=(EntityContainerIterator&&)	   = default;
+	EntityContainerIterator() = default;
 
 	EntityContainerIterator& operator=(pointer entity) {
 		entity_ = entity;
@@ -921,6 +901,13 @@ private:
 template <LoopCriterion C, typename... Ts>
 class EntityContainer {
 public:
+	EntityContainer() = default;
+
+	EntityContainer(
+		const Manager& manager, Index max_entity, std::tuple<impl::Pool<Ts>*...>&& pools
+	) :
+		manager_{ manager }, max_entity_{ max_entity }, pools_{ pools } {}
+
 	using iterator		 = EntityContainerIterator<C, EntityContainer<C, Ts...>, Ts...>;
 	using const_iterator = EntityContainerIterator<C, const EntityContainer<C, Ts...>, const Ts...>;
 
@@ -973,13 +960,6 @@ public:
 		ForEach([&]([[maybe_unused]] auto e) { ++count; });
 		return count;
 	}
-
-	EntityContainer() = default;
-
-	EntityContainer(
-		const Manager& manager, Index max_entity, std::tuple<impl::Pool<Ts>*...>&& pools
-	) :
-		manager_{ manager }, max_entity_{ max_entity }, pools_{ pools } {}
 
 private:
 	Entity GetEntity(Index entity) const;
@@ -1043,13 +1023,7 @@ private:
 
 class Entity {
 public:
-	Entity()  = default;
-	~Entity() = default;
-
-	Entity& operator=(const Entity&) = default;
-	Entity(const Entity&)			 = default;
-	Entity& operator=(Entity&&)		 = default;
-	Entity(Entity&&)				 = default;
+	Entity() = default;
 
 	bool operator==(const Entity& e) const {
 		return entity_ == e.entity_ && version_ == e.version_ && manager_ == e.manager_;
