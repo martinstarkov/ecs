@@ -136,8 +136,8 @@ public:
 	~Pool() override				 = default;
 
 	[[nodiscard]] virtual std::shared_ptr<AbstractPool> Clone() const final {
-		// The reason this is not statically asserted is because it would disallow move-only
-		// component pools.
+		// The reason this is not statically asserted is because it would disallow
+		// move-only component pools.
 		if constexpr (std::is_copy_constructible_v<T>) {
 			auto pool		  = std::make_shared<Pool<T>>();
 			pool->components_ = components_;
@@ -212,7 +212,8 @@ public:
 		assert(Has(entity));
 		assert(
 			sparse_[entity] < components_.size() &&
-			"Likely attempting to retrieve a component before it has been fully added to the "
+			"Likely attempting to retrieve a component before it has been fully "
+			"added to the "
 			"entity, e.g. self-referencing Get() in the Add() constructor call"
 		);
 		return components_[sparse_[entity]];
@@ -778,11 +779,11 @@ public:
 	}
 
 	/*operator bool() const {
-		if (entity_) {
-			return true;
-		} else {
-			return false;
-		}
+			if (entity_) {
+					return true;
+			} else {
+					return false;
+			}
 	}*/
 
 	bool operator==(const EntityContainerIterator& iterator) const {
@@ -811,8 +812,8 @@ public:
 	}
 
 	/*EntityContainerIterator& operator--() {
-		--m_ptr;
-		return (*this);
+			--m_ptr;
+			return (*this);
 	}*/
 
 	EntityContainerIterator operator++(int) {
@@ -822,9 +823,9 @@ public:
 	}
 
 	/*EntityContainerIterator operator--(int) {
-		auto temp(*this);
-		--m_ptr;
-		return temp;
+			auto temp(*this);
+			--m_ptr;
+			return temp;
 	}*/
 
 	EntityContainerIterator operator+(const difference_type& movement) {
@@ -836,11 +837,11 @@ public:
 	}
 
 	/*EntityContainerIterator operator-(const difference_type& movement) {
-		auto oldPtr	 = m_ptr;
-		m_ptr		-= movement;
-		auto temp(*this);
-		m_ptr = oldPtr;
-		return temp;
+			auto oldPtr	 = m_ptr;
+			m_ptr		-= movement;
+			auto temp(*this);
+			m_ptr = oldPtr;
+			return temp;
 	}*/
 
 	auto operator*() {
@@ -885,7 +886,8 @@ private:
 		if (!entity_container_.IsMaxEntity(entity_)) {
 			assert(
 				entity_container_.EntityWithinLimit(entity_) &&
-				"Cannot create entity container iterator with out-of-range entity index"
+				"Cannot create entity container iterator with out-of-range entity "
+				"index"
 			);
 		}
 	}
@@ -970,8 +972,8 @@ private:
 
 	[[nodiscard]] bool EntityMeetsCriteria(Index entity) const {
 		using namespace impl; // For some reason without using namespace
-							  // std::get<Pool<Ts>*>(pools_)->template Pool<Ts>::Has does not return
-							  // accurate results.
+							  // std::get<Pool<Ts>*>(pools_)->template
+							  // Pool<Ts>::Has does not return accurate results.
 		bool activated{ manager_.IsActivated(entity) };
 
 		if (!activated) {
