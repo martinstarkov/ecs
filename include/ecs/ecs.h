@@ -209,7 +209,7 @@ public:
 	}
 
 	[[nodiscard]] const T& Get(Index entity) const {
-		assert(Has(entity));
+		assert(Has(entity) && "Entity does not have the requested component");
 		assert(
 			sparse_[entity] < components_.size() &&
 			"Likely attempting to retrieve a component before it has been fully "
