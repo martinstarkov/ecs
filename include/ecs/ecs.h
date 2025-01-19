@@ -26,17 +26,53 @@ SOFTWARE.
 
 #pragma once
 
-#include <cassert>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <iterator>
 #include <memory>
-#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#ifndef NDEBUG
+#define ECS_ENABLE_ASSERTS
+#endif
+
+#ifdef ECS_ENABLE_ASSERTS
+
+#include <cstdlib>
+#include <filesystem>
+#include <iostream>
+
+#define ECS_DEBUGBREAK() ((void)0)
+
+#if defined(_MSC_VER) || defined(__INTEL_COMPILER)
+#undef ECS_DEBUGBREAK
+#define ECS_DEBUGBREAK() __debugbreak()
+#elif defined(__linux__)
+#include <signal.h>
+#undef ECS_DEBUGBREAK
+#define ECS_DEBUGBREAK() raise(SIGTRAP)
+#endif
+
+#define ECS_ASSERT(condition, message)                                                          \
+	{                                                                                           \
+		if (!(condition)) {                                                                     \
+			std::cout << "ASSERTION FAILED: "                                                   \
+					  << std::filesystem::path(__FILE__).filename().string() << ":" << __LINE__ \
+					  << ": " << message << "\n";                                               \
+			ECS_DEBUGBREAK();                                                                   \
+			std::abort();                                                                       \
+		}                                                                                       \
+	}
+
+#else
+
+#define ECS_ASSERT(...) ((void)0)
+
+#endif
 
 namespace ecs {
 
@@ -84,15 +120,12 @@ template <typename Struct, typename... Ts>
 constexpr bool is_direct_list_initializable_v = is_direct_list_initializable<Struct, Ts...>::value;
 
 template <typename Struct, typename... Ts>
-using is_aggregate_initializable = std::conjunction<
-	std::is_aggregate<Struct>, is_direct_list_initializable<Struct, Ts...>,
-	std::negation<std::conjunction<
-		std::bool_constant<sizeof...(Ts) == 1>,
-		std::is_same<std::decay_t<std::tuple_element_t<0, std::tuple<Ts...>>>, Struct>>>>;
-
-template <typename S, typename... Ts>
 struct aggregate_initializable {
-	constexpr static const bool value{ is_aggregate_initializable<S, Ts...>::value };
+	constexpr static const bool value{ std::conjunction_v<
+		std::is_aggregate<Struct>, is_direct_list_initializable<Struct, Ts...>,
+		std::negation<std::conjunction<
+			std::bool_constant<sizeof...(Ts) == 1>,
+			std::is_same<std::decay_t<std::tuple_element_t<0, std::tuple<Ts...>>>, Struct>>>> };
 };
 
 template <typename S>
@@ -135,7 +168,7 @@ public:
 	Pool& operator=(const Pool&)	 = default;
 	~Pool() override				 = default;
 
-	[[nodiscard]] virtual std::shared_ptr<AbstractPool> Clone() const final {
+	[[nodiscard]] std::shared_ptr<AbstractPool> Clone() const final {
 		// The reason this is not statically asserted is because it would disallow
 		// move-only component pools.
 		if constexpr (std::is_copy_constructible_v<T>) {
@@ -145,15 +178,19 @@ public:
 			pool->sparse_	  = sparse_;
 			return pool;
 		} else {
-			assert(!"Cannot clone component pool with a non copy constructible component");
+			ECS_ASSERT(
+				false, "Cannot clone component pool with a non copy constructible component"
+			);
 			return nullptr;
 		}
 	}
 
-	virtual void Copy(Index from_entity, Index to_entity) final {
+	void Copy(Index from_entity, Index to_entity) final {
 		// Same reason as given in Clone() for why no static_assert.
 		if constexpr (std::is_copy_constructible_v<T>) {
-			assert(Has(from_entity));
+			ECS_ASSERT(
+				Has(from_entity), "Cannot copy from an entity which does not exist in the manager"
+			);
 			if (!Has(to_entity)) {
 				Add(to_entity, components_[sparse_[from_entity]]);
 			} else {
@@ -162,17 +199,17 @@ public:
 				);
 			}
 		} else {
-			assert(!"Cannot copy an entity with a non copy constructible component");
+			ECS_ASSERT(false, "Cannot copy an entity with a non copy constructible component");
 		}
 	}
 
-	virtual void Clear() final {
+	void Clear() final {
 		components_.clear();
 		dense_.clear();
 		sparse_.clear();
 	}
 
-	virtual void Reset() final {
+	void Reset() final {
 		Clear();
 
 		components_.shrink_to_fit();
@@ -180,24 +217,24 @@ public:
 		sparse_.shrink_to_fit();
 	}
 
-	virtual bool Remove(Index entity) final {
-		if (Has(entity)) {
-			// See https://skypjack.github.io/2020-08-02-ecs-baf-part-9/ for
-			// in-depth explanation. In short, swap with back and pop back,
-			// relinking sparse ids after.
-			const Index last{ dense_.back() };
-			std::swap(dense_.back(), dense_[sparse_[entity]]);
-			std::swap(components_.back(), components_[sparse_[entity]]);
-			assert(last < sparse_.size());
-			std::swap(sparse_[last], sparse_[entity]);
-			dense_.pop_back();
-			components_.pop_back();
-			return true;
+	bool Remove(Index entity) final {
+		if (!Has(entity)) {
+			return false;
 		}
-		return false;
+		// See https://skypjack.github.io/2020-08-02-ecs-baf-part-9/ for
+		// in-depth explanation. In short, swap with back and pop back,
+		// relinking sparse ids after.
+		const Index last{ dense_.back() };
+		std::swap(dense_.back(), dense_[sparse_[entity]]);
+		std::swap(components_.back(), components_[sparse_[entity]]);
+		ECS_ASSERT(last < sparse_.size(), "");
+		std::swap(sparse_[last], sparse_[entity]);
+		dense_.pop_back();
+		components_.pop_back();
+		return true;
 	}
 
-	[[nodiscard]] virtual bool Has(Index entity) const final {
+	[[nodiscard]] bool Has(Index entity) const final {
 		if (entity >= sparse_.size()) {
 			return false;
 		}
@@ -209,9 +246,9 @@ public:
 	}
 
 	[[nodiscard]] const T& Get(Index entity) const {
-		assert(Has(entity) && "Entity does not have the requested component");
-		assert(
-			sparse_[entity] < components_.size() &&
+		ECS_ASSERT(Has(entity), "Entity does not have the requested component");
+		ECS_ASSERT(
+			sparse_[entity] < components_.size(),
 			"Likely attempting to retrieve a component before it has been fully "
 			"added to the "
 			"entity, e.g. self-referencing Get() in the Add() constructor call"
@@ -274,7 +311,7 @@ public:
 		std::uint8_t offset{ static_cast<std::uint8_t>(index % 8) };
 		std::uint8_t bitfield{ static_cast<std::uint8_t>(1 << offset) };
 
-		assert(byte_index < data_.size());
+		ECS_ASSERT(byte_index < data_.size(), "");
 
 		if (value) {
 			data_[byte_index] |= bitfield;
@@ -287,7 +324,7 @@ public:
 		std::size_t byte_index{ index / 8 };
 		std::size_t offset{ index % 8 };
 
-		assert(byte_index < data_.size());
+		ECS_ASSERT(byte_index < data_.size(), "");
 		int set{ (data_[byte_index] >> offset) & 0x1 };
 		return static_cast<bool>(set);
 	}
@@ -325,10 +362,10 @@ public:
 	}
 
 private:
-	[[nodiscard]] std::size_t GetByteCount(std::size_t bit_count) {
+	[[nodiscard]] static std::size_t GetByteCount(std::size_t bit_count) {
 		std::size_t byte_count{ 1 };
 		if (bit_count >= 8) {
-			assert(1 + (bit_count - 1) / 8 > 0);
+			ECS_ASSERT(1 + (bit_count - 1) / 8 > 0, "");
 			byte_count = 1 + (bit_count - 1) / 8;
 		}
 		return byte_count;
@@ -384,60 +421,62 @@ public:
 				continue;
 			}
 			pool = pool->Clone();
-			assert(pool != nullptr && "Cloning manager failed");
+			ECS_ASSERT(pool != nullptr, "Cloning manager failed");
 		}
 		return clone;
 	}
 
 	void Refresh() {
-		if (instance_->refresh_required_) {
-			// This must be set before refresh starts in case
-			// events are called (for instance during entity deletion).
-			instance_->refresh_required_ = false;
-			assert(
-				instance_->entities_.Size() == instance_->versions_.size() &&
-				"Refresh failed due to varying entity vector and version vector "
-				"size"
-			);
-			assert(
-				instance_->entities_.Size() == instance_->refresh_.Size() &&
-				"Refresh failed due to varying entity vector and refresh vector "
-				"size"
-			);
-			assert(
-				instance_->next_entity_ <= instance_->entities_.Size() &&
-				"Next available entity must not be out of bounds of entity vector"
-			);
-			Index alive{ 0 };
-			Index dead{ 0 };
-			for (Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
-				// Entity was marked for refresh.
-				if (instance_->refresh_[entity]) {
-					instance_->refresh_.Set(entity, false);
-					if (instance_->entities_[entity]) { // Marked for deletion.
-						ClearEntity(entity);
-						instance_->entities_.Set(entity, false);
-						++instance_->versions_[entity];
-						instance_->free_entities_.emplace_back(entity);
-						++dead;
-					} else { // Marked for 'creation'.
-						instance_->entities_.Set(entity, true);
-						++alive;
-					}
-				}
-			}
-			// Update entity count with net change.
-			instance_->count_ += alive;
-			instance_->count_  = instance_->count_ > dead ? instance_->count_ - dead : 0;
+		if (!instance_->refresh_required_) {
+			return;
 		}
+		// This must be set before refresh starts in case
+		// events are called (for instance during entity deletion).
+		instance_->refresh_required_ = false;
+		ECS_ASSERT(
+			instance_->entities_.Size() == instance_->versions_.size(),
+			"Refresh failed due to varying entity vector and version vector "
+			"size"
+		);
+		ECS_ASSERT(
+			instance_->entities_.Size() == instance_->refresh_.Size(),
+			"Refresh failed due to varying entity vector and refresh vector "
+			"size"
+		);
+		ECS_ASSERT(
+			instance_->next_entity_ <= instance_->entities_.Size(),
+			"Next available entity must not be out of bounds of entity vector"
+		);
+		Index alive{ 0 };
+		Index dead{ 0 };
+		for (Index entity{ 0 }; entity < instance_->next_entity_; ++entity) {
+			if (!instance_->refresh_[entity]) {
+				continue;
+			}
+			// Entity was marked for refresh.
+			instance_->refresh_.Set(entity, false);
+			if (instance_->entities_[entity]) { // Marked for deletion.
+				ClearEntity(entity);
+				instance_->entities_.Set(entity, false);
+				++instance_->versions_[entity];
+				instance_->free_entities_.emplace_back(entity);
+				++dead;
+			} else { // Marked for 'creation'.
+				instance_->entities_.Set(entity, true);
+				++alive;
+			}
+		}
+		// Update entity count with net change.
+		instance_->count_ += alive;
+		instance_->count_  = instance_->count_ > dead ? instance_->count_ - dead : 0;
 	}
 
 	void Reserve(std::size_t capacity) {
 		instance_->entities_.Reserve(capacity);
 		instance_->refresh_.Reserve(capacity);
 		instance_->versions_.reserve(capacity);
-		assert(
-			instance_->entities_.Capacity() == instance_->refresh_.Capacity() &&
+		ECS_ASSERT(
+			instance_->entities_.Capacity() == instance_->refresh_.Capacity(),
 			"Entity and refresh vectors must have the same capacity"
 		);
 	}
@@ -450,7 +489,7 @@ public:
 	template <typename... Ts>
 	Entity CopyEntity(const Entity& from);
 
-	// TODO: Add const versions of the three functions below.
+	// TODO: Add const versions of the two functions below.
 
 	template <typename... Ts>
 	[[nodiscard]] ecs::EntitiesWith<Ts...> EntitiesWith();
@@ -458,7 +497,7 @@ public:
 	template <typename... Ts>
 	[[nodiscard]] ecs::EntitiesWithout<Ts...> EntitiesWithout();
 
-	[[nodiscard]] ecs::Entities Entities();
+	[[nodiscard]] ecs::Entities Entities() const;
 
 	[[nodiscard]] std::size_t Size() const {
 		return instance_->count_;
@@ -478,7 +517,7 @@ public:
 		instance_->versions_.clear();
 		instance_->free_entities_.clear();
 
-		for (auto& pool : instance_->pools_) {
+		for (const auto& pool : instance_->pools_) {
 			if (pool != nullptr) {
 				pool->Clear();
 			}
@@ -503,7 +542,7 @@ private:
 	friend struct std::hash<Entity>;
 	friend class Entity;
 
-	Manager(int) {}
+	explicit Manager(int) {}
 
 	template <LoopCriterion C, typename... Ts>
 	friend class EntityContainer;
@@ -512,13 +551,13 @@ private:
 	template <typename... Ts>
 	void CopyEntity(Index from_id, Version from_version, Index to_id, Version to_version) {
 		using namespace impl;
-		assert(
-			IsAlive(from_id, from_version) &&
+		ECS_ASSERT(
+			IsAlive(from_id, from_version),
 			"Cannot copy from entity which has not been initialized from the "
 			"manager"
 		);
-		assert(
-			IsAlive(to_id, to_version) &&
+		ECS_ASSERT(
+			IsAlive(to_id, to_version),
 			"Cannot copy to entity which has not been initialized from the "
 			"manager"
 		);
@@ -529,12 +568,12 @@ private:
 			);
 			auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 			bool manager_has{ ((std::get<Pool<Ts>*>(pools) != nullptr) && ...) };
-			assert(
-				manager_has && "Cannot copy entity with a component that is not "
-							   "even in the manager"
+			ECS_ASSERT(
+				manager_has, "Cannot copy entity with a component that is not "
+							 "even in the manager"
 			);
 			bool entity_has{ (std::get<Pool<Ts>*>(pools)->template Pool<Ts>::Has(from_id) && ...) };
-			assert(entity_has && "Cannot copy entity with a component that it does not have");
+			ECS_ASSERT(entity_has, "Cannot copy entity with a component that it does not have");
 			(std::get<Pool<Ts>*>(pools)->template Pool<Ts>::Copy(from_id, to_id), ...);
 		} else { // Copy all components.
 			for (auto& pool : instance_->pools_) {
@@ -548,7 +587,7 @@ private:
 	void GenerateEntity(Index& entity, Version& version) {
 		entity = 0;
 		// Pick entity from free list before trying to increment entity counter.
-		if (instance_->free_entities_.size() > 0) {
+		if (!instance_->free_entities_.empty()) {
 			entity = instance_->free_entities_.front();
 			instance_->free_entities_.pop_front();
 		} else {
@@ -558,13 +597,13 @@ private:
 		if (entity >= instance_->entities_.Size()) {
 			Resize(instance_->versions_.capacity() * 2);
 		}
-		assert(
-			entity < instance_->entities_.Size() &&
+		ECS_ASSERT(
+			entity < instance_->entities_.Size(),
 			"Created entity is outside of manager entity vector range"
 		);
-		assert(!instance_->entities_[entity] && "Cannot create new entity from live entity");
-		assert(
-			!instance_->refresh_[entity] && "Cannot create new entity from refresh marked entity"
+		ECS_ASSERT(!instance_->entities_[entity], "Cannot create new entity from live entity");
+		ECS_ASSERT(
+			!instance_->refresh_[entity], "Cannot create new entity from refresh marked entity"
 		);
 		// Mark entity for refresh.
 		instance_->refresh_.Set(entity, true);
@@ -579,18 +618,18 @@ private:
 			instance_->refresh_.Resize(size, false);
 			instance_->versions_.resize(size, null_version);
 		}
-		assert(
-			instance_->entities_.Size() == instance_->versions_.size() &&
+		ECS_ASSERT(
+			instance_->entities_.Size() == instance_->versions_.size(),
 			"Resize failed due to varying entity vector and version vector size"
 		);
-		assert(
-			instance_->entities_.Size() == instance_->refresh_.Size() &&
+		ECS_ASSERT(
+			instance_->entities_.Size() == instance_->refresh_.Size(),
 			"Resize failed due to varying entity vector and refresh vector size"
 		);
 	}
 
-	void ClearEntity(Index entity) {
-		for (auto& pool : instance_->pools_) {
+	void ClearEntity(Index entity) const {
+		for (const auto& pool : instance_->pools_) {
 			if (pool != nullptr) {
 				pool->Remove(entity);
 			}
@@ -610,53 +649,55 @@ private:
 	}
 
 	[[nodiscard]] Version GetVersion(Index entity) const {
-		assert(entity < instance_->versions_.size());
+		ECS_ASSERT(entity < instance_->versions_.size(), "");
 		return instance_->versions_[entity];
 	}
 
 	[[nodiscard]] bool Match(Index entity1, Index entity2) const {
-		for (auto& pool : instance_->pools_) {
-			if (pool != nullptr) {
-				bool has1{ pool->Has(entity1) };
-				bool has2{ pool->Has(entity2) };
-				// Check that one entity has a component while the other doesn't.
-				if ((has1 || has2) && (!has1 || !has2)) {
-					// Exit early if one non-matching component is found.
-					return false;
-				}
+		for (const auto& pool : instance_->pools_) {
+			if (pool == nullptr) {
+				continue;
+			}
+			bool has1{ pool->Has(entity1) };
+			bool has2{ pool->Has(entity2) };
+			// Check that one entity has a component while the other doesn't.
+			if ((has1 || has2) && (!has1 || !has2)) {
+				// Exit early if one non-matching component is found.
+				return false;
 			}
 		}
 		return true;
 	}
 
 	void DestroyEntity(Index entity, Version version) {
-		assert(entity < instance_->versions_.size());
-		assert(entity < instance_->refresh_.Size());
-		if (instance_->versions_[entity] == version) {
-			if (instance_->entities_[entity]) {
-				instance_->refresh_.Set(entity, true);
-				instance_->refresh_required_ = true;
-			} else if (instance_->refresh_[entity]) {
-				/*
-				 * Edge case where entity is created and marked for deletion
-				 * before a Refresh() has been called.
-				 * In this case, destroy and invalidate the entity without
-				 * a Refresh() call. This is equivalent to an entity which
-				 * never 'officially' existed in the manager.
-				 */
-				ClearEntity(entity);
-				instance_->refresh_.Set(entity, false);
-				++instance_->versions_[entity];
-				instance_->free_entities_.emplace_back(entity);
-			}
+		ECS_ASSERT(entity < instance_->versions_.size(), "");
+		ECS_ASSERT(entity < instance_->refresh_.Size(), "");
+		if (instance_->versions_[entity] != version) {
+			return;
+		}
+		if (instance_->entities_[entity]) {
+			instance_->refresh_.Set(entity, true);
+			instance_->refresh_required_ = true;
+		} else if (instance_->refresh_[entity]) {
+			/*
+			 * Edge case where entity is created and marked for deletion
+			 * before a Refresh() has been called.
+			 * In this case, destroy and invalidate the entity without
+			 * a Refresh() call. This is equivalent to an entity which
+			 * never 'officially' existed in the manager.
+			 */
+			ClearEntity(entity);
+			instance_->refresh_.Set(entity, false);
+			++instance_->versions_[entity];
+			instance_->free_entities_.emplace_back(entity);
 		}
 	}
 
 	template <typename T>
 	[[nodiscard]] const impl::Pool<T>* GetPool(Index component) const {
-		assert(component == GetId<T>() && "GetPool mismatch with component id");
+		ECS_ASSERT(component == GetId<T>(), "GetPool mismatch with component id");
 		if (component < instance_->pools_.size()) {
-			const auto& pool = instance_->pools_[component];
+			const auto& pool{ instance_->pools_[component] };
 			// This is nullptr if the pool does not exist in the manager.
 			return static_cast<impl::Pool<T>*>(pool.get());
 		}
@@ -665,9 +706,9 @@ private:
 
 	template <typename T>
 	[[nodiscard]] impl::Pool<T>* GetPool(Index component) {
-		assert(component == GetId<T>() && "GetPool mismatch with component id");
+		ECS_ASSERT(component == GetId<T>(), "GetPool mismatch with component id");
 		if (component < instance_->pools_.size()) {
-			auto& pool = instance_->pools_[component];
+			auto& pool{ instance_->pools_[component] };
 			// This is nullptr if the pool does not exist in the manager.
 			return static_cast<impl::Pool<T>*>(pool.get());
 		}
@@ -687,12 +728,12 @@ private:
 		using namespace impl;
 		if constexpr (sizeof...(Ts) == 1) {
 			const auto pool{ GetPool<Ts...>(GetId<Ts...>()) };
-			assert(pool != nullptr && "Manager does not have the requested component");
+			ECS_ASSERT(pool != nullptr, "Manager does not have the requested component");
 			return pool->Get(entity);
 		} else {
 			const auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
-			assert(
-				((std::get<Pool<Ts>*>(pools) != nullptr) && ...) &&
+			ECS_ASSERT(
+				((std::get<Pool<Ts>*>(pools) != nullptr) && ...),
 				"Manager does not have at least one of the requested components"
 			);
 			return std::forward_as_tuple<const Ts&...>(
@@ -706,12 +747,12 @@ private:
 		using namespace impl;
 		if constexpr (sizeof...(Ts) == 1) {
 			auto pool{ GetPool<Ts...>(GetId<Ts...>()) };
-			assert(pool != nullptr && "Manager does not have the requested component");
+			ECS_ASSERT(pool != nullptr, "Manager does not have the requested component");
 			return pool->Get(entity);
 		} else {
 			auto pools{ std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
-			assert(
-				((std::get<Pool<Ts>*>(pools) != nullptr) && ...) &&
+			ECS_ASSERT(
+				((std::get<Pool<Ts>*>(pools) != nullptr) && ...),
 				"Manager does not have at least one of the requested components"
 			);
 			return std::forward_as_tuple<Ts&...>(
@@ -734,11 +775,11 @@ private:
 		impl::Pool<T>* pool{ GetPool<T>(component) };
 		if (pool == nullptr) {
 			std::shared_ptr<impl::Pool<T>> new_pool = std::make_shared<impl::Pool<T>>();
-			assert(component < instance_->pools_.size() && "Component index out of range");
+			ECS_ASSERT(component < instance_->pools_.size(), "Component index out of range");
 			instance_->pools_[component] = new_pool;
 			pool						 = new_pool.get();
 		}
-		assert(pool != nullptr && "Could not create new component pool correctly");
+		ECS_ASSERT(pool != nullptr, "Could not create new component pool correctly");
 		return pool->Add(entity, std::forward<Ts>(constructor_args)...);
 	}
 
@@ -766,9 +807,9 @@ template <LoopCriterion C, typename container, typename... Ts>
 class EntityContainerIterator {
 public:
 	using iterator_category = std::forward_iterator_tag;
+	using difference_type	= std::ptrdiff_t;
+	using pointer			= Index;
 	// using value_type		= std::tuple<Entity, Ts...> || Entity;
-	using difference_type = std::ptrdiff_t;
-	using pointer		  = Index;
 	// using reference			= std::tuple<Entity, Ts&...>|| Entity;
 
 	EntityContainerIterator() = default;
@@ -777,14 +818,6 @@ public:
 		entity_ = entity;
 		return *this;
 	}
-
-	/*operator bool() const {
-			if (entity_) {
-					return true;
-			} else {
-					return false;
-			}
-	}*/
 
 	bool operator==(const EntityContainerIterator& iterator) const {
 		return entity_ == iterator.entity_;
@@ -811,22 +844,11 @@ public:
 		return *this;
 	}
 
-	/*EntityContainerIterator& operator--() {
-			--m_ptr;
-			return (*this);
-	}*/
-
 	EntityContainerIterator operator++(int) {
 		auto temp(*this);
 		++(*this);
 		return temp;
 	}
-
-	/*EntityContainerIterator operator--(int) {
-			auto temp(*this);
-			--m_ptr;
-			return temp;
-	}*/
 
 	EntityContainerIterator operator+(const difference_type& movement) {
 		auto old  = entity_;
@@ -835,14 +857,6 @@ public:
 		entity_ = old;
 		return temp;
 	}
-
-	/*EntityContainerIterator operator-(const difference_type& movement) {
-			auto oldPtr	 = m_ptr;
-			m_ptr		-= movement;
-			auto temp(*this);
-			m_ptr = oldPtr;
-			return temp;
-	}*/
 
 	auto operator*() {
 		return entity_container_.GetComponentTuple(entity_);
@@ -853,20 +867,24 @@ public:
 	}
 
 	pointer operator->() {
-		assert(entity_container_.EntityMeetsCriteria(entity_) && "No entity with given components");
-		assert(entity_container_.EntityWithinLimit(entity_) && "Out-of-range entity index");
-		assert(
-			!entity_container_.IsMaxEntity(entity_) &&
+		ECS_ASSERT(
+			entity_container_.EntityMeetsCriteria(entity_), "No entity with given components"
+		);
+		ECS_ASSERT(entity_container_.EntityWithinLimit(entity_), "Out-of-range entity index");
+		ECS_ASSERT(
+			!entity_container_.IsMaxEntity(entity_),
 			"Cannot dereference entity container iterator end"
 		);
 		return entity_;
 	}
 
 	pointer GetEntityId() const {
-		assert(entity_container_.EntityMeetsCriteria(entity_) && "No entity with given components");
-		assert(entity_container_.EntityWithinLimit(entity_) && "Out-of-range entity index");
-		assert(
-			!entity_container_.IsMaxEntity(entity_) &&
+		ECS_ASSERT(
+			entity_container_.EntityMeetsCriteria(entity_), "No entity with given components"
+		);
+		ECS_ASSERT(entity_container_.EntityWithinLimit(entity_), "Out-of-range entity index");
+		ECS_ASSERT(
+			!entity_container_.IsMaxEntity(entity_),
 			"Cannot dereference entity container iterator end"
 		);
 		return entity_;
@@ -884,8 +902,8 @@ private:
 			this->operator++();
 		}
 		if (!entity_container_.IsMaxEntity(entity_)) {
-			assert(
-				entity_container_.EntityWithinLimit(entity_) &&
+			ECS_ASSERT(
+				entity_container_.EntityWithinLimit(entity_),
 				"Cannot create entity container iterator with out-of-range entity "
 				"index"
 			);
@@ -906,7 +924,7 @@ public:
 	EntityContainer() = default;
 
 	EntityContainer(
-		const Manager& manager, Index max_entity, std::tuple<impl::Pool<Ts>*...>&& pools
+		const Manager& manager, Index max_entity, const std::tuple<impl::Pool<Ts>*...>& pools
 	) :
 		manager_{ manager }, max_entity_{ max_entity }, pools_{ pools } {}
 
@@ -1037,13 +1055,13 @@ public:
 
 	template <typename T, typename... Ts>
 	T& Add(Ts&&... constructor_args) {
-		assert(IsAlive() && "Cannot add component to dead or null entity");
+		ECS_ASSERT(IsAlive(), "Cannot add component to dead or null entity");
 		return manager_.Add<T>(entity_, manager_.GetId<T>(), std::forward<Ts>(constructor_args)...);
 	}
 
 	template <typename... Ts>
 	void Remove() {
-		assert(IsAlive() && "Cannot remove component(s) from dead or null entity");
+		ECS_ASSERT(IsAlive(), "Cannot remove component(s) from dead or null entity");
 		(manager_.Remove<Ts>(entity_, manager_.GetId<Ts>()), ...);
 	}
 
@@ -1054,24 +1072,24 @@ public:
 
 	template <typename... Ts>
 	[[nodiscard]] bool HasAny() const {
-		assert(IsAlive() && "Cannot check if dead or null entity has any component(s)");
+		ECS_ASSERT(IsAlive(), "Cannot check if dead or null entity has any component(s)");
 		return (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) || ...);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get() const {
-		assert(IsAlive() && "Cannot get component(s) from dead or null entity");
+		ECS_ASSERT(IsAlive(), "Cannot get component(s) from dead or null entity");
 		return manager_.Get<Ts...>(entity_);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get() {
-		assert(IsAlive() && "Cannot get component(s) from dead or null entity");
+		ECS_ASSERT(IsAlive(), "Cannot get component(s) from dead or null entity");
 		return manager_.Get<Ts...>(entity_);
 	}
 
-	void Clear() {
-		assert(IsAlive() && "Cannot clear components of dead or null entity");
+	void Clear() const {
+		ECS_ASSERT(IsAlive(), "Cannot clear components of dead or null entity");
 		manager_.ClearEntity(entity_);
 	}
 
@@ -1121,21 +1139,21 @@ inline const Entity null;
 
 template <LoopCriterion C, typename... Ts>
 inline Entity EntityContainer<C, Ts...>::GetEntity(Index entity) const {
-	assert(EntityWithinLimit(entity) && "Out-of-range entity index");
-	assert(!IsMaxEntity(entity) && "Cannot dereference entity container iterator end");
-	assert(EntityMeetsCriteria(entity) && "No entity with given components");
+	ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
+	ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
+	ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 	return Entity{ entity, manager_.GetVersion(entity), manager_ };
 }
 
 template <LoopCriterion C, typename... Ts>
 auto EntityContainer<C, Ts...>::GetComponentTuple(Index entity) {
 	using namespace impl;
-	assert(EntityWithinLimit(entity) && "Out-of-range entity index");
-	assert(!IsMaxEntity(entity) && "Cannot dereference entity container iterator end");
-	assert(EntityMeetsCriteria(entity) && "No entity with given components");
+	ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
+	ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
+	ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 	if constexpr (C == LoopCriterion::WithComponents) {
-		assert(
-			((std::get<Pool<Ts>*>(pools_) != nullptr) && ...) &&
+		ECS_ASSERT(
+			((std::get<Pool<Ts>*>(pools_) != nullptr) && ...),
 			"Component pools cannot be destroyed while looping through entities"
 		);
 		return std::tuple<Entity, Ts&...>(
@@ -1150,12 +1168,12 @@ auto EntityContainer<C, Ts...>::GetComponentTuple(Index entity) {
 template <LoopCriterion C, typename... Ts>
 auto EntityContainer<C, Ts...>::GetComponentTuple(Index entity) const {
 	using namespace impl;
-	assert(EntityWithinLimit(entity) && "Out-of-range entity index");
-	assert(!IsMaxEntity(entity) && "Cannot dereference entity container iterator end");
-	assert(EntityMeetsCriteria(entity) && "No entity with given components");
+	ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
+	ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
+	ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 	if constexpr (C == LoopCriterion::WithComponents) {
-		assert(
-			((std::get<Pool<Ts>*>(pools_) != nullptr) && ...) &&
+		ECS_ASSERT(
+			((std::get<Pool<Ts>*>(pools_) != nullptr) && ...),
 			"Component pools cannot be destroyed while looping through entities"
 		);
 		return std::tuple<Entity, const Ts&...>(
@@ -1168,26 +1186,23 @@ auto EntityContainer<C, Ts...>::GetComponentTuple(Index entity) const {
 }
 
 inline bool Entity::IsIdenticalTo(const Entity& e) const {
-	bool handle_copies{ *this == e };
-	if (handle_copies) {
+	if (*this == e) {
 		return true;
 	}
 
-	bool null_entities{ *this == ecs::null && e == ecs::null };
-	if (null_entities) {
+	if (*this == ecs::null && e == ecs::null) {
 		return true;
 	}
 
-	bool different_entities{ *this != ecs::null && e != ecs::null && entity_ != e.entity_ };
-
-	return different_entities && manager_ == e.manager_ && manager_.Match(entity_, e.entity_);
+	return *this != ecs::null && e != ecs::null && entity_ != e.entity_ && manager_ == e.manager_ &&
+		   manager_.Match(entity_, e.entity_);
 }
 
 inline Entity Manager::CreateEntity() {
 	Index entity{ 0 };
 	Version version{ null_version };
 	GenerateEntity(entity, version);
-	assert(version != null_version && "Failed to create new entity in manager");
+	ECS_ASSERT(version != null_version, "Failed to create new entity in manager");
 	return Entity{ entity, version, *this };
 }
 
@@ -1213,7 +1228,7 @@ inline ecs::EntitiesWithout<Ts...> Manager::EntitiesWithout() {
 	return { *this, instance_->next_entity_, std::make_tuple(GetPool<Ts>(GetId<Ts>())...) };
 }
 
-inline ecs::Entities Manager::Entities() {
+inline ecs::Entities Manager::Entities() const {
 	return { *this, instance_->next_entity_, std::make_tuple() };
 }
 
