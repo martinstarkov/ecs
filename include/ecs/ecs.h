@@ -503,6 +503,10 @@ public:
 		return instance_->count_;
 	}
 
+	[[nodiscard]] bool IsEmpty() const {
+		return Size() == 0;
+	}
+
 	[[nodiscard]] std::size_t Capacity() const {
 		return instance_->versions_.capacity();
 	}
