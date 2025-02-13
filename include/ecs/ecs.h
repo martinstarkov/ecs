@@ -2,7 +2,7 @@
 
 MIT License
 
-Copyright (c) 2024 | Martin Starkov | https://github.com/martinstarkov
+Copyright (c) 2025 | Martin Starkov | https://github.com/martinstarkov
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1057,6 +1057,12 @@ public:
 		return !(*this == e);
 	}
 
+	template <typename... Ts>
+	Entity Copy() const {
+		ECS_ASSERT(IsAlive(), "Cannot copy a dead or null entity");
+		return manager_.CopyEntity<Ts...>(*this);
+	}
+
 	template <typename T, typename... Ts>
 	T& Add(Ts&&... constructor_args) {
 		ECS_ASSERT(IsAlive(), "Cannot add component to dead or null entity");
@@ -1136,7 +1142,8 @@ private:
 
 	Index entity_{ 0 };
 	Version version_{ null_version };
-	Manager manager_{ 0 };
+	// Copying an entity is const on the handle but not on the manager.
+	mutable Manager manager_{ 0 };
 };
 
 inline const Entity null;

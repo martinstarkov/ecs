@@ -1,15 +1,16 @@
 # C++ Entity Component System Library
 
 ## Introduction
+
 This library aims to be cache-friendly by storing components contiguously in memory, while also supporting runtime addition of new component types. The implementation uses a dense and sparse set combined with an indexing table to match entities to their respective components.
 
 ## Usage
 
-1. Acquire the ```include/ecs/ecs.h``` file from this repository (using CMake or manually).
+1. Acquire the `include/ecs/ecs.h` file from this repository (using CMake or manually).
 
 2. Add `#include "ecs/ecs.h"` (or wherever it is kept) to files which utilize the entity component system.
 
-## CMake 
+## CMake
 
 Pasting the following code into a CMake file (minimum version: 3.14) will allow one to use `#include "ecs/ecs.h"` inside their specified CMake target project.
 
@@ -36,7 +37,8 @@ The core storage unit of entities and components is the `ecs::Manager` class, cr
 ecs::Manager manager;
 ```
 
-Constructing a manager in this way allocates an internal manager instance (as a shared pointer). This means that copying a manager via traditional copy construction will simply create a new handle (strong reference) to the existing manager (i.e. they will share memory). This prevents accidental copying of managers, which can be expensive, and allows for non-copy constructible components to exist in a manager. ```manager.Clone()``` should be used if the user wishes to clone the contents of a manager. If one wishes to create a manager handle without allocating a new internal manager instance, simply use:
+Constructing a manager in this way allocates an internal manager instance (as a shared pointer). This means that copying a manager via traditional copy construction will simply create a new handle (strong reference) to the existing manager (i.e. they will share memory). This prevents accidental copying of managers, which can be expensive, and allows for non-copy constructible components to exist in a manager. `manager.Clone()` should be used if the user wishes to clone the contents of a manager. If one wishes to create a manager handle without allocating a new internal manager instance, simply use:
+
 ```c++
 ecs::Manager manager{ false }; // no allocations: useful when storing manager handles in classes.
 ```
@@ -53,7 +55,7 @@ ecs::Manager manager;
 auto entity = manager.CreateEntity();
 ```
 
-Calling ```manager.CreateEntity()``` will create an entity but it will not be considered alive until the manager is refreshed. Entities must be alive to be detected in the manager (for instance when looping through entities with specific components). The memory associated with the entity is, however, stored in the manager and therefore components can be added or removed to/from the entity before refreshing.
+Calling `manager.CreateEntity()` will create an entity but it will not be considered alive until the manager is refreshed. Entities must be alive to be detected in the manager (for instance when looping through entities with specific components). The memory associated with the entity is, however, stored in the manager and therefore components can be added or removed to/from the entity before refreshing.
 
 ```c++
 manager.Refresh();
@@ -66,13 +68,13 @@ entity.Destroy();
 ```
 
 But will not be removed from the manager until a refresh is called. This prevents iterator invalidation if entities destroy each other while looping through a container of them.
-```entity.IsAlive()``` can be called to check the state of validity of an entity in its parent manager.
+`entity.IsAlive()` can be called to check the state of validity of an entity in its parent manager.
 
-**TLDR;** Remember to always call ```manager.Refresh()``` after an entity is created, destroyed or copied.
+**TLDR;** Remember to always call `manager.Refresh()` after an entity is created, destroyed or copied.
 
 A null (invalid) entity can be represented using `ecs::null`.
 
-Note: ```ecs::null``` is a constexpr instance of the ```ecs::impl::NullEntity``` class, therefore the auto keyword should not be used if the entity will be set to a valid one later.
+Note: `ecs::null` is a constexpr instance of the `ecs::impl::NullEntity` class, therefore the auto keyword should not be used if the entity will be set to a valid one later.
 
 ```c++
 ecs::Entity initially_invalid_entity = ecs::null;
@@ -81,16 +83,17 @@ auto permanently_invalid_entity = ecs::null;
 ```
 
 Comparing entities can be done as follows:
-- Using overloaded ```==``` or ```!=``` operator to compare two entity handles (or ```ecs::null```).
-- Using ```entity.IsIdenticalTo(other_entity)``` to compare entity composition (whether they have identical components).
 
-Entity handles implement ```std::hash``` which allows them to be used as keys in hashed containers such as ```std::unordered_map```.
+- Using overloaded `==` or `!=` operator to compare two entity handles (or `ecs::null`).
+- Using `entity.IsIdenticalTo(other_entity)` to compare entity composition (whether they have identical components).
 
-```entity.GetManager()``` returns a reference to the entity handle's parent manager.
+Entity handles implement `std::hash` which allows them to be used as keys in hashed containers such as `std::unordered_map`.
+
+`entity.GetManager()` returns a reference to the entity handle's parent manager.
 
 ## Components
 
-Components can be viewed as properties (or data) of an entity. Due to runtime addition support, the manager does not need to be notified of new component types in compile time. 
+Components can be viewed as properties (or data) of an entity. Due to runtime addition support, the manager does not need to be notified of new component types in compile time.
 
 Components require a valid constructor, destructor, and move constructor.
 
@@ -187,25 +190,41 @@ manager.Refresh();
 
 ## Manager utility functions
 
-As copying entity handles does not create new entities, copying all of an entity's components to a new entity can be done via the manager. Note that the `CopyEntity()` function creates a new manager entity inside of itself, therefore a `manager.Refresh()` must be called afterward for the entity to be detected.
+As copying entity handles does not create new entities, copying all of an entity's components to a new entity can be done via the manager or via the entity handle. This requires that all of the entity's copied components are copy-constructible. Note that the `entity.Copy()` and `manager.CopyEntity(from_entity)` functions create a new entity inside the manager, therefore a `manager.Refresh()` must be called afterward for the entity to be detected.
+
+All components of an entity can be copied as follows:
 
 ```c++
+auto new_entity = entity.Copy();
+// or equivalently:
 auto new_entity = manager.CopyEntity(entity);
+// or without creating a new entity:
+manager.CopyEntity(from_entity, to_entity);
 
 assert(new_entity.IsIdenticalTo(entity)); // passes
 
 manager.Refresh() // still required as with CreateEntity()
-// new_entity now detected when looping through manager entities. 
+// new_entity now detected when looping through manager entities.
 ```
 
-This requires that all of the entity's components are copy-constructible. If the user wishes to copy only certain components they can do so using template parameters:
+If the user wishes to copy only certain components they can do so using template parameters:
 
 ```c++
+auto new_entity = entity.Copy<ZombieComponent, FoodComponent>();
+// or equivalently:
 auto new_entity = manager.CopyEntity<ZombieComponent, FoodComponent>(entity);
+// or without creating a new entity:
+manager.CopyEntity<ZombieComponent, FoodComponent>(from_entity, to_entity);
 
 // new_entity now has only the same ZombieComponent and FoodComponent as entity.
 assert(!new_entity.IsIdenticalTo(entity)); // passes
-``` 
+```
+
+Whether a manager has any alive entities can be checked via:
+
+```c++
+bool is_empty = manager.IsEmpty();
+```
 
 The number of alive entities in the manager can be found using:
 
@@ -245,7 +264,7 @@ Managers can be duplicated as follows:
 auto new_manager = manager.Clone();
 
 // manager comparison is slow and inadvisable for large managers.
-assert(new_manager == manager); 
+assert(new_manager == manager);
 ```
 
 ## Thanks to

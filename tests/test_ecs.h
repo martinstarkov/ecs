@@ -165,9 +165,15 @@ bool TestECS() {
 	assert(!entity2.IsAlive());
 
 	auto new_entity = manager.CopyEntity(entity);
+	// Alternative way of copying entity.
+	auto new_entity_other = entity.Copy();
 	// Note the late manager.Refresh() call.
 
 	assert(new_entity.IsIdenticalTo(entity));
+	assert(entity.IsIdenticalTo(new_entity));
+	assert(new_entity_other.IsIdenticalTo(entity));
+	assert(entity.IsIdenticalTo(new_entity_other));
+
 	assert((entity.Has<FoodComponent, ZombieComponent>()));
 	assert((new_entity.Has<FoodComponent, ZombieComponent>()));
 
@@ -192,9 +198,10 @@ bool TestECS() {
 
 	manager.Refresh();
 
-	assert(manager.Size() == 3); // entity, new_entity, new_entity2.
+	assert(manager.Size() == 4); // entity, new_entity, new_entity2, new_entity_other.
 	new_entity.Destroy();
-	assert(manager.Size() == 3); // entity, new_entity, new_entity2.
+	new_entity_other.Destroy();
+	assert(manager.Size() == 4); // entity, new_entity, new_entity2, new_entity_other.
 	manager.Refresh();
 	assert(manager.Size() == 2); // entity, new_entity2.
 	auto new_entity3 = manager.CreateEntity();
