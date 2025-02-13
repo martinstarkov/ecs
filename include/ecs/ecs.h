@@ -257,7 +257,7 @@ public:
 	}
 
 	[[nodiscard]] T& Get(Index entity) {
-		return const_cast<T&>(static_cast<const Pool<T>&>(*this).Get(entity));
+		return const_cast<T&>(std::as_const(*this).Get(entity));
 	}
 
 	template <typename... Ts>
