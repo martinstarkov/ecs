@@ -427,7 +427,7 @@ public:
 	}
 
 	void Refresh() {
-		if (!instance_->refresh_required_) {
+		if (instance_ == nullptr || !instance_->refresh_required_) {
 			return;
 		}
 		// This must be set before refresh starts in case
@@ -1057,9 +1057,12 @@ public:
 		return !(*this == e);
 	}
 
+	// Copying a destroyed entity will return ecs::null.
 	template <typename... Ts>
 	Entity Copy() const {
-		ECS_ASSERT(IsAlive(), "Cannot copy a dead or null entity");
+		if (!IsAlive()) {
+			return {};
+		}
 		return manager_.CopyEntity<Ts...>(*this);
 	}
 
