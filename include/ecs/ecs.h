@@ -1049,6 +1049,25 @@ class Entity {
 public:
 	Entity() = default;
 
+	Entity(const Entity&)			 = default;
+	Entity& operator=(const Entity&) = default;
+
+	Entity(Entity&& other) noexcept :
+		entity_{ std::exchange(other.entity_, 0) },
+		version_{ std::exchange(other.version_, null_version) },
+		manager_{ std::exchange(other.manager_, Manager{ 0 }) } {}
+
+	Entity& operator=(Entity&& other) noexcept {
+		if (this != &other) {
+			entity_	 = std::exchange(other.entity_, 0);
+			version_ = std::exchange(other.version_, null_version);
+			manager_ = std::exchange(other.manager_, Manager{ 0 });
+		}
+		return *this;
+	}
+
+	~Entity() = default;
+
 	bool operator==(const Entity& e) const {
 		return entity_ == e.entity_ && version_ == e.version_ && manager_ == e.manager_;
 	}
@@ -1060,49 +1079,40 @@ public:
 	// Copying a destroyed entity will return ecs::null.
 	template <typename... Ts>
 	Entity Copy() const {
-		if (!IsAlive()) {
-			return {};
-		}
 		return manager_.CopyEntity<Ts...>(*this);
 	}
 
 	template <typename T, typename... Ts>
 	T& Add(Ts&&... constructor_args) {
-		ECS_ASSERT(IsAlive(), "Cannot add component to dead or null entity");
 		return manager_.Add<T>(entity_, manager_.GetId<T>(), std::forward<Ts>(constructor_args)...);
 	}
 
 	template <typename... Ts>
 	void Remove() {
-		ECS_ASSERT(IsAlive(), "Cannot remove component(s) from dead or null entity");
 		(manager_.Remove<Ts>(entity_, manager_.GetId<Ts>()), ...);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] bool Has() const {
-		return IsAlive() && (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) && ...);
+		return (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) && ...);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] bool HasAny() const {
-		ECS_ASSERT(IsAlive(), "Cannot check if dead or null entity has any component(s)");
 		return (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) || ...);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get() const {
-		ECS_ASSERT(IsAlive(), "Cannot get component(s) from dead or null entity");
 		return manager_.Get<Ts...>(entity_);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get() {
-		ECS_ASSERT(IsAlive(), "Cannot get component(s) from dead or null entity");
 		return manager_.Get<Ts...>(entity_);
 	}
 
 	void Clear() const {
-		ECS_ASSERT(IsAlive(), "Cannot clear components of dead or null entity");
 		manager_.ClearEntity(entity_);
 	}
 
@@ -1110,7 +1120,7 @@ public:
 		return manager_.IsAlive(entity_, version_);
 	}
 
-	void Destroy() {
+	void Destroy() noexcept {
 		if (manager_.IsAlive(entity_, version_)) {
 			manager_.DestroyEntity(entity_, version_);
 		}
