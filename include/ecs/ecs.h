@@ -1079,58 +1079,74 @@ public:
 	// Copying a destroyed entity will return ecs::null.
 	template <typename... Ts>
 	Entity Copy() const {
+		if (manager_.instance_ == nullptr) {
+			return {};
+		}
 		return manager_.CopyEntity<Ts...>(*this);
 	}
 
 	template <typename T, typename... Ts>
 	T& Add(Ts&&... constructor_args) {
+		ECS_ASSERT(manager_.instance_ != nullptr, "Cannot add component to null entity");
 		return manager_.Add<T>(entity_, manager_.GetId<T>(), std::forward<Ts>(constructor_args)...);
 	}
 
 	template <typename... Ts>
 	void Remove() {
+		if (manager_.instance_ == nullptr) {
+			return;
+		}
 		(manager_.Remove<Ts>(entity_, manager_.GetId<Ts>()), ...);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] bool Has() const {
-		return (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) && ...);
+		return manager_.instance_ != nullptr &&
+			   (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) && ...);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] bool HasAny() const {
-		return (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) || ...);
+		return manager_.instance_ != nullptr &&
+			   (manager_.Has<Ts>(entity_, manager_.GetId<Ts>()) || ...);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get() const {
+		ECS_ASSERT(manager_.instance_ != nullptr, "Cannot get component of null entity");
 		return manager_.Get<Ts...>(entity_);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get() {
+		ECS_ASSERT(manager_.instance_ != nullptr, "Cannot get component of null entity");
 		return manager_.Get<Ts...>(entity_);
 	}
 
 	void Clear() const {
+		if (manager_.instance_ == nullptr) {
+			return;
+		}
 		manager_.ClearEntity(entity_);
 	}
 
 	[[nodiscard]] bool IsAlive() const {
-		return manager_.IsAlive(entity_, version_);
+		return manager_.instance_ != nullptr && manager_.IsAlive(entity_, version_);
 	}
 
 	void Destroy() noexcept {
-		if (manager_.IsAlive(entity_, version_)) {
+		if (manager_.instance_ != nullptr && manager_.IsAlive(entity_, version_)) {
 			manager_.DestroyEntity(entity_, version_);
 		}
 	}
 
 	[[nodiscard]] Manager& GetManager() {
+		ECS_ASSERT(manager_.instance_ != nullptr, "Cannot get manager of null entity");
 		return manager_;
 	}
 
 	[[nodiscard]] const Manager& GetManager() const {
+		ECS_ASSERT(manager_.instance_ != nullptr, "Cannot get manager of null entity");
 		return manager_;
 	}
 
@@ -1219,7 +1235,9 @@ inline bool Entity::IsIdenticalTo(const Entity& e) const {
 	}
 
 	return *this != ecs::null && e != ecs::null && entity_ != e.entity_ && manager_ == e.manager_ &&
-		   manager_.Match(entity_, e.entity_);
+				   manager_.instance_ != nullptr
+			 ? manager_.Match(entity_, e.entity_)
+			 : true;
 }
 
 inline Entity Manager::CreateEntity() {
