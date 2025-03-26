@@ -3,6 +3,7 @@
 #include <cassert>
 #include <chrono>
 #include <iostream>
+#include <utility>
 
 #include "ecs/ecs.h"
 
@@ -129,6 +130,13 @@ bool TestECS() {
 
 	int threshold = 100;
 
+	for (auto [e, zombie, food] :
+		 std::as_const(manager).EntitiesWith<ZombieComponent, FoodComponent>()) {
+		assert(e.Has<ZombieComponent>());
+		assert(e.Has<FoodComponent>());
+		// zombie.number += 1; // Fails to compile due to const manager.
+	}
+
 	for (auto [e, zombie, food] : manager.EntitiesWith<ZombieComponent, FoodComponent>()) {
 		if (food.hunger < threshold) {
 			e.Destroy();
@@ -155,6 +163,7 @@ bool TestECS() {
 	entity2.Remove<FoodComponent>();
 
 	for (auto e : manager.EntitiesWithout<FoodComponent>()) {
+		assert((!e.Has<FoodComponent>()));
 		e.Destroy();
 	}
 
