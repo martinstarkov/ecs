@@ -335,27 +335,9 @@ public:
 	}
 
 	[[nodiscard]] constexpr decltype(auto) GetWithEntity(Index entity, const Manager* manager)
-		const {
-		ECS_ASSERT(
-			AllExist(), "Component pools cannot be destroyed while looping through entities"
-		);
-		static_assert(sizeof...(Ts) > 0);
-		return std::tuple<Entity, const Ts&...>(
-			Entity{ entity, manager->GetVersion(entity), manager },
-			(std::get<PoolType<Ts>>(pools_)->template Pool<Ts>::Get(entity))...
-		);
-	}
+		const;
 
-	[[nodiscard]] constexpr decltype(auto) GetWithEntity(Index entity, Manager* manager) {
-		ECS_ASSERT(
-			AllExist(), "Component pools cannot be destroyed while looping through entities"
-		);
-		static_assert(sizeof...(Ts) > 0);
-		return std::tuple<Entity, Ts&...>(
-			Entity{ entity, manager->GetVersion(entity), manager },
-			(std::get<PoolType<Ts>>(pools_)->template Pool<Ts>::Get(entity))...
-		);
-	}
+	[[nodiscard]] constexpr decltype(auto) GetWithEntity(Index entity, Manager* manager);
 
 	[[nodiscard]] constexpr decltype(auto) Get(Index entity) const {
 		ECS_ASSERT(AllExist(), "Manager does not have at least one of the requested components");
@@ -1167,6 +1149,14 @@ public:
 		return { max_entity_, *this };
 	}
 
+	const_iterator begin() const {
+		return { 0, *this };
+	}
+
+	const_iterator end() const {
+		return { max_entity_, *this };
+	}
+
 	const_iterator cbegin() const {
 		return { 0, *this };
 	}
@@ -1279,6 +1269,34 @@ private:
 	impl::Index max_entity_{ 0 };
 	impl::Pools<is_const, Ts...> pools_;
 };
+
+namespace impl {
+
+template <bool is_const, typename... Ts>
+[[nodiscard]] constexpr decltype(auto) Pools<is_const, Ts...>::GetWithEntity(
+	Index entity, const Manager* manager
+) const {
+	ECS_ASSERT(AllExist(), "Component pools cannot be destroyed while looping through entities");
+	static_assert(sizeof...(Ts) > 0);
+	return std::tuple<Entity, const Ts&...>(
+		Entity{ entity, manager->GetVersion(entity), manager },
+		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts>::Get(entity))...
+	);
+}
+
+template <bool is_const, typename... Ts>
+[[nodiscard]] constexpr decltype(auto) Pools<is_const, Ts...>::GetWithEntity(
+	Index entity, Manager* manager
+) {
+	ECS_ASSERT(AllExist(), "Component pools cannot be destroyed while looping through entities");
+	static_assert(sizeof...(Ts) > 0);
+	return std::tuple<Entity, Ts&...>(
+		Entity{ entity, manager->GetVersion(entity), manager },
+		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts>::Get(entity))...
+	);
+}
+
+} // namespace impl
 
 inline Entity Manager::CreateEntity() {
 	impl::Index entity{ 0 };
