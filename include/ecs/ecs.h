@@ -315,8 +315,8 @@ private:
 template <typename T, bool is_const, typename... Ts>
 class Pools {
 public:
-	template <typename T>
-	using PoolType = std::conditional_t<is_const, const Pool<T>*, Pool<T>*>;
+	template <typename TPool>
+	using PoolType = std::conditional_t<is_const, const Pool<TPool>*, Pool<TPool>*>;
 
 	explicit constexpr Pools(PoolType<Ts>... pools) :
 		pools_{ std::tuple<PoolType<Ts>...>(pools...) } {}
