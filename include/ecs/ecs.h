@@ -335,8 +335,9 @@ public:
 			   (!std::get<PoolType<Ts>>(pools_)->template Pool<Ts>::Has(entity) && ...);
 	}
 
-	[[nodiscard]] constexpr decltype(auto) GetWithEntity(Index entity, const Manager* manager)
-		const;
+	[[nodiscard]] constexpr decltype(auto) GetWithEntity(
+		Index entity, const Manager* manager
+	) const;
 
 	[[nodiscard]] constexpr decltype(auto) GetWithEntity(Index entity, Manager* manager);
 
@@ -817,13 +818,13 @@ protected:
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get(impl::Index entity) const {
-		impl::Pools<Entity, true, Ts...> p{ GetPool<Ts...>(GetId<Ts...>())... };
+		impl::Pools<Entity, true, Ts...> p{ (GetPool<Ts>(GetId<Ts>()))... };
 		return p.Get(entity);
 	}
 
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get(impl::Index entity) {
-		impl::Pools<Entity, false, Ts...> p{ GetPool<Ts>(GetId<Ts>())... };
+		impl::Pools<Entity, false, Ts...> p{ (GetPool<Ts>(GetId<Ts>()))... };
 		return p.Get(entity);
 	}
 
@@ -1246,7 +1247,9 @@ private:
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		if constexpr (Criterion == impl::LoopCriterion::WithComponents) {
-			impl::Pools<T, true, Ts...> pools{ manager_->GetPool<Ts>(manager_->GetId<Ts>())... };
+			impl::Pools<T, true, Ts...> pools{
+				manager_->template GetPool<Ts>(manager_->template GetId<Ts>())...
+			};
 			return pools.GetWithEntity(entity, manager_);
 		} else {
 			return T{ entity, manager_->GetVersion(entity), manager_ };
@@ -1259,7 +1262,9 @@ private:
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		if constexpr (Criterion == impl::LoopCriterion::WithComponents) {
-			impl::Pools<T, false, Ts...> pools{ manager_->GetPool<Ts>(manager_->GetId<Ts>())... };
+			impl::Pools<T, false, Ts...> pools{
+				manager_->template GetPool<Ts>(manager_->template GetId<Ts>())...
+			};
 			return pools.GetWithEntity(entity, manager_);
 		} else {
 			return T{ entity, manager_->GetVersion(entity), manager_ };
