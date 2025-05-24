@@ -608,6 +608,11 @@ class DynamicBitset {
 	// Modified version of:
 	// https://github.com/syoyo/dynamic_bitset/blob/master/dynamic_bitset.hh
 public:
+	DynamicBitset() = default;
+
+	DynamicBitset(std::size_t bit_count, std::vector<std::uint8_t> data) :
+		bit_count_{ bit_count }, data_{ data } {}
+
 	/**
 	 * @brief Sets the bit at the specified index to a given value.
 	 *
@@ -726,6 +731,24 @@ public:
 	 */
 	void ShrinkToFit() {
 		data_.shrink_to_fit();
+	}
+
+	/**
+	 * @brief Retrieves the bitset vector.
+	 *
+	 * @return The internal storage vector of bytes.
+	 */
+	[[nodiscard]] const std::vector<std::uint8_t>& GetData() const {
+		return data_;
+	}
+
+	/**
+	 * @brief Retrieves the number of set bits.
+	 *
+	 * @return The total number of bits in the bitset.
+	 */
+	[[nodiscard]] std::size_t GetBitCount() const {
+		return bit_count_;
 	}
 
 private:
