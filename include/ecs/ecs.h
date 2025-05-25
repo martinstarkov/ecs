@@ -1535,6 +1535,22 @@ protected:
 		return pool != nullptr && pool->Has(entity);
 	}
 
+	template <typename T>
+	impl::Pool<T, Archiver>* GetOrAddPool(impl::Index component) {
+		if (component >= pools_.size()) {
+			pools_.resize(static_cast<std::size_t>(component) + 1);
+		}
+		auto pool{ GetPool<T>(component) };
+		if (pool == nullptr) {
+			auto new_pool{ std::make_unique<impl::Pool<T, Archiver>>() };
+			pool = new_pool.get();
+			ECS_ASSERT(component < pools_.size(), "Component index out of range");
+			pools_[component] = std::move(new_pool);
+		}
+		ECS_ASSERT(pool != nullptr, "Could not create new component pool correctly");
+		return pool;
+	}
+
 	/**
 	 * @brief Adds a new component to an entity.
 	 *
@@ -1550,17 +1566,7 @@ protected:
 	 */
 	template <typename T, typename... Ts>
 	T& Add(impl::Index entity, impl::Index component, Ts&&... constructor_args) {
-		if (component >= pools_.size()) {
-			pools_.resize(static_cast<std::size_t>(component) + 1);
-		}
-		auto pool{ GetPool<T>(component) };
-		if (pool == nullptr) {
-			auto new_pool{ std::make_unique<impl::Pool<T, Archiver>>() };
-			pool = new_pool.get();
-			ECS_ASSERT(component < pools_.size(), "Component index out of range");
-			pools_[component] = std::move(new_pool);
-		}
-		ECS_ASSERT(pool != nullptr, "Could not create new component pool correctly");
+		auto pool{ GetOrAddPool<T>(component) };
 		return pool->Add(entity, std::forward<Ts>(constructor_args)...);
 	}
 
