@@ -40,7 +40,7 @@ int main() {
     auto entity = manager.CreateEntity();
     entity.Add<Position>(0.f, 0.f);
     entity.Add<Velocity>(1.f, 1.f);
-    
+
     manager.Refresh();
 
     for (auto [e, pos, vel] : manager.EntitiesWith<Position, Velocity>()) {
@@ -67,7 +67,7 @@ Add the following to your `CMakeLists.txt` (minimum version: 3.14) to fetch and 
 include(FetchContent)
 
 FetchContent_Declare(
-    ecs 
+    ecs
     GIT_REPOSITORY https://github.com/martinstarkov/ecs.git
     GIT_TAG main
 )
@@ -90,16 +90,6 @@ The `ecs::Manager` is the core class responsible for storing and managing all en
 #include "ecs/ecs.h"
 
 ecs::Manager manager;
-```
-
-### Ownership and Copying
-
-Because `ecs::Manager` is a large internal storage container, **copying it is explicitly disabled**. The copy constructor and copy assignment operator are deleted to prevent accidental duplication of potentially expensive data.
-
-To create a deep copy of a manager (i.e., clone all entities and their components), use:
-
-```cpp
-auto new_manager = manager.Clone(); // Deep copy
 ```
 
 ---
@@ -148,11 +138,10 @@ In this example, the entity is only considered "alive" in the manager and part o
 
 ### Invalid Entities
 
-To represent an invalid entity, you can use either `ecs::null` or a default-constructed `ecs::Entity{}`. Both are functionally equivalent.
+To represent an invalid entity, you can use a default-constructed `ecs::Entity{}`.
 
 ```cpp
-ecs::Entity invalid_entity = ecs::null;    // Using ecs::null
-ecs::Entity invalid_entity2{};              // Using default-constructed entity
+ecs::Entity invalid_entity{}; // Using default-constructed entity
 ```
 
 ### Entity Comparisons & Identity

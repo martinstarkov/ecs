@@ -65,11 +65,6 @@ bool TestECS() {
 	assert(!e2.IsAlive());
 	assert(from.IsAlive());
 	assert(to.IsAlive());
-	auto permanently_invalid_entity = ecs::null;
-	assert(e2 != permanently_invalid_entity);
-	e2 = ecs::null;
-	assert(e2 == permanently_invalid_entity);
-	assert(permanently_invalid_entity == e2);
 	ecs::Entity entity = manager.CreateEntity();
 	assert(manager == entity.GetManager());
 
@@ -229,7 +224,7 @@ bool TestECS() {
 	assert(manager.Size() == 0);
 	manager.Refresh();
 	assert(manager.Size() == 3);
-	auto new_manager = manager.Clone();
+	auto new_manager = manager;
 	assert(new_manager != manager);
 	assert(new_manager.Size() == 3);
 	assert(manager.Size() == 3);

@@ -199,7 +199,7 @@ public:
 	 * @param value The vector to be (not) serialized.
 	 */
 	template <typename T>
-	void FromVector(const std::vector<T>& value) {}
+	void FromVector([[maybe_unused]] const std::vector<T>& value) {}
 
 	/**
 	 * @brief Returns an empty vector without reading any data.
@@ -909,13 +909,49 @@ public:
 	/**
 	 * @brief Deleted copy constructor to prevent copying of Manager objects.
 	 */
-	Manager(const Manager&) = delete;
+	Manager(const Manager& other) :
+		next_entity_{ other.next_entity_ },
+		count_{ other.count_ },
+		refresh_required_{ other.refresh_required_ },
+		entities_{ other.entities_ },
+		refresh_{ other.refresh_ },
+		versions_{ other.versions_ },
+		free_entities_{ other.free_entities_ } {
+		pools_.resize(other.pools_.size());
+		for (std::size_t i{ 0 }; i < other.pools_.size(); ++i) {
+			const auto& pool{ other.pools_[i] };
+			if (pool == nullptr) {
+				continue;
+			}
+			pools_[i] = pool->Clone();
+			ECS_ASSERT(pools_[i] != nullptr, "Cloning manager failed");
+		}
+	}
 
 	/**
 	 * @brief Deleted copy assignment operator to prevent assignment of Manager objects.
 	 * @return This object, unchanged.
 	 */
-	Manager& operator=(const Manager&) = delete;
+	Manager& operator=(const Manager& other) {
+		if (this != &other) {
+			next_entity_	  = other.next_entity_;
+			count_			  = other.count_;
+			refresh_required_ = other.refresh_required_;
+			entities_		  = other.entities_;
+			refresh_		  = other.refresh_;
+			versions_		  = other.versions_;
+			free_entities_	  = other.free_entities_;
+			for (std::size_t i{ 0 }; i < other.pools_.size(); ++i) {
+				const auto& pool{ other.pools_[i] };
+				if (pool == nullptr) {
+					continue;
+				}
+				pools_[i] = pool->Clone();
+				ECS_ASSERT(pools_[i] != nullptr, "Cloning manager failed");
+			}
+		}
+		return *this;
+	}
 
 	/**
 	 * @brief Move constructor for the manager.
@@ -973,32 +1009,6 @@ public:
 	 */
 	friend bool operator!=(const Manager& a, const Manager& b) {
 		return !operator==(a, b);
-	}
-
-	/**
-	 * @brief Creates a clone of the current Manager.
-	 * @return A new Manager object that is a copy of the current one.
-	 */
-	[[nodiscard]] Manager Clone() const {
-		Manager clone;
-		clone.count_			= count_;
-		clone.next_entity_		= next_entity_;
-		clone.entities_			= entities_;
-		clone.refresh_			= refresh_;
-		clone.refresh_required_ = refresh_required_;
-		clone.versions_			= versions_;
-		clone.free_entities_	= free_entities_;
-
-		clone.pools_.resize(pools_.size());
-		for (std::size_t i{ 0 }; i < pools_.size(); ++i) {
-			const auto& pool{ pools_[i] };
-			if (pool == nullptr) {
-				continue;
-			}
-			clone.pools_[i] = pool->Clone();
-			ECS_ASSERT(clone.pools_[i] != nullptr, "Cloning manager failed");
-		}
-		return clone;
 	}
 
 	/**
@@ -1879,14 +1889,9 @@ protected:
 	Manager<Archiver>* manager_{ nullptr };
 };
 
-/**
- * @brief A null entity, used to represent an invalid entity.
- */
-inline const Entity null{};
-
 template <typename Archiver>
 inline Entity<Archiver>::operator bool() const {
-	return *this != ecs::null;
+	return *this != Entity<Archiver>{};
 }
 
 template <impl::LoopCriterion Criterion, typename TContainer, typename... Ts>
@@ -2244,7 +2249,7 @@ private:
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		if constexpr (Criterion == impl::LoopCriterion::WithComponents) {
-			impl::Pools<Entity<Archiver>, Archiver, true, Ts...> pools{
+			impl::Pools<T, Archiver, true, Ts...> pools{
 				manager_->template GetPool<Ts>(manager_->template GetId<Ts>())...
 			};
 			return pools.GetWithEntity(entity, manager_);
@@ -2264,7 +2269,7 @@ private:
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		if constexpr (Criterion == impl::LoopCriterion::WithComponents) {
-			impl::Pools<Entity<Archiver>, Archiver, false, Ts...> pools{
+			impl::Pools<T, Archiver, false, Ts...> pools{
 				manager_->template GetPool<Ts>(manager_->template GetId<Ts>())...
 			};
 			return pools.GetWithEntity(entity, manager_);
