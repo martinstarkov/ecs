@@ -189,31 +189,18 @@ constexpr bool is_aggregate_initializable_v = aggregate_initializable<Struct, Ts
  */
 class VoidArchiver {
 public:
-	/**
-	 * @brief Accepts a vector of data but performs no operation.
-	 *
-	 * This method exists to satisfy interface requirements but discards
-	 * the input. It can be used in contexts where serialization is optional.
-	 *
-	 * @tparam T The type of data stored in the vector.
-	 * @param value The vector to be (not) serialized.
-	 */
 	template <typename T>
-	void FromVector([[maybe_unused]] const std::vector<T>& value) {}
+	void SetComponents(const std::vector<T>& value);
 
-	/**
-	 * @brief Returns an empty vector without reading any data.
-	 *
-	 * This method exists to satisfy interface requirements but returns
-	 * an empty vector. It can be used in contexts where deserialization is optional.
-	 *
-	 * @tparam T The expected type of data in the resulting vector.
-	 * @return An empty vector of type T.
-	 */
 	template <typename T>
-	std::vector<T> ToVector() const {
-		return {};
-	}
+	void SetArrays(const std::vector<Index>& dense_set, const std::vector<Index>& sparse_set);
+
+	template <typename T>
+	[[nodiscard]] std::vector<T> GetComponents() const;
+
+	// @return dense_set, sparse_set
+	template <typename T>
+	[[nodiscard]] std::pair<std::vector<Index>, std::vector<Index>> GetArrays() const;
 };
 
 /**
@@ -362,7 +349,8 @@ public:
 		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
 			return;
 		} else {
-			archiver.FromVector(components_);
+			archiver.template SetComponents<T>(components_);
+			archiver.template SetArrays<T>(dense_, sparse_);
 		}
 	}
 
@@ -379,7 +367,10 @@ public:
 		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
 			return;
 		} else {
-			components_ = archiver.template ToVector<T>();
+			components_			 = archiver.template GetComponents<T>();
+			auto [dense, sparse] = archiver.template GetArrays<T>();
+			dense_				 = dense;
+			sparse_				 = sparse;
 		}
 	}
 
@@ -717,7 +708,7 @@ class DynamicBitset {
 public:
 	DynamicBitset() = default;
 
-	DynamicBitset(std::size_t bit_count, std::vector<std::uint8_t> data) :
+	DynamicBitset(std::size_t bit_count, const std::vector<std::uint8_t>& data) :
 		bit_count_{ bit_count }, data_{ data } {}
 
 	/**
