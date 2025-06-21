@@ -980,7 +980,7 @@ public:
 	/**
 	 * @brief Destructor for the manager.
 	 */
-	~Manager() = default;
+	virtual ~Manager() = default;
 
 	/**
 	 * @brief Equality operator for comparing two Manager objects.
@@ -1162,6 +1162,8 @@ public:
 	 * @brief Clears all entities and resets the manager state.
 	 */
 	void Clear() {
+		ClearEntities();
+
 		count_			  = 0;
 		next_entity_	  = 0;
 		refresh_required_ = false;
@@ -1204,6 +1206,8 @@ protected:
 	friend class impl::Pools;
 	template <typename T, typename A>
 	friend class impl::Pool;
+
+	virtual void ClearEntities();
 
 	/**
 	 * @brief Copies an entity's components to another entity.
@@ -2372,6 +2376,13 @@ inline ecs::Entities<Archiver, true> Manager<Archiver>::Entities() const {
 template <typename Archiver>
 inline ecs::Entities<Archiver, false> Manager<Archiver>::Entities() {
 	return { this, next_entity_, impl::Pools<Entity<Archiver>, Archiver, false>{} };
+}
+
+template <typename Archiver>
+inline void Manager<Archiver>::ClearEntities() {
+	for (auto entity : Entities()) {
+		entity.Destroy();
+	}
 }
 
 } // namespace ecs
