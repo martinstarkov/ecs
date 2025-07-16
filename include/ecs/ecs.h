@@ -190,6 +190,15 @@ constexpr bool is_aggregate_initializable_v = aggregate_initializable<Struct, Ts
 class VoidArchiver {
 public:
 	template <typename T>
+	void SetComponent(const T& component);
+
+	template <typename T>
+	[[nodiscard]] bool HasComponent() const;
+
+	template <typename T>
+	[[nodiscard]] T GetComponent() const;
+
+	template <typename T>
 	void SetComponents(const std::vector<T>& value);
 
 	template <typename T>
@@ -284,6 +293,19 @@ public:
 	virtual void Serialize(Archiver& archiver) const = 0;
 
 	/**
+	 * @brief Serializes the component associated with a specific entity using the provided
+	 * archiver.
+	 *
+	 * This function should be implemented by derived classes to serialize the internal data
+	 * of a single component identified by the given entity index. The serialized output
+	 * must be consistent with the format expected by the corresponding deserialization function.
+	 *
+	 * @param archiver The archiver instance used to write the serialized component data.
+	 * @param entity The index of the entity whose component should be serialized.
+	 */
+	virtual void Serialize(Archiver& archiver, Index entity) const = 0;
+
+	/**
 	 * @brief Deserializes components into the pool using the provided archiver.
 	 *
 	 * This function should be implemented by derived classes to reconstruct their internal
@@ -292,6 +314,18 @@ public:
 	 * @param archiver The archiver instance used to read and load the component data.
 	 */
 	virtual void Deserialize(const Archiver& archiver) = 0;
+
+	/**
+	 * @brief Deserializes component data for a specific entity from the provided archiver.
+	 *
+	 * This function should be implemented by derived classes to reconstruct the internal
+	 * component data for a single entity from the archiver. The input format must match
+	 * the one used during serialization of that entity's component.
+	 *
+	 * @param archiver The archiver instance used to read and load the component data.
+	 * @param entity The index of the entity for which the component data should be deserialized.
+	 */
+	virtual void Deserialize(const Archiver& archiver, Index entity) = 0;
 };
 
 /**
@@ -339,10 +373,6 @@ public:
 	/**
 	 * @brief Serializes the component data in the pool using the provided archiver.
 	 *
-	 * This method checks at compile time whether the provided Archiver type is `VoidArchiver`.
-	 * If so, serialization is skipped entirely. Otherwise, the method serializes the internal
-	 * `components_` vector using the archiver's `FromVector()` method.
-	 *
 	 * @param archiver The archiver instance used to write component data.
 	 */
 	void Serialize(Archiver& archiver) const override {
@@ -355,11 +385,21 @@ public:
 	}
 
 	/**
-	 * @brief Deserializes component data into the pool using the provided archiver.
+	 * @brief Serializes the component data of a single entity using the provided archiver.
 	 *
-	 * This method checks at compile time whether the provided Archiver type is `VoidArchiver`.
-	 * If so, deserialization is skipped entirely. Otherwise, the method uses the archiver's
-	 * `ToVector<T>()` method to populate the internal `components_` vector with deserialized data.
+	 * @param archiver The archiver instance used to write component data.
+	 * @param entity The index of the entity whose component should be serialized.
+	 */
+	void Serialize(Archiver& archiver, Index entity) const override {
+		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
+			return;
+		} else if (Has(entity)) {
+			archiver.template SetComponent<T>(Get(entity));
+		}
+	}
+
+	/**
+	 * @brief Deserializes component data into the pool using the provided archiver.
 	 *
 	 * @param archiver The archiver instance used to read component data.
 	 */
@@ -371,6 +411,24 @@ public:
 			auto [dense, sparse] = archiver.template GetArrays<T>();
 			dense_				 = dense;
 			sparse_				 = sparse;
+		}
+	}
+
+	/**
+	 * @brief Deserializes component data for a single entity using the provided archiver.
+	 *
+	 * @param archiver The archiver instance used to read component data.
+	 * @param entity The index of the entity for which the component data should be deserialized.
+	 */
+	void Deserialize(const Archiver& archiver, Index entity) override {
+		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
+			return;
+		} else if (archiver.template HasComponent<T>()) {
+			if (Has(entity)) {
+				Get(entity) = archiver.template GetComponent<T>();
+			} else {
+				Add(entity, archiver.template GetComponent<T>());
+			}
 		}
 	}
 
