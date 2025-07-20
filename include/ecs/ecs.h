@@ -328,6 +328,76 @@ public:
 	virtual void Deserialize(const Archiver& archiver, Index entity) = 0;
 };
 
+template <typename Ret, typename... Args>
+class Hook {
+public:
+	using FunctionType = Ret (*)(void*, Args...);
+	using ReturnType   = Ret;
+
+	Hook() noexcept = default;
+
+	template <Ret (*Function)(Args...)>
+	void Connect() noexcept {
+		fn_ = [](void*, Args... args) -> Ret {
+			return Function(std::forward<Args>(args)...);
+		};
+		instance_ = nullptr;
+	}
+
+	template <typename Type, Ret (Type::*Member)(Args...)>
+	void Connect(Type* obj) noexcept {
+		fn_ = [](void* instance, Args... args) -> Ret {
+			return (static_cast<Type*>(instance)->*Member)(std::forward<Args>(args)...);
+		};
+		instance_ = obj;
+	}
+
+	Ret operator()(Args... args) const {
+		return std::invoke(fn_, instance_, std::forward<Args>(args)...);
+	}
+
+	bool operator==(const Hook& other) const noexcept {
+		return fn_ == other.fn_ && instance_ == other.instance_;
+	}
+
+	bool operator!=(const Hook& other) const noexcept {
+		return !operator==(other);
+	}
+
+private:
+	FunctionType fn_{ nullptr };
+	void* instance_{ nullptr };
+};
+
+template <typename Ret, typename... Args>
+class HookPool {
+public:
+	using HookType = Hook<Ret, Args...>;
+
+	void AddHook(const HookType& hook) {
+		hooks_.emplace_back(hook);
+	}
+
+	void RemoveHook(const HookType& hook) {
+		auto it = std::find(hooks_.begin(), hooks_.end(), hook);
+		if (it != hooks_.end()) {
+			hooks_.erase(it);
+		}
+	}
+
+	void CallAll(Args&&... args) const {
+		for (const auto& hook : hooks_) {
+			std::invoke(hook, std::forward<Args>(args)...);
+		}
+	}
+
+private:
+	std::vector<HookType> hooks_;
+};
+
+template <typename Archiver>
+using ComponentHooks = HookPool<void, Entity<Archiver>>;
+
 /**
  * @class Pool
  * @brief A template class representing a pool of components of type T with optional serialization
@@ -616,6 +686,10 @@ public:
 			return components_.emplace_back(std::forward<Ts>(constructor_args)...);
 		}
 	}
+
+	ComponentHooks<Archiver> construct_hooks;
+	ComponentHooks<Archiver> update_hooks;
+	ComponentHooks<Archiver> destruct_hooks;
 
 private:
 	// @brief The vector storing components of type T.
