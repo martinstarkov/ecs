@@ -1319,12 +1319,13 @@ public:
 	void Reset() {
 		Clear();
 
+		pools_.clear();
+
 		entities_.ShrinkToFit();
 		refresh_.ShrinkToFit();
+
 		versions_.shrink_to_fit();
 		free_entities_.shrink_to_fit();
-
-		pools_.clear();
 		pools_.shrink_to_fit();
 	}
 
@@ -1835,16 +1836,29 @@ public:
 
 	/**
 	 * @brief Copies the current entity.
-	 * If the entity is invalid or destroyed, a new entity is returned.
+	 * If the entity is invalid, an invalid entity is returned.
 	 * @tparam Ts The component types to copy.
 	 * @return A new entity that is a copy of the current one.
 	 */
 	template <typename... Ts>
-	Entity Copy() {
+	[[nodiscard]] Entity Copy() {
 		if (manager_ == nullptr) {
 			return {};
 		}
 		return manager_->template CopyEntity<Ts...>(*this);
+	}
+
+	// TODO: Add brief.
+	template <typename T, typename... Ts>
+	T& TryAdd(Ts&&... constructor_args) {
+		ECS_ASSERT(manager_ != nullptr, "Cannot add component to null entity");
+		if (auto component{ manager_->template GetId<T>() };
+			!manager_->template Has<T>(entity_, component)) {
+			return manager_->template Add<T>(
+				entity_, component, std::forward<Ts>(constructor_args)...
+			);
+		}
+		return manager_->template Get<T>(entity_);
 	}
 
 	/**
