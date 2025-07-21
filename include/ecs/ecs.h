@@ -1237,8 +1237,6 @@ public:
 		return !operator==(a, b);
 	}
 
-	// TODO: Add doxygen documentation for hooks.
-
 	/// Type alias for a single hook used within component hook pools.
 	using Hook = typename impl::ComponentHooks<Archiver>::HookType;
 
