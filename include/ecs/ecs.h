@@ -344,9 +344,12 @@ public:
 	 * the one used during serialization of that entity's component.
 	 *
 	 * @param archiver The archiver instance used to read and load the component data.
+	 * @param manager The manager that the entity belongs to.
 	 * @param entity The index of the entity for which the component data should be deserialized.
 	 */
-	virtual void Deserialize(const Archiver& archiver, Index entity) = 0;
+	virtual void Deserialize(
+		const Archiver& archiver, const Manager<Archiver>& manager, Index entity
+	) = 0;
 };
 
 /**
@@ -600,16 +603,18 @@ public:
 	 * @brief Deserializes component data for a single entity using the provided archiver.
 	 *
 	 * @param archiver The archiver instance used to read component data.
+	 * @param manager The manager that the entity belongs to.
 	 * @param entity The index of the entity for which the component data should be deserialized.
 	 */
-	void Deserialize(const Archiver& archiver, Index entity) override {
+	void Deserialize(const Archiver& archiver, const Manager<Archiver>& manager, Index entity)
+		override {
 		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
 			return;
 		} else if (archiver.template HasComponent<T>()) {
 			if (Has(entity)) {
 				Get(entity) = archiver.template GetComponent<T>();
 			} else {
-				Add(entity, archiver.template GetComponent<T>());
+				Add(manager, entity, archiver.template GetComponent<T>());
 			}
 		}
 	}
@@ -1631,9 +1636,8 @@ protected:
 				std::conjunction_v<std::is_copy_constructible<Ts>...>,
 				"Cannot copy entity with a component that is not copy constructible"
 			);
-			impl::Pools<Entity<Archiver>, Archiver, false, Ts...> pools{
-				GetPool<Ts>(GetId<Ts>())...
-			};
+			impl::Pools<Entity<Archiver>, Archiver, false, Ts...> pools{ GetPool<Ts>(GetId<Ts>()
+			)... };
 			// Validate if the pools exist and contain the required components
 			ECS_ASSERT(
 				pools.AllExist(), "Cannot copy entity with a component that is not "
@@ -3009,8 +3013,7 @@ struct hash<ecs::Entity<Archiver>> {
 	size_t operator()(const ecs::Entity<Archiver>& e) const {
 		// Source: https://stackoverflow.com/a/17017281
 		size_t h{ 17 };
-		h = h * 31 + hash<ecs::Manager<Archiver>*>()(
-						 e.manager_
+		h = h * 31 + hash<ecs::Manager<Archiver>*>()(e.manager_
 					 );								/**< Hash for the associated manager pointer. */
 		h = h * 31 +
 			hash<ecs::impl::Index>()(e.entity_);	/**< Hash for the entity's unique index. */
