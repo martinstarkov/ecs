@@ -7,6 +7,12 @@
 
 #include "ecs/ecs.h"
 
+struct HookComponent {
+	HookComponent() = default;
+
+	int irrelevant{ 0 };
+};
+
 struct HumanComponent {
 	HumanComponent(int age, double height) : age{ age }, height{ height } {}
 
@@ -43,6 +49,82 @@ struct FoodComponent {
 	int hunger{};
 };
 
+void ConstructHook1(ecs::Entity<> e) {
+	std::cout << "Hook: Constructed HookComponent for ";
+	std::cout << e.GetId() << std::endl;
+}
+
+void ConstructHook2(ecs::Entity<> e) {
+	std::cout << "Another hook: Constructed HookComponent for ";
+	std::cout << e.GetId() << std::endl;
+}
+
+void UpdateHook1(ecs::Entity<> e) {
+	std::cout << "Hook: Updated HookComponent for ";
+	std::cout << e.GetId() << std::endl;
+}
+
+void DestructHook1(ecs::Entity<> e) {
+	std::cout << "Hook: Destructed HookComponent for ";
+	std::cout << e.GetId() << std::endl;
+}
+
+bool TestHooks() {
+	ecs::Manager manager;
+
+	auto construct_hook1 = manager.OnConstruct<HookComponent>().Connect<&ConstructHook1>();
+	assert(manager.HasOnConstruct<HookComponent>(construct_hook1));
+	auto construct_hook2 = manager.OnConstruct<HookComponent>().Connect<&ConstructHook2>();
+	assert(manager.HasOnConstruct<HookComponent>(construct_hook2));
+	auto update_hook1 = manager.OnUpdate<HookComponent>().Connect<&UpdateHook1>();
+	assert(manager.HasOnUpdate<HookComponent>(update_hook1));
+	auto destruct_hook1 = manager.OnDestruct<HookComponent>().Connect<&DestructHook1>();
+	assert(manager.HasOnDestruct<HookComponent>(destruct_hook1));
+
+	ecs::Entity e0 = manager.CreateEntity();
+	ecs::Entity e1 = manager.CreateEntity();
+	ecs::Entity e2 = manager.CreateEntity();
+	ecs::Entity e3 = manager.CreateEntity();
+	ecs::Entity e4 = manager.CreateEntity();
+
+	e0.Add<HookComponent>();
+	e1.Add<HookComponent>();
+
+	manager.RemoveOnConstruct<HookComponent>(construct_hook2);
+	assert(!manager.HasOnConstruct<HookComponent>(construct_hook2));
+
+	e2.Add<HookComponent>();
+	e3.Add<HookComponent>();
+	e4.Add<HookComponent>();
+
+	e0.Update<HookComponent>();
+	e1.Update<HookComponent>();
+
+	manager.RemoveOnUpdate<HookComponent>(update_hook1);
+	assert(!manager.HasOnUpdate<HookComponent>(update_hook1));
+
+	e2.Update<HookComponent>();
+	e3.Update<HookComponent>();
+	e4.Update<HookComponent>();
+
+	e0.Remove<HookComponent>();
+	e1.Remove<HookComponent>();
+
+	e2.Clear();
+	e3.Destroy();
+
+	manager.Refresh();
+
+	manager.RemoveOnDestruct<HookComponent>(destruct_hook1);
+	assert(!manager.HasOnDestruct<HookComponent>(destruct_hook1));
+
+	e4.Remove<HookComponent>();
+
+	std::cout << "ECS hook tests passed!" << std::endl;
+
+	return true;
+}
+
 bool TestECS() {
 	std::cout << "Starting ECS tests..." << std::endl;
 
@@ -78,7 +160,12 @@ bool TestECS() {
 	assert(is_human);
 	bool is_cyborg = entity.Has<HumanComponent, RobotComponent>();
 	assert(!is_cyborg);
-	entity.Add<RobotComponent>(33);
+	bool is_human_or_cyborg = entity.HasAny<HumanComponent, RobotComponent>();
+	assert(is_human_or_cyborg);
+	bool is_cyborg_or_human = entity.HasAny<RobotComponent, HumanComponent>();
+	assert(is_cyborg_or_human);
+	entity.TryAdd<RobotComponent>(34);
+	entity.Add<RobotComponent>(33); // replaces previous component
 	is_cyborg = entity.Has<HumanComponent, RobotComponent>();
 	assert(is_cyborg);
 
@@ -89,9 +176,16 @@ bool TestECS() {
 	assert((entity.Has<RobotComponent, HumanComponent>()));
 	auto [robot, h] = entity.Get<RobotComponent, HumanComponent>();
 	assert(robot.id == 33);
+	entity.TryAdd<RobotComponent>(34); // does not replace previous component.
+	auto robot_ref2{ entity.Get<RobotComponent>() };
+	assert(robot_ref2.id == 33);
 	assert(h.age == 22 + 1);
+	auto human_pointer{ entity.TryGet<HumanComponent>() };
+	assert(human_pointer != nullptr);
 	entity.Remove<HumanComponent>();
 	assert(!entity.Has<HumanComponent>());
+	auto inhuman_pointer{ entity.TryGet<HumanComponent>() };
+	assert(inhuman_pointer == nullptr);
 
 	assert(!entity.Has<AlienComponent>());
 	entity.Remove<RobotComponent, AlienComponent>();
@@ -229,6 +323,8 @@ bool TestECS() {
 	assert(new_manager.Size() == 3);
 	assert(manager.Size() == 3);
 
+	TestHooks();
+
 	std::cout << "All ECS tests passed!" << std::endl;
 
 	return true;
@@ -272,7 +368,7 @@ void ProfileECS() {
 			e.Add<ProfileTestComponent>(3, 3);
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Adding (auto for loop) " << entity_count << " components took "
+		std::cout << "Adding " << entity_count << " components took "
 				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
 				  << " ms" << std::endl;
 
@@ -281,7 +377,7 @@ void ProfileECS() {
 			profile.x += 1;
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Incrementing (auto for loop) " << entity_count << " component members took "
+		std::cout << "Incrementing " << entity_count << " component members took "
 				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
 				  << " ms" << std::endl;
 
@@ -290,7 +386,7 @@ void ProfileECS() {
 			e.Remove<ProfileTestComponent>();
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "Removing (auto for loop) " << entity_count << " components took "
+		std::cout << "Removing " << entity_count << " components took "
 				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
 				  << " ms" << std::endl;
 
@@ -302,7 +398,7 @@ void ProfileECS() {
 			e.Add<ProfileTestComponent>(5, 5);
 		}
 		stop = std::chrono::high_resolution_clock::now();
-		std::cout << "2x re-adding (auto for loop) " << entity_count << " components took "
+		std::cout << "2x Readding " << entity_count << " components took "
 				  << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count()
 				  << " ms" << std::endl;
 	} else {

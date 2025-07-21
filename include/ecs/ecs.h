@@ -244,34 +244,47 @@ public:
 	[[nodiscard]] virtual std::unique_ptr<AbstractPool> Clone() const = 0;
 
 	/**
+	 * @brief Invokes destruct hooks on all the components in the pool.
+	 *
+	 * @param manager The manager which owns the pool.
+	 */
+	virtual void InvokeDestructHooks(const Manager<Archiver>& manager) = 0;
+
+	/**
 	 * @brief Copies a component from one entity to another within the pool.
 	 *
+	 * @param manager The manager within which the copy is occurring.
 	 * @param from_entity The source entity from which to copy the component.
 	 * @param to_entity The target entity to which the component will be copied.
 	 */
-	virtual void Copy(Index from_entity, Index to_entity) = 0;
+	virtual void Copy(const Manager<Archiver>& manager, Index from_entity, Index to_entity) = 0;
 
 	/**
 	 * @brief Clears the pool, removing all components.
 	 *
 	 * This method removes all components from the pool but does not reset the size of the pool.
+	 *
+	 * @param manager The manager to which the component pool belongs.
 	 */
-	virtual void Clear() = 0;
+	virtual void Clear(const Manager<Archiver>& manager) = 0;
 
 	/**
 	 * @brief Resets the pool, clearing all components and freeing memory.
 	 *
 	 * This method clears the pool and shrinks its memory usage to fit the current size.
+	 *
+	 * @param manager The manager to which the component pool belongs.
 	 */
-	virtual void Reset() = 0;
+	virtual void Reset(const Manager<Archiver>& manager) = 0;
 
 	/**
 	 * @brief Removes a component from the pool for a given entity.
 	 *
+	 * @param manager The manager to which the entity belongs.
 	 * @param entity The entity from which to remove the component.
 	 * @return True if the component was successfully removed, otherwise false.
 	 */
-	virtual bool Remove(Index entity) = 0;
+	virtual bool Remove(const Manager<Archiver>& manager, Index entity) = 0;
 
 	/**
 	 * @brief Checks if the pool contains a component for the specified entity.
@@ -280,6 +293,14 @@ public:
 	 * @return True if the entity has a component in the pool, otherwise false.
 	 */
 	[[nodiscard]] virtual bool Has(Index entity) const = 0;
+
+	/**
+	 * @brief Calls the update hooks of the component for the specified entity.
+	 *
+	 * @param manager The manager to which the entity belongs.
+	 * @param entity The entity to update.
+	 */
+	virtual void Update(const Manager<Archiver>& manager, Index entity) const = 0;
 
 	/**
 	 * @brief Serializes all components in the pool using the provided archiver.
@@ -328,73 +349,164 @@ public:
 	virtual void Deserialize(const Archiver& archiver, Index entity) = 0;
 };
 
+/**
+ * @brief A class that wraps a callable hook (either free function or member function).
+ *
+ * @tparam Ret Return type of the hook.
+ * @tparam Args Argument types for the hook.
+ */
 template <typename Ret, typename... Args>
-class Hook {
+class HookImpl {
 public:
+	/// Function type for the hook implementation.
 	using FunctionType = Ret (*)(void*, Args...);
-	using ReturnType   = Ret;
+	/// Return type of the hook.
+	using ReturnType = Ret;
 
-	Hook() noexcept = default;
+	/**
+	 * @brief Default constructor.
+	 */
+	HookImpl() noexcept = default;
 
+	/**
+	 * @brief Connects a free (non-member) function to this hook.
+	 *
+	 * @tparam Function A free function pointer of type Ret(Args...).
+	 * @return *this.
+	 */
 	template <Ret (*Function)(Args...)>
-	void Connect() noexcept {
+	HookImpl& Connect() noexcept {
 		fn_ = [](void*, Args... args) -> Ret {
 			return Function(std::forward<Args>(args)...);
 		};
 		instance_ = nullptr;
+		return *this;
 	}
 
+	/**
+	 * @brief Connects a member function to this hook.
+	 *
+	 * @tparam Type The class type that contains the member function.
+	 * @tparam Member A member function pointer of type Ret(Type::*)(Args...).
+	 * @param obj Pointer to the instance of the object.
+	 * @return *this.
+	 */
 	template <typename Type, Ret (Type::*Member)(Args...)>
-	void Connect(Type* obj) noexcept {
+	HookImpl& Connect(Type* obj) noexcept {
 		fn_ = [](void* instance, Args... args) -> Ret {
 			return (static_cast<Type*>(instance)->*Member)(std::forward<Args>(args)...);
 		};
 		instance_ = obj;
+		return *this;
 	}
 
+	/**
+	 * @brief Invokes the connected function with the given arguments.
+	 *
+	 * @param args Arguments to pass to the function.
+	 * @return Result of the function call.
+	 */
 	Ret operator()(Args... args) const {
 		return std::invoke(fn_, instance_, std::forward<Args>(args)...);
 	}
 
-	bool operator==(const Hook& other) const noexcept {
+	/**
+	 * @brief Compares this hook to another for equality.
+	 *
+	 * @param other Another HookImpl instance.
+	 * @return true if both function and instance are equal.
+	 */
+	bool operator==(const HookImpl& other) const noexcept {
 		return fn_ == other.fn_ && instance_ == other.instance_;
 	}
 
-	bool operator!=(const Hook& other) const noexcept {
+	/**
+	 * @brief Compares this hook to another for inequality.
+	 *
+	 * @param other Another HookImpl instance.
+	 * @return true if either function or instance differ.
+	 */
+	bool operator!=(const HookImpl& other) const noexcept {
 		return !operator==(other);
 	}
 
 private:
-	FunctionType fn_{ nullptr };
-	void* instance_{ nullptr };
+	FunctionType fn_{ nullptr }; ///< Function pointer with void* for object binding.
+	void* instance_{ nullptr };	 ///< Pointer to the object instance for member functions.
 };
 
+/**
+ * @brief A container for storing and managing multiple hooks.
+ *
+ * @tparam Ret Return type for all hooks in the pool.
+ * @tparam Args Argument types for all hooks in the pool.
+ */
 template <typename Ret, typename... Args>
 class HookPool {
 public:
-	using HookType = Hook<Ret, Args...>;
+	/// Type alias for the hook implementation.
+	using HookType = HookImpl<Ret, Args...>;
 
-	void AddHook(const HookType& hook) {
-		hooks_.emplace_back(hook);
+	/**
+	 * @brief Adds a new default-initialized hook to the pool.
+	 *
+	 * @return Reference to the newly added hook.
+	 */
+	HookType& AddHook() {
+		return hooks_.emplace_back();
 	}
 
+	/**
+	 * @brief Checks whether the hook pool has the given hook.
+	 *
+	 * @param hook The HookImpl instance instance to check.
+	 * @return True if the hook pool has the specified hook, false otherwise.
+	 */
+	[[nodiscard]] bool HasHook(const HookType& hook) const {
+		auto it{ std::find(hooks_.begin(), hooks_.end(), hook) };
+		return it != hooks_.end();
+	}
+
+	/**
+	 * @brief Removes a hook from the pool.
+	 *
+	 * @param hook The HookImpl instance to remove.
+	 */
 	void RemoveHook(const HookType& hook) {
-		auto it = std::find(hooks_.begin(), hooks_.end(), hook);
-		if (it != hooks_.end()) {
-			hooks_.erase(it);
-		}
+		auto it{ std::find(hooks_.begin(), hooks_.end(), hook) };
+		ECS_ASSERT(it != hooks_.end(), "Cannot remove hook which has not been added");
+		hooks_.erase(it);
 	}
 
-	void CallAll(Args&&... args) const {
+	/**
+	 * @brief Invokes all hooks in the pool with the given arguments.
+	 *
+	 * @param args Arguments to pass to each hook.
+	 */
+	void Invoke(Args&&... args) const {
 		for (const auto& hook : hooks_) {
 			std::invoke(hook, std::forward<Args>(args)...);
 		}
 	}
 
 private:
-	std::vector<HookType> hooks_;
+	/**
+	 * @brief Adds an existing hook to the pool.
+	 *
+	 * @param hook The HookImpl instance to add.
+	 */
+	void AddHook(const HookType& hook) {
+		hooks_.emplace_back(hook);
+	}
+
+	std::vector<HookType> hooks_; ///< Internal storage of hook instances.
 };
 
+/**
+ * @brief Alias for a hook pool specialized for component hooks.
+ *
+ * @tparam Archiver Type of the archiver used in the entity system.
+ */
 template <typename Archiver>
 using ComponentHooks = HookPool<void, Entity<Archiver>>;
 
@@ -438,7 +550,7 @@ public:
 	Pool& operator=(const Pool&) = default;
 
 	/** @brief Destructor for the Pool class. */
-	~Pool() override = default;
+	~Pool() final = default;
 
 	/**
 	 * @brief Serializes the component data in the pool using the provided archiver.
@@ -521,9 +633,12 @@ public:
 		// component pools.
 		if constexpr (std::is_copy_constructible_v<T>) {
 			auto pool{ std::make_unique<Pool<T, Archiver>>() };
-			pool->components_ = components_;
-			pool->dense_	  = dense_;
-			pool->sparse_	  = sparse_;
+			pool->components_	   = components_;
+			pool->dense_		   = dense_;
+			pool->sparse_		   = sparse_;
+			pool->construct_hooks_ = construct_hooks_;
+			pool->destruct_hooks_  = destruct_hooks_;
+			pool->update_hooks_	   = update_hooks_;
 			return pool;
 		} else {
 			ECS_ASSERT(
@@ -534,45 +649,37 @@ public:
 	}
 
 	/**
+	 * @brief Invokes destruct hooks on all the components in the pool.
+	 *
+	 * @param manager The manager which owns the pool.
+	 */
+	void InvokeDestructHooks(const Manager<Archiver>& manager) final;
+
+	/**
 	 * @brief Copies a component from one entity to another.
 	 *
+	 * @param manager The manager within which the copy is occurring.
 	 * @param from_entity The source entity from which to copy the component.
 	 * @param to_entity The target entity to which the component will be copied.
 	 */
-	void Copy(Index from_entity, Index to_entity) final {
-		// Same reason as given in Clone() for why no static_assert.
-		if constexpr (std::is_copy_constructible_v<T>) {
-			ECS_ASSERT(
-				Has(from_entity), "Cannot copy from an entity which does not exist in the manager"
-			);
-			if (!Has(to_entity)) {
-				Add(to_entity, components_[sparse_[from_entity]]);
-			} else {
-				components_.emplace(
-					components_.begin() + sparse_[to_entity], components_[sparse_[from_entity]]
-				);
-			}
-		} else {
-			ECS_ASSERT(false, "Cannot copy an entity with a non copy constructible component");
-		}
-	}
+	void Copy(const Manager<Archiver>& manager, Index from_entity, Index to_entity) final;
 
 	/**
 	 * @brief Clears the pool, removing all components.
 	 *
 	 * This method removes all components from the pool.
+	 *
+	 * @param manager The manager to which the component pool belongs.
 	 */
-	void Clear() final {
-		components_.clear();
-		dense_.clear();
-		sparse_.clear();
-	}
+	void Clear(const Manager<Archiver>& manager) final;
 
 	/**
 	 * @brief Resets the pool by clearing all components and shrinking memory usage.
+	 *
+	 * @param manager The manager to which the component pool belongs.
 	 */
-	void Reset() final {
-		Clear();
+	void Reset(const Manager<Archiver>& manager) final {
+		Clear(manager);
 
 		components_.shrink_to_fit();
 		dense_.shrink_to_fit();
@@ -582,25 +689,11 @@ public:
 	/**
 	 * @brief Removes a component from the pool for a given entity.
 	 *
+	 * @param manager The manager to which the entity belongs.
 	 * @param entity The entity from which to remove the component.
 	 * @return True if the component was successfully removed, otherwise false.
 	 */
-	bool Remove(Index entity) final {
-		if (!Has(entity)) {
-			return false;
-		}
-		// See https://skypjack.github.io/2020-08-02-ecs-baf-part-9/ for
-		// in-depth explanation. In short, swap with back and pop back,
-		// relinking sparse ids after.
-		auto last{ dense_.back() };
-		std::swap(dense_.back(), dense_[sparse_[entity]]);
-		std::swap(components_.back(), components_[sparse_[entity]]);
-		ECS_ASSERT(last < sparse_.size(), "");
-		std::swap(sparse_[last], sparse_[entity]);
-		dense_.pop_back();
-		components_.pop_back();
-		return true;
-	}
+	bool Remove(const Manager<Archiver>& manager, Index entity) final;
 
 	/**
 	 * @brief Checks if the pool contains a component for the specified entity.
@@ -618,6 +711,14 @@ public:
 		}
 		return entity == dense_[s];
 	}
+
+	/**
+	 * @brief Calls the update hooks of the component for the specified entity.
+	 *
+	 * @param manager The manager to which the entity belongs.
+	 * @param entity The entity to update.
+	 */
+	virtual void Update(const Manager<Archiver>& manager, Index entity) const final;
 
 	/**
 	 * @brief Retrieves a constant reference to the component associated with the specified entity.
@@ -647,49 +748,37 @@ public:
 	/**
 	 * @brief Adds a component to the pool for the specified entity.
 	 *
+	 * @param manager The manager to which the entity belongs.
 	 * @param entity The entity to which the component will be added.
 	 * @param constructor_args Arguments to construct the component.
 	 * @return A reference to the newly added component.
 	 */
 	template <typename... Ts>
-	T& Add(Index entity, Ts&&... constructor_args) {
-		static_assert(
-			std::is_constructible_v<T, Ts...> || tt::is_aggregate_initializable_v<T, Ts...>,
-			"Cannot add component which is not constructible from given arguments"
-		);
-		if (entity < sparse_.size()) {
-			// Entity has had the component before.
-			if (sparse_[entity] < dense_.size() && dense_[sparse_[entity]] == entity) {
-				// Entity currently has the component.
-				// Replace the current component with a new component.
-				T& component{ components_[sparse_[entity]] };
-				component.~T();
-				// This approach prevents the creation of a temporary component object.
-				if constexpr (std::is_aggregate_v<T>) {
-					new (&component) T{ std::forward<Ts>(constructor_args)... };
-				} else {
-					new (&component) T(std::forward<Ts>(constructor_args)...);
-				}
-				return component;
-			}
-			// Entity currently does not have the component.
-			sparse_[entity] = static_cast<Index>(dense_.size());
-		} else {
-			// Entity has never had the component.
-			sparse_.resize(static_cast<std::size_t>(entity) + 1, static_cast<Index>(dense_.size()));
-		}
-		// Add new component to the entity.
-		dense_.push_back(entity);
-		if constexpr (std::is_aggregate_v<T>) {
-			return components_.emplace_back(std::move(T{ std::forward<Ts>(constructor_args)... }));
-		} else {
-			return components_.emplace_back(std::forward<Ts>(constructor_args)...);
-		}
+	T& Add(const Manager<Archiver>& manager, Index entity, Ts&&... constructor_args);
+
+	[[nodiscard]] const ComponentHooks<Archiver>& GetConstructHooks() const {
+		return construct_hooks_;
 	}
 
-	ComponentHooks<Archiver> construct_hooks;
-	ComponentHooks<Archiver> update_hooks;
-	ComponentHooks<Archiver> destruct_hooks;
+	[[nodiscard]] const ComponentHooks<Archiver>& GetDestructHooks() const {
+		return destruct_hooks_;
+	}
+
+	[[nodiscard]] const ComponentHooks<Archiver>& GetUpdateHooks() const {
+		return update_hooks_;
+	}
+
+	[[nodiscard]] ComponentHooks<Archiver>& GetConstructHooks() {
+		return construct_hooks_;
+	}
+
+	[[nodiscard]] ComponentHooks<Archiver>& GetDestructHooks() {
+		return destruct_hooks_;
+	}
+
+	[[nodiscard]] ComponentHooks<Archiver>& GetUpdateHooks() {
+		return update_hooks_;
+	}
 
 private:
 	// @brief The vector storing components of type T.
@@ -700,6 +789,12 @@ private:
 
 	// @brief The sparse vector indexing components.
 	std::vector<Index> sparse_;
+
+	ComponentHooks<Archiver> construct_hooks_;
+
+	ComponentHooks<Archiver> update_hooks_;
+
+	ComponentHooks<Archiver> destruct_hooks_;
 };
 
 /**
@@ -727,11 +822,13 @@ public:
 	/**
 	 * @brief Copies components from one entity to another across all pools.
 	 *
+	 * @param manager The manager in which the copy is occurring.
 	 * @param from_id The source entity.
 	 * @param to_id The target entity.
 	 */
-	constexpr void Copy(Index from_id, Index to_id) {
-		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Copy(from_id, to_id), ...);
+	constexpr void Copy(const Manager<Archiver>& manager, Index from_id, Index to_id) {
+		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Copy(manager, from_id, to_id),
+		 ...);
 	}
 
 	/**
@@ -1000,7 +1097,7 @@ private:
 	// @brief The total number of bits in the bitset.
 	std::size_t bit_count_{ 0 };
 
-	// TODO: Move to std::byte instead of std::uint8_t.
+	// TODO: Eventually move to using std::byte instead of std::uint8_t.
 
 	// @brief The internal storage for the bitset (as a vector of bytes).
 	std::vector<std::uint8_t> data_;
@@ -1112,7 +1209,13 @@ public:
 	/**
 	 * @brief Destructor for the manager.
 	 */
-	virtual ~Manager() = default;
+	virtual ~Manager() {
+		for (auto& pool : pools_) {
+			if (pool) {
+				pool->InvokeDestructHooks(*this);
+			}
+		}
+	}
 
 	/**
 	 * @brief Equality operator for comparing two Manager objects.
@@ -1132,6 +1235,154 @@ public:
 	 */
 	friend bool operator!=(const Manager& a, const Manager& b) {
 		return !operator==(a, b);
+	}
+
+	// TODO: Add doxygen documentation for hooks.
+
+	/// Type alias for a single hook used within component hook pools.
+	using Hook = typename impl::ComponentHooks<Archiver>::HookType;
+
+	/**
+	 * @brief Adds a construct hook for the specified component type.
+	 *
+	 * This hook is invoked whenever a component of type `T` is constructed.
+	 * Note: Discarding the returned hook instance will make it impossible to remove the hook later.
+	 *
+	 * @tparam T The component type to attach the construct hook to.
+	 * @return Reference to the newly added hook, which can be configured or stored for later
+	 * removal.
+	 */
+	template <typename T>
+	[[nodiscard]] Hook& OnConstruct() {
+		auto component{ GetId<T>() };
+		auto pool{ GetOrAddPool<T>(component) };
+		return pool->template Pool<T, Archiver>::GetConstructHooks().AddHook();
+	}
+
+	/**
+	 * @brief Adds a destruct hook for the specified component type.
+	 *
+	 * This hook is invoked whenever a component of type `T` is destroyed.
+	 * Note: Discarding the returned hook instance will make it impossible to remove the hook later.
+	 *
+	 * @tparam T The component type to attach the destruct hook to.
+	 * @return Reference to the newly added hook, which can be configured or stored for later
+	 * removal.
+	 */
+	template <typename T>
+	[[nodiscard]] Hook& OnDestruct() {
+		auto component{ GetId<T>() };
+		auto pool{ GetOrAddPool<T>(component) };
+		return pool->template Pool<T, Archiver>::GetDestructHooks().AddHook();
+	}
+
+	/**
+	 * @brief Adds an update hook for the specified component type.
+	 *
+	 * This hook is invoked during update operations on a component of type `T`.
+	 * Note: Discarding the returned hook instance will make it impossible to remove the hook later.
+	 *
+	 * @tparam T The component type to attach the update hook to.
+	 * @return Reference to the newly added hook, which can be configured or stored for later
+	 * removal.
+	 */
+	template <typename T>
+	[[nodiscard]] Hook& OnUpdate() {
+		auto component{ GetId<T>() };
+		auto pool{ GetOrAddPool<T>(component) };
+		return pool->template Pool<T, Archiver>::GetUpdateHooks().AddHook();
+	}
+
+	/**
+	 * @brief Checks if a specific construct hook exists for the given component type.
+	 *
+	 * This function allows you to verify whether the provided hook is currently registered
+	 * as a construct hook for the specified component type `T`.
+	 *
+	 * @tparam T The component type to check.
+	 * @param hook The hook to search for in the construct hook list.
+	 * @return true if the hook is registered; false otherwise.
+	 */
+	template <typename T>
+	[[nodiscard]] bool HasOnConstruct(const Hook& hook) const {
+		auto component{ GetId<T>() };
+		const auto pool{ GetPool<T>(component) };
+		return pool != nullptr &&
+			   pool->template Pool<T, Archiver>::GetConstructHooks().HasHook(hook);
+	}
+
+	/**
+	 * @brief Checks if a specific destruct hook exists for the given component type.
+	 *
+	 * This function allows you to verify whether the provided hook is currently registered
+	 * as a destruct hook for the specified component type `T`.
+	 *
+	 * @tparam T The component type to check.
+	 * @param hook The hook to search for in the destruct hook list.
+	 * @return true if the hook is registered; false otherwise.
+	 */
+	template <typename T>
+	[[nodiscard]] bool HasOnDestruct(const Hook& hook) const {
+		auto component{ GetId<T>() };
+		const auto pool{ GetPool<T>(component) };
+		return pool != nullptr &&
+			   pool->template Pool<T, Archiver>::GetDestructHooks().HasHook(hook);
+	}
+
+	/**
+	 * @brief Checks if a specific update hook exists for the given component type.
+	 *
+	 * This function allows you to verify whether the provided hook is currently registered
+	 * as an update hook for the specified component type `T`.
+	 *
+	 * @tparam T The component type to check.
+	 * @param hook The hook to search for in the update hook list.
+	 * @return true if the hook is registered; false otherwise.
+	 */
+	template <typename T>
+	[[nodiscard]] bool HasOnUpdate(const Hook& hook) const {
+		auto component{ GetId<T>() };
+		const auto pool{ GetPool<T>(component) };
+		return pool != nullptr && pool->template Pool<T, Archiver>::GetUpdateHooks().HasHook(hook);
+	}
+
+	/**
+	 * @brief Removes a previously added construct hook for the specified component type.
+	 *
+	 * @tparam T The component type the hook was registered to.
+	 * @param hook The hook instance to remove.
+	 */
+	template <typename T>
+	void RemoveOnConstruct(const Hook& hook) {
+		auto component{ GetId<T>() };
+		auto pool{ GetOrAddPool<T>(component) };
+		pool->template Pool<T, Archiver>::GetConstructHooks().RemoveHook(hook);
+	}
+
+	/**
+	 * @brief Removes a previously added destruct hook for the specified component type.
+	 *
+	 * @tparam T The component type the hook was registered to.
+	 * @param hook The hook instance to remove.
+	 */
+	template <typename T>
+	void RemoveOnDestruct(const Hook& hook) {
+		auto component{ GetId<T>() };
+		auto pool{ GetOrAddPool<T>(component) };
+		pool->template Pool<T, Archiver>::GetDestructHooks().RemoveHook(hook);
+	}
+
+	/**
+	 * @brief Removes a previously added update hook for the specified component type.
+	 *
+	 * @tparam T The component type the hook was registered to.
+	 * @param hook The hook instance to remove.
+	 */
+	template <typename T>
+	void RemoveOnUpdate(const Hook& hook) {
+		auto component{ GetId<T>() };
+		auto pool{ GetOrAddPool<T>(component) };
+		pool->template Pool<T, Archiver>::GetUpdateHooks().RemoveHook(hook);
 	}
 
 	/**
@@ -1294,6 +1545,12 @@ public:
 	 * @brief Clears all entities and resets the manager state.
 	 */
 	void Clear() {
+		for (const auto& pool : pools_) {
+			if (pool != nullptr) {
+				pool->Clear(*this);
+			}
+		}
+
 		ClearEntities();
 
 		count_			  = 0;
@@ -1304,12 +1561,6 @@ public:
 		refresh_.Clear();
 		versions_.clear();
 		free_entities_.clear();
-
-		for (const auto& pool : pools_) {
-			if (pool != nullptr) {
-				pool->Clear();
-			}
-		}
 	}
 
 	/**
@@ -1317,6 +1568,12 @@ public:
 	 *        Shrinks the capacity of the storage.
 	 */
 	void Reset() {
+		for (auto& pool : pools_) {
+			if (pool) {
+				pool->Reset(*this);
+			}
+		}
+
 		Clear();
 
 		pools_.clear();
@@ -1376,8 +1633,9 @@ protected:
 				std::conjunction_v<std::is_copy_constructible<Ts>...>,
 				"Cannot copy entity with a component that is not copy constructible"
 			);
-			impl::Pools<Entity<Archiver>, Archiver, false, Ts...> pools{ GetPool<Ts>(GetId<Ts>()
-			)... };
+			impl::Pools<Entity<Archiver>, Archiver, false, Ts...> pools{
+				GetPool<Ts>(GetId<Ts>())...
+			};
 			// Validate if the pools exist and contain the required components
 			ECS_ASSERT(
 				pools.AllExist(), "Cannot copy entity with a component that is not "
@@ -1386,12 +1644,12 @@ protected:
 			ECS_ASSERT(
 				pools.Has(from_id), "Cannot copy entity with a component that it does not have"
 			);
-			pools.Copy(from_id, to_id);
+			pools.Copy(*this, from_id, to_id);
 		} else { // Copy all components.
 			// Loop through all pools and copy components
 			for (auto& pool : pools_) {
 				if (pool != nullptr && pool->Has(from_id)) {
-					pool->Copy(from_id, to_id);
+					pool->Copy(*this, from_id, to_id);
 				}
 			}
 		}
@@ -1473,7 +1731,7 @@ protected:
 	void ClearEntity(impl::Index entity) const {
 		for (const auto& pool : pools_) {
 			if (pool != nullptr) {
-				pool->Remove(entity);
+				pool->Remove(*this, entity);
 			}
 		}
 	}
@@ -1513,7 +1771,7 @@ protected:
 	 * @return The version of the entity.
 	 */
 	[[nodiscard]] impl::Version GetVersion(impl::Index entity) const {
-		ECS_ASSERT(entity < versions_.size(), "");
+		ECS_ASSERT(entity < versions_.size(), "Entity does not have a valid version");
 		return versions_[entity];
 	}
 
@@ -1616,7 +1874,7 @@ protected:
 	void Remove(impl::Index entity, impl::Index component) {
 		auto pool{ GetPool<T>(component) };
 		if (pool != nullptr) {
-			pool->template Pool<T, Archiver>::Remove(entity);
+			pool->template Pool<T, Archiver>::Remove(*this, entity);
 		}
 	}
 
@@ -1663,6 +1921,18 @@ protected:
 		return pool != nullptr && pool->Has(entity);
 	}
 
+	/**
+	 * @brief Invokes the specified components' update hooks.
+	 * @tparam Ts The component types to update.
+	 */
+	template <typename T>
+	void Update(impl::Index entity, impl::Index component) const {
+		const auto pool{ GetPool<T>(component) };
+		if (pool != nullptr) {
+			pool->Update(*this, entity);
+		}
+	}
+
 	template <typename T>
 	impl::Pool<T, Archiver>* GetOrAddPool(impl::Index component) {
 		if (component >= pools_.size()) {
@@ -1695,7 +1965,7 @@ protected:
 	template <typename T, typename... Ts>
 	T& Add(impl::Index entity, impl::Index component, Ts&&... constructor_args) {
 		auto pool{ GetOrAddPool<T>(component) };
-		return pool->Add(entity, std::forward<Ts>(constructor_args)...);
+		return pool->Add(*this, entity, std::forward<Ts>(constructor_args)...);
 	}
 
 	/**
@@ -1836,22 +2106,29 @@ public:
 
 	/**
 	 * @brief Copies the current entity.
-	 * If the entity is invalid, an invalid entity is returned.
+	 * If the entity is invalid, an invalid entity is returned. Refresh the manager for the entity
+	 * to appear while looping through manager entities.
 	 * @tparam Ts The component types to copy.
 	 * @return A new entity that is a copy of the current one.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] Entity Copy() {
+	Entity Copy() {
 		if (manager_ == nullptr) {
 			return {};
 		}
 		return manager_->template CopyEntity<Ts...>(*this);
 	}
 
-	// TODO: Add brief.
+	/**
+	 * @brief Adds a component to the entity if it does not already have it, otherwise does nothing.
+	 * @tparam T The component type to add.
+	 * @tparam Ts The constructor arguments for the component.
+	 * @param constructor_args The arguments to construct the component.
+	 * @return A reference to the added or already existing component.
+	 */
 	template <typename T, typename... Ts>
 	T& TryAdd(Ts&&... constructor_args) {
-		ECS_ASSERT(manager_ != nullptr, "Cannot add component to null entity");
+		ECS_ASSERT(manager_ != nullptr, "Cannot add component to a null entity");
 		if (auto component{ manager_->template GetId<T>() };
 			!manager_->template Has<T>(entity_, component)) {
 			return manager_->template Add<T>(
@@ -1862,7 +2139,8 @@ public:
 	}
 
 	/**
-	 * @brief Adds a component to the entity.
+	 * @brief Adds a component to the entity. If the entity already has the component, it is
+	 * replaced.
 	 * @tparam T The component type to add.
 	 * @tparam Ts The constructor arguments for the component.
 	 * @param constructor_args The arguments to construct the component.
@@ -1870,14 +2148,15 @@ public:
 	 */
 	template <typename T, typename... Ts>
 	T& Add(Ts&&... constructor_args) {
-		ECS_ASSERT(manager_ != nullptr, "Cannot add component to null entity");
+		ECS_ASSERT(manager_ != nullptr, "Cannot add component to a null entity");
 		return manager_->template Add<T>(
 			entity_, manager_->template GetId<T>(), std::forward<Ts>(constructor_args)...
 		);
 	}
 
 	/**
-	 * @brief Removes components from the entity.
+	 * @brief Removes components from the entity. If the entity does not have the component, does
+	 * nothing.
 	 * @tparam Ts The component types to remove.
 	 */
 	template <typename... Ts>
@@ -1889,7 +2168,7 @@ public:
 	}
 
 	/**
-	 * @brief Checks if the entity has all specified components.
+	 * @brief Checks if the entity has all the specified components.
 	 * @tparam Ts The component types to check for.
 	 * @return True if the entity has all specified components, false otherwise.
 	 */
@@ -1917,7 +2196,7 @@ public:
 	 */
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get() const {
-		ECS_ASSERT(manager_ != nullptr, "Cannot get component of null entity");
+		ECS_ASSERT(manager_ != nullptr, "Cannot get component of a null entity");
 		return manager_->template Get<Ts...>(entity_);
 	}
 
@@ -1928,8 +2207,46 @@ public:
 	 */
 	template <typename... Ts>
 	[[nodiscard]] decltype(auto) Get() {
-		ECS_ASSERT(manager_ != nullptr, "Cannot get component of null entity");
+		ECS_ASSERT(manager_ != nullptr, "Cannot get component of a null entity");
 		return manager_->template Get<Ts...>(entity_);
+	}
+
+	/**
+	 * @brief Retrieve a const pointer to the specified entity component. If entity does not have
+	 * the component, returns nullptr.
+	 * @tparam T The component type to retrieve.
+	 * @return A const pointer component of the entity, or nullptr if the entity has no such
+	 * component.
+	 */
+	template <typename T>
+	[[nodiscard]] const T* TryGet() const {
+		ECS_ASSERT(manager_ != nullptr, "Cannot get component of a null entity");
+		if (auto component{ manager_->template GetId<T>() };
+			manager_->template Has<T>(entity_, component)) {
+			return &manager_->template Get<T>(entity_);
+		}
+		return nullptr;
+	}
+
+	/**
+	 * @brief Retrieve a pointer to the specified entity component. If entity does not have the
+	 * component, returns nullptr.
+	 * @tparam T The component type to retrieve.
+	 * @return A pointer component of the entity, or nullptr if the entity has no such component.
+	 */
+	template <typename T>
+	[[nodiscard]] T* TryGet() {
+		return const_cast<T*>(std::as_const(*this).template TryGet<T>());
+	}
+
+	/**
+	 * @brief Invokes the specified components' update hooks.
+	 * @tparam Ts The component types to update.
+	 */
+	template <typename... Ts>
+	void Update() const {
+		ECS_ASSERT(manager_ != nullptr, "Cannot update the component of a null entity");
+		(manager_->template Update<Ts>(entity_, manager_->template GetId<Ts>()), ...);
 	}
 
 	/**
@@ -1969,7 +2286,7 @@ public:
 	 * @return A reference to the entity's manager.
 	 */
 	[[nodiscard]] Manager<Archiver>& GetManager() {
-		ECS_ASSERT(manager_ != nullptr, "Cannot get manager of null entity");
+		ECS_ASSERT(manager_ != nullptr, "Cannot get manager of a null entity");
 		return *manager_;
 	}
 
@@ -1978,7 +2295,7 @@ public:
 	 * @return A const reference to the entity's manager.
 	 */
 	[[nodiscard]] const Manager<Archiver>& GetManager() const {
-		ECS_ASSERT(manager_ != nullptr, "Cannot get manager of null entity");
+		ECS_ASSERT(manager_ != nullptr, "Cannot get manager of a null entity");
 		return *manager_;
 	}
 
@@ -1997,12 +2314,39 @@ public:
 				 : true;
 	}
 
+	/**
+	 * @brief Retrieves the internal ID/index of the entity.
+	 *
+	 * This ID uniquely identifies the entity within the ECS system's storage.
+	 * It is typically used internally for lookups or comparisons.
+	 * Note: This should not be used for serialization.
+	 *
+	 * @return The entity's index (ID).
+	 */
+	[[nodiscard]] impl::Index GetId() const {
+		return entity_;
+	}
+
+	/**
+	 * @brief Retrieves the version of the entity.
+	 *
+	 * The version distinguishes between different incarnations of an entity
+	 * that may reuse the same ID after destruction. Useful for validating handles.
+	 *
+	 * @return The current version of the entity.
+	 */
+	[[nodiscard]] impl::Index GetVersion() const {
+		return version_;
+	}
+
 protected:
 	template <typename A>
 	friend class Manager;
 	friend struct std::hash<Entity>;
 	template <typename T, typename A, bool is_const, impl::LoopCriterion Criterion, typename... Ts>
 	friend class EntityContainer;
+	template <typename T, typename A>
+	friend class impl::Pool;
 	template <typename T, typename A, bool is_const, typename... Ts>
 	friend class impl::Pools;
 
@@ -2437,6 +2781,114 @@ private:
 
 namespace impl {
 
+template <typename T, typename Archiver>
+void Pool<T, Archiver>::InvokeDestructHooks(const Manager<Archiver>& manager) {
+	for (auto entity : dense_) {
+		destruct_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+	}
+}
+
+template <typename T, typename Archiver>
+void Pool<T, Archiver>::Copy(const Manager<Archiver>& manager, Index from_entity, Index to_entity) {
+	// Same reason as given in Clone() for why no static_assert.
+	if constexpr (std::is_copy_constructible_v<T>) {
+		ECS_ASSERT(
+			Has(from_entity), "Cannot copy from an entity which does not exist in the manager"
+		);
+		if (!Has(to_entity)) {
+			Add(manager, to_entity, components_[sparse_[from_entity]]);
+		} else {
+			components_.emplace(
+				components_.begin() + sparse_[to_entity], components_[sparse_[from_entity]]
+			);
+			update_hooks_.Invoke(Entity{ to_entity, manager.GetVersion(to_entity), &manager });
+		}
+	} else {
+		ECS_ASSERT(false, "Cannot copy an entity with a non copy constructible component");
+	}
+}
+
+template <typename T, typename Archiver>
+void Pool<T, Archiver>::Clear(const Manager<Archiver>& manager) {
+	InvokeDestructHooks(manager);
+	components_.clear();
+	dense_.clear();
+	sparse_.clear();
+}
+
+template <typename T, typename Archiver>
+void Pool<T, Archiver>::Update(const Manager<Archiver>& manager, Index entity) const {
+	ECS_ASSERT(Has(entity), "Cannot update a component which the entity does not have");
+	update_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+}
+
+template <typename T, typename Archiver>
+bool Pool<T, Archiver>::Remove(const Manager<Archiver>& manager, Index entity) {
+	if (!Has(entity)) {
+		return false;
+	}
+	destruct_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+
+	// See https://skypjack.github.io/2020-08-02-ecs-baf-part-9/ for
+	// in-depth explanation. In short, swap with back and pop back,
+	// relinking sparse ids after.
+	auto last{ dense_.back() };
+	std::swap(dense_.back(), dense_[sparse_[entity]]);
+	std::swap(components_.back(), components_[sparse_[entity]]);
+	ECS_ASSERT(last < sparse_.size(), "");
+	std::swap(sparse_[last], sparse_[entity]);
+	dense_.pop_back();
+	components_.pop_back();
+	return true;
+}
+
+template <typename T, typename Archiver>
+template <typename... Ts>
+T& Pool<T, Archiver>::Add(
+	const Manager<Archiver>& manager, Index entity, Ts&&... constructor_args
+) {
+	static_assert(
+		std::is_constructible_v<T, Ts...> || tt::is_aggregate_initializable_v<T, Ts...>,
+		"Cannot add component which is not constructible from given arguments"
+	);
+	if (entity < sparse_.size()) {
+		// Entity has had the component before.
+		if (sparse_[entity] < dense_.size() && dense_[sparse_[entity]] == entity) {
+			// Entity currently has the component.
+			// Replace the current component with a new component.
+			T& component{ components_[sparse_[entity]] };
+			component.~T();
+			// This approach prevents the creation of a temporary component object.
+			if constexpr (std::is_aggregate_v<T>) {
+				new (&component) T{ std::forward<Ts>(constructor_args)... };
+			} else {
+				new (&component) T(std::forward<Ts>(constructor_args)...);
+			}
+			update_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+			return component;
+		}
+		// Entity currently does not have the component.
+		sparse_[entity] = static_cast<Index>(dense_.size());
+	} else {
+		// Entity has never had the component.
+		sparse_.resize(static_cast<std::size_t>(entity) + 1, static_cast<Index>(dense_.size()));
+	}
+	// Add new component to the entity.
+	dense_.push_back(entity);
+
+	T* component{ nullptr };
+
+	if constexpr (std::is_aggregate_v<T>) {
+		component =
+			&components_.emplace_back(std::move(T{ std::forward<Ts>(constructor_args)... }));
+	} else {
+		component = &components_.emplace_back(std::forward<Ts>(constructor_args)...);
+	}
+
+	construct_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+	return *component;
+}
+
 template <typename T, typename Archiver, bool is_const, typename... Ts>
 [[nodiscard]] constexpr decltype(auto) Pools<T, Archiver, is_const, Ts...>::GetWithEntity(
 	Index entity, const Manager<Archiver>* manager
@@ -2559,7 +3011,8 @@ struct hash<ecs::Entity<Archiver>> {
 	size_t operator()(const ecs::Entity<Archiver>& e) const {
 		// Source: https://stackoverflow.com/a/17017281
 		size_t h{ 17 };
-		h = h * 31 + hash<ecs::Manager<Archiver>*>()(e.manager_
+		h = h * 31 + hash<ecs::Manager<Archiver>*>()(
+						 e.manager_
 					 );								/**< Hash for the associated manager pointer. */
 		h = h * 31 +
 			hash<ecs::impl::Index>()(e.entity_);	/**< Hash for the entity's unique index. */
