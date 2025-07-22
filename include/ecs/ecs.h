@@ -380,8 +380,25 @@ public:
 	template <Ret (*Function)(Args...)>
 	HookImpl& Connect() noexcept {
 		fn_ = [](void*, Args... args) -> Ret {
-			return Function(std::forward<Args>(args)...);
+			return std::invoke(Function, std::forward<Args>(args)...);
 		};
+		instance_ = nullptr;
+		return *this;
+	}
+
+	/**
+	 * @brief Connects a non-capturing lambda to this hook.
+	 *
+	 * @tparam Lambda Type of the lambda or function object.
+	 * @param lambda A non-capturing lambda to connect.
+	 * @return Reference to this HookImpl instance.
+	 *
+	 * @note Capturing lambdas are not supported in this overload, as they cannot
+	 *       be converted to function pointers in C++17.
+	 */
+	template <typename Lambda>
+	HookImpl& Connect(Lambda lambda) noexcept {
+		fn_		  = +lambda;
 		instance_ = nullptr;
 		return *this;
 	}
@@ -606,8 +623,9 @@ public:
 	 * @param manager The manager that the entity belongs to.
 	 * @param entity The index of the entity for which the component data should be deserialized.
 	 */
-	void Deserialize(const Archiver& archiver, const Manager<Archiver>& manager, Index entity)
-		override {
+	void Deserialize(
+		const Archiver& archiver, const Manager<Archiver>& manager, Index entity
+	) override {
 		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
 			return;
 		} else if (archiver.template HasComponent<T>()) {
@@ -1111,6 +1129,14 @@ private:
 } // namespace impl
 
 /**
+ * @brief Alias for a signal hook.
+ *
+ * @tparam Archiver Type of the archiver used in the entity system.
+ */
+template <typename Archiver>
+using Hook = typename impl::ComponentHooks<Archiver>::HookType;
+
+/**
  * @class Manager
  * @brief A class responsible for managing entities in the entity component system (ECS).
  *
@@ -1242,9 +1268,6 @@ public:
 		return !operator==(a, b);
 	}
 
-	/// Type alias for a single hook used within component hook pools.
-	using Hook = typename impl::ComponentHooks<Archiver>::HookType;
-
 	/**
 	 * @brief Adds a construct hook for the specified component type.
 	 *
@@ -1256,7 +1279,7 @@ public:
 	 * removal.
 	 */
 	template <typename T>
-	[[nodiscard]] Hook& OnConstruct() {
+	[[nodiscard]] Hook<Archiver>& OnConstruct() {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
 		return pool->template Pool<T, Archiver>::GetConstructHooks().AddHook();
@@ -1273,7 +1296,7 @@ public:
 	 * removal.
 	 */
 	template <typename T>
-	[[nodiscard]] Hook& OnDestruct() {
+	[[nodiscard]] Hook<Archiver>& OnDestruct() {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
 		return pool->template Pool<T, Archiver>::GetDestructHooks().AddHook();
@@ -1290,7 +1313,7 @@ public:
 	 * removal.
 	 */
 	template <typename T>
-	[[nodiscard]] Hook& OnUpdate() {
+	[[nodiscard]] Hook<Archiver>& OnUpdate() {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
 		return pool->template Pool<T, Archiver>::GetUpdateHooks().AddHook();
@@ -1307,7 +1330,7 @@ public:
 	 * @return true if the hook is registered; false otherwise.
 	 */
 	template <typename T>
-	[[nodiscard]] bool HasOnConstruct(const Hook& hook) const {
+	[[nodiscard]] bool HasOnConstruct(const Hook<Archiver>& hook) const {
 		auto component{ GetId<T>() };
 		const auto pool{ GetPool<T>(component) };
 		return pool != nullptr &&
@@ -1325,7 +1348,7 @@ public:
 	 * @return true if the hook is registered; false otherwise.
 	 */
 	template <typename T>
-	[[nodiscard]] bool HasOnDestruct(const Hook& hook) const {
+	[[nodiscard]] bool HasOnDestruct(const Hook<Archiver>& hook) const {
 		auto component{ GetId<T>() };
 		const auto pool{ GetPool<T>(component) };
 		return pool != nullptr &&
@@ -1343,7 +1366,7 @@ public:
 	 * @return true if the hook is registered; false otherwise.
 	 */
 	template <typename T>
-	[[nodiscard]] bool HasOnUpdate(const Hook& hook) const {
+	[[nodiscard]] bool HasOnUpdate(const Hook<Archiver>& hook) const {
 		auto component{ GetId<T>() };
 		const auto pool{ GetPool<T>(component) };
 		return pool != nullptr && pool->template Pool<T, Archiver>::GetUpdateHooks().HasHook(hook);
@@ -1356,7 +1379,7 @@ public:
 	 * @param hook The hook instance to remove.
 	 */
 	template <typename T>
-	void RemoveOnConstruct(const Hook& hook) {
+	void RemoveOnConstruct(const Hook<Archiver>& hook) {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
 		pool->template Pool<T, Archiver>::GetConstructHooks().RemoveHook(hook);
@@ -1369,7 +1392,7 @@ public:
 	 * @param hook The hook instance to remove.
 	 */
 	template <typename T>
-	void RemoveOnDestruct(const Hook& hook) {
+	void RemoveOnDestruct(const Hook<Archiver>& hook) {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
 		pool->template Pool<T, Archiver>::GetDestructHooks().RemoveHook(hook);
@@ -1382,7 +1405,7 @@ public:
 	 * @param hook The hook instance to remove.
 	 */
 	template <typename T>
-	void RemoveOnUpdate(const Hook& hook) {
+	void RemoveOnUpdate(const Hook<Archiver>& hook) {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
 		pool->template Pool<T, Archiver>::GetUpdateHooks().RemoveHook(hook);
@@ -1636,8 +1659,9 @@ protected:
 				std::conjunction_v<std::is_copy_constructible<Ts>...>,
 				"Cannot copy entity with a component that is not copy constructible"
 			);
-			impl::Pools<Entity<Archiver>, Archiver, false, Ts...> pools{ GetPool<Ts>(GetId<Ts>()
-			)... };
+			impl::Pools<Entity<Archiver>, Archiver, false, Ts...> pools{
+				GetPool<Ts>(GetId<Ts>())...
+			};
 			// Validate if the pools exist and contain the required components
 			ECS_ASSERT(
 				pools.AllExist(), "Cannot copy entity with a component that is not "
@@ -3013,7 +3037,8 @@ struct hash<ecs::Entity<Archiver>> {
 	size_t operator()(const ecs::Entity<Archiver>& e) const {
 		// Source: https://stackoverflow.com/a/17017281
 		size_t h{ 17 };
-		h = h * 31 + hash<ecs::Manager<Archiver>*>()(e.manager_
+		h = h * 31 + hash<ecs::Manager<Archiver>*>()(
+						 e.manager_
 					 );								/**< Hash for the associated manager pointer. */
 		h = h * 31 +
 			hash<ecs::impl::Index>()(e.entity_);	/**< Hash for the entity's unique index. */
