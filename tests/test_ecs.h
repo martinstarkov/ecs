@@ -49,6 +49,10 @@ struct FoodComponent {
 	int hunger{};
 };
 
+void TestManagerFunction(ecs::Manager manager) {
+	std::cout << "Passed" << std::endl;
+}
+
 void ConstructHook1(ecs::Entity e) {
 	std::cout << "Hook: Constructed HookComponent for ";
 	std::cout << e.GetId() << std::endl;
