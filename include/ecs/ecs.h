@@ -582,9 +582,7 @@ public:
 	 * @param archiver The archiver instance used to write component data.
 	 */
 	void Serialize(Archiver& archiver) const override {
-		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
-			return;
-		} else {
+		if constexpr (!std::is_same_v<Archiver, VoidArchiver>) {
 			archiver.template SetComponents<T>(components_);
 			archiver.template SetArrays<T>(dense_, sparse_);
 		}
@@ -597,10 +595,10 @@ public:
 	 * @param entity The index of the entity whose component should be serialized.
 	 */
 	void Serialize(Archiver& archiver, Index entity) const override {
-		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
-			return;
-		} else if (Has(entity)) {
-			archiver.template SetComponent<T>(Get(entity));
+		if constexpr (!std::is_same_v<Archiver, VoidArchiver>) {
+			if (Has(entity)) {
+				archiver.template SetComponent<T>(Get(entity));
+			}
 		}
 	}
 
@@ -610,9 +608,8 @@ public:
 	 * @param archiver The archiver instance used to read component data.
 	 */
 	void Deserialize(const Archiver& archiver) override {
-		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
-			return;
-		} else {
+		if constexpr (!std::is_same_v<Archiver, VoidArchiver> &&
+					  std::is_default_constructible_v<T>) {
 			components_			 = archiver.template GetComponents<T>();
 			auto [dense, sparse] = archiver.template GetArrays<T>();
 			dense_				 = dense;
@@ -627,11 +624,14 @@ public:
 	 * @param manager The manager that the entity belongs to.
 	 * @param entity The index of the entity for which the component data should be deserialized.
 	 */
-	void Deserialize(const Archiver& archiver, const Manager<Archiver>& manager, Index entity)
-		override {
-		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
-			return;
-		} else if (archiver.template HasComponent<T>()) {
+	void Deserialize(
+		const Archiver& archiver, const Manager<Archiver>& manager, Index entity
+	) override {
+		if constexpr (!std::is_same_v<Archiver, VoidArchiver> &&
+					  std::is_default_constructible_v<T>) {
+			if (!archiver.template HasComponent<T>()) {
+				return;
+			}
 			if (Has(entity)) {
 				Get(entity) = archiver.template GetComponent<T>();
 			} else {
@@ -3023,7 +3023,8 @@ struct hash<ecs::impl::Entity<Archiver>> {
 	size_t operator()(const ecs::impl::Entity<Archiver>& e) const {
 		// Source: https://stackoverflow.com/a/17017281
 		size_t h{ 17 };
-		h = h * 31 + hash<ecs::impl::Manager<Archiver>*>()(e.manager_
+		h = h * 31 + hash<ecs::impl::Manager<Archiver>*>()(
+						 e.manager_
 					 );								/**< Hash for the associated manager pointer. */
 		h = h * 31 +
 			hash<ecs::impl::Index>()(e.entity_);	/**< Hash for the entity's unique index. */
