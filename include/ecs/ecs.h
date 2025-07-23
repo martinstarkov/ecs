@@ -2980,31 +2980,30 @@ using Entity = Manager::HandleType;
 namespace std {
 
 /**
- * @brief Specialization of the std::hash template for the ecs::Entity type.
+ * @brief Specialization of the std::hash template for the ecs::impl::Entity type.
  *
- * This specialization provides a custom hash function for the `ecs::Entity` type.
+ * This specialization provides a custom hash function for the `ecs::impl::Entity` type.
  * It combines the hashes of the associated manager, entity index, and version into a single hash
- * value. This is used when an `ecs::Entity` is used as a key in hash-based containers such as
+ * value. This is used when an `ecs::impl::Entity` is used as a key in hash-based containers such as
  * `std::unordered_map`.
  *
- * @tparam ecs::Entity The type for which the hash is being specialized.
+ * @tparam ecs::impl::Entity The type for which the hash is being specialized.
  */
 template <typename TManager>
 struct hash<ecs::impl::Entity<TManager>> {
 	/**
-	 * @brief Computes the hash value for an ecs::Entity object.
+	 * @brief Computes the hash value for an ecs::impl::Entity object.
 	 *
 	 * This function combines the individual hash values of the entity's manager, entity index, and
 	 * version. The resulting hash value is then returned.
 	 *
-	 * @param e The `ecs::Entity` object for which the hash value is being calculated.
-	 * @return The computed hash value for the given `ecs::Entity`.
+	 * @param e The `ecs::impl::Entity` object for which the hash value is being calculated.
+	 * @return The computed hash value for the given `ecs::impl::Entity`.
 	 */
 	size_t operator()(const ecs::impl::Entity<TManager>& e) const {
 		// Source: https://stackoverflow.com/a/17017281
 		size_t h{ 17 };
-		h = h * 31 + hash<ecs::Manager<Archiver, ecs::impl::Entity<TManager>>*>()(e.manager_
-					 );								/**< Hash for the associated manager pointer. */
+		h = h * 31 + hash<void*>()(e.manager_);		/**< Hash for the associated manager pointer. */
 		h = h * 31 +
 			hash<ecs::impl::Index>()(e.entity_);	/**< Hash for the entity's unique index. */
 		h = h * 31 +
