@@ -49,22 +49,26 @@ struct FoodComponent {
 	int hunger{};
 };
 
-void ConstructHook1(ecs::Entity<> e) {
+void TestManagerFunction(ecs::Manager e) {
+	(void)0;
+}
+
+void ConstructHook1(ecs::Entity e) {
 	std::cout << "Hook: Constructed HookComponent for ";
 	std::cout << e.GetId() << std::endl;
 }
 
-void ConstructHook2(ecs::Entity<> e) {
+void ConstructHook2(ecs::Entity e) {
 	std::cout << "Another hook: Constructed HookComponent for ";
 	std::cout << e.GetId() << std::endl;
 }
 
-void UpdateHook1(ecs::Entity<> e) {
+void UpdateHook1(ecs::Entity e) {
 	std::cout << "Hook: Updated HookComponent for ";
 	std::cout << e.GetId() << std::endl;
 }
 
-void DestructHook1(ecs::Entity<> e) {
+void DestructHook1(ecs::Entity e) {
 	std::cout << "Hook: Destructed HookComponent for ";
 	std::cout << e.GetId() << std::endl;
 }
