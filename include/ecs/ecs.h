@@ -506,9 +506,9 @@ public:
 	 *
 	 * @param args Arguments to pass to each hook.
 	 */
-	void Invoke(Args&&... args) const {
+	void Invoke(Args... args) const {
 		for (const auto& hook : hooks_) {
-			std::invoke(hook, std::forward<Args>(args)...);
+			std::invoke(hook, args...);
 		}
 	}
 
