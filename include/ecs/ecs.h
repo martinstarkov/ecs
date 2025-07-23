@@ -88,12 +88,12 @@ SOFTWARE.
 
 namespace ecs {
 
-template <typename Archiver>
-class Entity;
-template <typename Archiver>
-class Manager;
-
 namespace impl {
+
+template <typename TManager>
+class Entity;
+template <typename Archiver, template <typename> class EntityHandle>
+class Manager;
 
 using Index	  = std::uint32_t;
 using Version = std::uint32_t;
@@ -107,45 +107,102 @@ enum class LoopCriterion {
 	WithoutComponents
 };
 
-} // namespace impl
-
-template <
-	typename T, typename Archiver, bool is_const, impl::LoopCriterion Criterion, typename... Ts>
+template <typename TManager, bool is_const, LoopCriterion Criterion, typename... Ts>
 class EntityContainer;
 
-template <impl::LoopCriterion Criterion, typename TContainer, typename... Ts>
+template <LoopCriterion Criterion, typename TContainer, typename... Ts>
 class EntityContainerIterator;
 
 /**
- * @brief Alias for an entity container with no components for const and non-const entities.
+ * @brief A class that wraps a callable hook (either free function or member function).
  *
- * @tparam is_const A boolean indicating whether the container is for const entities.
+ * @tparam Ret Return type of the hook.
+ * @tparam Args Argument types for the hook.
  */
-template <typename Archiver, bool is_const>
-using Entities = EntityContainer<Entity<Archiver>, Archiver, is_const, impl::LoopCriterion::None>;
+template <typename Ret, typename... Args>
+class Hook {
+public:
+	/// Function type for the hook implementation.
+	using FunctionType = Ret (*)(void*, Args...);
+	/// Return type of the hook.
+	using ReturnType = Ret;
 
-/**
- * @brief Alias for an entity container with specific components for const and non-const entities.
- *
- * @tparam is_const A boolean indicating whether the container is for const entities.
- * @tparam TComponents The component types that entities must have.
- */
-template <typename Archiver, bool is_const, typename... TComponents>
-using EntitiesWith = EntityContainer<
-	Entity<Archiver>, Archiver, is_const, impl::LoopCriterion::WithComponents, TComponents...>;
+	/**
+	 * @brief Default constructor.
+	 */
+	Hook() noexcept = default;
 
-/**
- * @brief Alias for an entity container lacking specific components for const and non-const
- * entities.
- *
- * @tparam is_const A boolean indicating whether the container is for const entities.
- * @tparam TComponents The component types that entities must lack.
- */
-template <typename Archiver, bool is_const, typename... TComponents>
-using EntitiesWithout = EntityContainer<
-	Entity<Archiver>, Archiver, is_const, impl::LoopCriterion::WithoutComponents, TComponents...>;
+	/**
+	 * @brief Connects a free (non-member) function to this hook.
+	 *
+	 * @tparam Function A free function pointer of type Ret(Args...).
+	 * @return *this.
+	 */
+	template <Ret (*Function)(Args...)>
+	Hook& Connect() noexcept {
+		fn_ = [](void*, Args... args) -> Ret {
+			return std::invoke(Function, std::forward<Args>(args)...);
+		};
+		instance_ = nullptr;
+		return *this;
+	}
 
-namespace impl {
+	/**
+	 * @brief Connects a non-capturing lambda to this hook.
+	 *
+	 * @tparam Lambda Type of the lambda or function object.
+	 * @param lambda A non-capturing lambda to connect.
+	 * @return Reference to this Hook instance.
+	 *
+	 * @note Capturing lambdas are not supported in this overload, as they cannot
+	 *       be converted to function pointers in C++17.
+	 */
+	template <typename Lambda>
+	Hook& Connect(Lambda lambda) noexcept {
+		fn_		  = +lambda;
+		instance_ = nullptr;
+		return *this;
+	}
+
+	/**
+	 * @brief Connects a member function to this hook.
+	 *
+	 * @tparam Type The class type that contains the member function.
+	 * @tparam Member A member function pointer of type Ret(Type::*)(Args...).
+	 * @param obj Pointer to the instance of the object.
+	 * @return *this.
+	 */
+	template <typename Type, Ret (Type::*Member)(Args...)>
+	Hook& Connect(Type* obj) noexcept {
+		fn_ = [](void* instance, Args... args) -> Ret {
+			return (static_cast<Type*>(instance)->*Member)(std::forward<Args>(args)...);
+		};
+		instance_ = obj;
+		return *this;
+	}
+
+	/**
+	 * @brief Invokes the connected function with the given arguments.
+	 *
+	 * @param args Arguments to pass to the function.
+	 * @return Result of the function call.
+	 */
+	Ret operator()(Args... args) const {
+		return std::invoke(fn_, instance_, std::forward<Args>(args)...);
+	}
+
+	friend bool operator==(const Hook& a, const Hook& b) {
+		return a.fn_ == b.fn_ && a.instance_ == b.instance_;
+	}
+
+	friend bool operator!=(const Hook& a, const Hook& b) {
+		return !operator==(a, b);
+	}
+
+private:
+	FunctionType fn_{ nullptr }; ///< Function pointer with void* for object binding.
+	void* instance_{ nullptr };	 ///< Pointer to the object instance for member functions.
+};
 
 namespace tt {
 
@@ -219,13 +276,14 @@ public:
  * This class defines the interface for managing a pool of components associated with entities.
  * It is intended to be subclassed for concrete component types.
  *
- * @tparam Archiver A class responsible for serializing component data. Defaults to VoidArchiver,
- *                  which performs no serialization and can be used as a placeholder when
- * serialization is not needed.
  */
-template <typename Archiver = VoidArchiver>
+template <
+	typename TManager, std::enable_if_t<std::is_class_v<TManager>, bool> =
+						   true /* Fixes compiler warning about int::ArchiverType */>
 class AbstractPool {
 public:
+	using ArchiverType = typename TManager::ArchiverType;
+
 	/** @brief Virtual destructor to allow proper cleanup of derived classes. */
 	virtual ~AbstractPool() = default;
 
@@ -248,7 +306,7 @@ public:
 	 *
 	 * @param manager The manager which owns the pool.
 	 */
-	virtual void InvokeDestructHooks(const Manager<Archiver>& manager) = 0;
+	virtual void InvokeDestructHooks(const TManager& manager) = 0;
 
 	/**
 	 * @brief Copies a component from one entity to another within the pool.
@@ -257,7 +315,7 @@ public:
 	 * @param from_entity The source entity from which to copy the component.
 	 * @param to_entity The target entity to which the component will be copied.
 	 */
-	virtual void Copy(const Manager<Archiver>& manager, Index from_entity, Index to_entity) = 0;
+	virtual void Copy(const TManager& manager, Index from_entity, Index to_entity) = 0;
 
 	/**
 	 * @brief Clears the pool, removing all components.
@@ -266,7 +324,7 @@ public:
 	 *
 	 * @param manager The manager to which the component pool belongs.
 	 */
-	virtual void Clear(const Manager<Archiver>& manager) = 0;
+	virtual void Clear(const TManager& manager) = 0;
 
 	/**
 	 * @brief Resets the pool, clearing all components and freeing memory.
@@ -275,7 +333,7 @@ public:
 	 *
 	 * @param manager The manager to which the component pool belongs.
 	 */
-	virtual void Reset(const Manager<Archiver>& manager) = 0;
+	virtual void Reset(const TManager& manager) = 0;
 
 	/**
 	 * @brief Removes a component from the pool for a given entity.
@@ -284,7 +342,7 @@ public:
 	 * @param entity The entity from which to remove the component.
 	 * @return True if the component was successfully removed, otherwise false.
 	 */
-	virtual bool Remove(const Manager<Archiver>& manager, Index entity) = 0;
+	virtual bool Remove(const TManager& manager, Index entity) = 0;
 
 	/**
 	 * @brief Checks if the pool contains a component for the specified entity.
@@ -300,7 +358,7 @@ public:
 	 * @param manager The manager to which the entity belongs.
 	 * @param entity The entity to update.
 	 */
-	virtual void Update(const Manager<Archiver>& manager, Index entity) const = 0;
+	virtual void Update(const TManager& manager, Index entity) const = 0;
 
 	/**
 	 * @brief Serializes all components in the pool using the provided archiver.
@@ -311,7 +369,7 @@ public:
 	 *
 	 * @param archiver The archiver instance used to write the serialized component data.
 	 */
-	virtual void Serialize(Archiver& archiver) const = 0;
+	virtual void Serialize(ArchiverType& archiver) const = 0;
 
 	/**
 	 * @brief Serializes the component associated with a specific entity using the provided
@@ -324,7 +382,7 @@ public:
 	 * @param archiver The archiver instance used to write the serialized component data.
 	 * @param entity The index of the entity whose component should be serialized.
 	 */
-	virtual void Serialize(Archiver& archiver, Index entity) const = 0;
+	virtual void Serialize(ArchiverType& archiver, Index entity) const = 0;
 
 	/**
 	 * @brief Deserializes components into the pool using the provided archiver.
@@ -334,7 +392,7 @@ public:
 	 *
 	 * @param archiver The archiver instance used to read and load the component data.
 	 */
-	virtual void Deserialize(const Archiver& archiver) = 0;
+	virtual void Deserialize(const ArchiverType& archiver) = 0;
 
 	/**
 	 * @brief Deserializes component data for a specific entity from the provided archiver.
@@ -348,111 +406,8 @@ public:
 	 * @param entity The index of the entity for which the component data should be deserialized.
 	 */
 	virtual void Deserialize(
-		const Archiver& archiver, const Manager<Archiver>& manager, Index entity
+		const ArchiverType& archiver, const TManager& manager, Index entity
 	) = 0;
-};
-
-/**
- * @brief A class that wraps a callable hook (either free function or member function).
- *
- * @tparam Ret Return type of the hook.
- * @tparam Args Argument types for the hook.
- */
-template <typename Ret, typename... Args>
-class HookImpl {
-public:
-	/// Function type for the hook implementation.
-	using FunctionType = Ret (*)(void*, Args...);
-	/// Return type of the hook.
-	using ReturnType = Ret;
-
-	/**
-	 * @brief Default constructor.
-	 */
-	HookImpl() noexcept = default;
-
-	/**
-	 * @brief Connects a free (non-member) function to this hook.
-	 *
-	 * @tparam Function A free function pointer of type Ret(Args...).
-	 * @return *this.
-	 */
-	template <Ret (*Function)(Args...)>
-	HookImpl& Connect() noexcept {
-		fn_ = [](void*, Args... args) -> Ret {
-			return std::invoke(Function, std::forward<Args>(args)...);
-		};
-		instance_ = nullptr;
-		return *this;
-	}
-
-	/**
-	 * @brief Connects a non-capturing lambda to this hook.
-	 *
-	 * @tparam Lambda Type of the lambda or function object.
-	 * @param lambda A non-capturing lambda to connect.
-	 * @return Reference to this HookImpl instance.
-	 *
-	 * @note Capturing lambdas are not supported in this overload, as they cannot
-	 *       be converted to function pointers in C++17.
-	 */
-	template <typename Lambda>
-	HookImpl& Connect(Lambda lambda) noexcept {
-		fn_		  = +lambda;
-		instance_ = nullptr;
-		return *this;
-	}
-
-	/**
-	 * @brief Connects a member function to this hook.
-	 *
-	 * @tparam Type The class type that contains the member function.
-	 * @tparam Member A member function pointer of type Ret(Type::*)(Args...).
-	 * @param obj Pointer to the instance of the object.
-	 * @return *this.
-	 */
-	template <typename Type, Ret (Type::*Member)(Args...)>
-	HookImpl& Connect(Type* obj) noexcept {
-		fn_ = [](void* instance, Args... args) -> Ret {
-			return (static_cast<Type*>(instance)->*Member)(std::forward<Args>(args)...);
-		};
-		instance_ = obj;
-		return *this;
-	}
-
-	/**
-	 * @brief Invokes the connected function with the given arguments.
-	 *
-	 * @param args Arguments to pass to the function.
-	 * @return Result of the function call.
-	 */
-	Ret operator()(Args... args) const {
-		return std::invoke(fn_, instance_, std::forward<Args>(args)...);
-	}
-
-	/**
-	 * @brief Compares this hook to another for equality.
-	 *
-	 * @param other Another HookImpl instance.
-	 * @return true if both function and instance are equal.
-	 */
-	bool operator==(const HookImpl& other) const noexcept {
-		return fn_ == other.fn_ && instance_ == other.instance_;
-	}
-
-	/**
-	 * @brief Compares this hook to another for inequality.
-	 *
-	 * @param other Another HookImpl instance.
-	 * @return true if either function or instance differ.
-	 */
-	bool operator!=(const HookImpl& other) const noexcept {
-		return !operator==(other);
-	}
-
-private:
-	FunctionType fn_{ nullptr }; ///< Function pointer with void* for object binding.
-	void* instance_{ nullptr };	 ///< Pointer to the object instance for member functions.
 };
 
 /**
@@ -465,7 +420,7 @@ template <typename Ret, typename... Args>
 class HookPool {
 public:
 	/// Type alias for the hook implementation.
-	using HookType = HookImpl<Ret, Args...>;
+	using HookType = typename Hook<Ret, Args...>;
 
 	/**
 	 * @brief Adds a new default-initialized hook to the pool.
@@ -523,14 +478,6 @@ private:
 };
 
 /**
- * @brief Alias for a hook pool specialized for component hooks.
- *
- * @tparam Archiver Type of the archiver used in the entity system.
- */
-template <typename Archiver>
-using ComponentHooks = HookPool<void, Entity<Archiver>>;
-
-/**
  * @class Pool
  * @brief A template class representing a pool of components of type T with optional serialization
  * support.
@@ -539,19 +486,22 @@ using ComponentHooks = HookPool<void, Entity<Archiver>>;
  * access, and manipulation of components associated with entities. It inherits from
  * AbstractPool and supports optional serialization through a customizable Archiver.
  *
- * @tparam T         The type of component stored in the pool.
- * @tparam Archiver  The archiver used for serialization and deserialization of components.
- *                   If set to VoidArchiver, serialization is effectively disabled.
+ * @tparam TComponent         The type of component stored in the pool.
  */
-template <typename T, typename Archiver>
-class Pool : public AbstractPool<Archiver> {
+template <typename TComponent, typename TManager>
+class Pool : public AbstractPool<TManager> {
+private:
 	static_assert(
-		std::is_move_constructible_v<T>,
+		std::is_move_constructible_v<TComponent>,
 		"Cannot create pool for component which is not move constructible"
 	);
 	static_assert(
-		std::is_destructible_v<T>, "Cannot create pool for component which is not destructible"
+		std::is_destructible_v<TComponent>,
+		"Cannot create pool for component which is not destructible"
 	);
+
+	using HandleType   = typename TManager::HandleType;
+	using ArchiverType = typename TManager::ArchiverType;
 
 public:
 	/** @brief Default constructor for the Pool class. */
@@ -577,12 +527,12 @@ public:
 	 *
 	 * @param archiver The archiver instance used to write component data.
 	 */
-	void Serialize(Archiver& archiver) const override {
-		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
+	void Serialize(ArchiverType& archiver) const override {
+		if constexpr (std::is_same_v<ArchiverType, VoidArchiver>) {
 			return;
 		} else {
-			archiver.template SetComponents<T>(components_);
-			archiver.template SetArrays<T>(dense_, sparse_);
+			archiver.template SetComponents<TComponent>(components_);
+			archiver.template SetArrays<TComponent>(dense_, sparse_);
 		}
 	}
 
@@ -592,11 +542,11 @@ public:
 	 * @param archiver The archiver instance used to write component data.
 	 * @param entity The index of the entity whose component should be serialized.
 	 */
-	void Serialize(Archiver& archiver, Index entity) const override {
-		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
+	void Serialize(ArchiverType& archiver, Index entity) const override {
+		if constexpr (std::is_same_v<ArchiverType, VoidArchiver>) {
 			return;
 		} else if (Has(entity)) {
-			archiver.template SetComponent<T>(Get(entity));
+			archiver.template SetComponent<TComponent>(Get(entity));
 		}
 	}
 
@@ -605,12 +555,12 @@ public:
 	 *
 	 * @param archiver The archiver instance used to read component data.
 	 */
-	void Deserialize(const Archiver& archiver) override {
-		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
+	void Deserialize(const ArchiverType& archiver) override {
+		if constexpr (std::is_same_v<ArchiverType, VoidArchiver>) {
 			return;
 		} else {
-			components_			 = archiver.template GetComponents<T>();
-			auto [dense, sparse] = archiver.template GetArrays<T>();
+			components_			 = archiver.template GetComponents<TComponent>();
+			auto [dense, sparse] = archiver.template GetArrays<TComponent>();
 			dense_				 = dense;
 			sparse_				 = sparse;
 		}
@@ -623,16 +573,14 @@ public:
 	 * @param manager The manager that the entity belongs to.
 	 * @param entity The index of the entity for which the component data should be deserialized.
 	 */
-	void Deserialize(
-		const Archiver& archiver, const Manager<Archiver>& manager, Index entity
-	) override {
-		if constexpr (std::is_same_v<Archiver, VoidArchiver>) {
+	void Deserialize(const ArchiverType& archiver, const TManager& manager, Index entity) override {
+		if constexpr (std::is_same_v<ArchiverType, VoidArchiver>) {
 			return;
-		} else if (archiver.template HasComponent<T>()) {
+		} else if (archiver.template HasComponent<TComponent>()) {
 			if (Has(entity)) {
-				Get(entity) = archiver.template GetComponent<T>();
+				Get(entity) = archiver.template GetComponent<TComponent>();
 			} else {
-				Add(manager, entity, archiver.template GetComponent<T>());
+				Add(manager, entity, archiver.template GetComponent<TComponent>());
 			}
 		}
 	}
@@ -643,7 +591,7 @@ public:
 	 * @return True if the components are copy constructible, otherwise false.
 	 */
 	[[nodiscard]] bool IsCloneable() const final {
-		return std::is_copy_constructible_v<T>;
+		return std::is_copy_constructible_v<TComponent>;
 	}
 
 	/**
@@ -651,11 +599,11 @@ public:
 	 *
 	 * @return A unique pointer to a new pool instance with the same components.
 	 */
-	[[nodiscard]] std::unique_ptr<AbstractPool<Archiver>> Clone() const final {
+	[[nodiscard]] std::unique_ptr<AbstractPool<TManager>> Clone() const final {
 		// The reason this is not statically asserted is because it would disallow move-only
 		// component pools.
-		if constexpr (std::is_copy_constructible_v<T>) {
-			auto pool{ std::make_unique<Pool<T, Archiver>>() };
+		if constexpr (std::is_copy_constructible_v<TComponent>) {
+			auto pool{ std::make_unique<Pool<TComponent, TManager>>() };
 			pool->components_	   = components_;
 			pool->dense_		   = dense_;
 			pool->sparse_		   = sparse_;
@@ -676,7 +624,7 @@ public:
 	 *
 	 * @param manager The manager which owns the pool.
 	 */
-	void InvokeDestructHooks(const Manager<Archiver>& manager) final;
+	void InvokeDestructHooks(const TManager& manager) final;
 
 	/**
 	 * @brief Copies a component from one entity to another.
@@ -685,7 +633,7 @@ public:
 	 * @param from_entity The source entity from which to copy the component.
 	 * @param to_entity The target entity to which the component will be copied.
 	 */
-	void Copy(const Manager<Archiver>& manager, Index from_entity, Index to_entity) final;
+	void Copy(const TManager& manager, Index from_entity, Index to_entity) final;
 
 	/**
 	 * @brief Clears the pool, removing all components.
@@ -694,14 +642,14 @@ public:
 	 *
 	 * @param manager The manager to which the component pool belongs.
 	 */
-	void Clear(const Manager<Archiver>& manager) final;
+	void Clear(const TManager& manager) final;
 
 	/**
 	 * @brief Resets the pool by clearing all components and shrinking memory usage.
 	 *
 	 * @param manager The manager to which the component pool belongs.
 	 */
-	void Reset(const Manager<Archiver>& manager) final {
+	void Reset(const TManager& manager) final {
 		Clear(manager);
 
 		components_.shrink_to_fit();
@@ -716,7 +664,7 @@ public:
 	 * @param entity The entity from which to remove the component.
 	 * @return True if the component was successfully removed, otherwise false.
 	 */
-	bool Remove(const Manager<Archiver>& manager, Index entity) final;
+	bool Remove(const TManager& manager, Index entity) final;
 
 	/**
 	 * @brief Checks if the pool contains a component for the specified entity.
@@ -741,7 +689,7 @@ public:
 	 * @param manager The manager to which the entity belongs.
 	 * @param entity The entity to update.
 	 */
-	virtual void Update(const Manager<Archiver>& manager, Index entity) const final;
+	virtual void Update(const TManager& manager, Index entity) const final;
 
 	/**
 	 * @brief Retrieves a constant reference to the component associated with the specified entity.
@@ -749,7 +697,7 @@ public:
 	 * @param entity The entity whose component is to be retrieved.
 	 * @return A constant reference to the component associated with the entity.
 	 */
-	[[nodiscard]] const T& Get(Index entity) const {
+	[[nodiscard]] const TComponent& Get(Index entity) const {
 		ECS_ASSERT(Has(entity), "Entity does not have the requested component");
 		ECS_ASSERT(
 			sparse_[entity] < components_.size(),
@@ -764,8 +712,8 @@ public:
 	 * @param entity The entity whose component is to be retrieved.
 	 * @return A reference to the component associated with the entity.
 	 */
-	[[nodiscard]] T& Get(Index entity) {
-		return const_cast<T&>(std::as_const(*this).Get(entity));
+	[[nodiscard]] TComponent& Get(Index entity) {
+		return const_cast<TComponent&>(std::as_const(*this).Get(entity));
 	}
 
 	/**
@@ -777,35 +725,35 @@ public:
 	 * @return A reference to the newly added component.
 	 */
 	template <typename... Ts>
-	T& Add(const Manager<Archiver>& manager, Index entity, Ts&&... constructor_args);
+	TComponent& Add(const TManager& manager, Index entity, Ts&&... constructor_args);
 
-	[[nodiscard]] const ComponentHooks<Archiver>& GetConstructHooks() const {
+	[[nodiscard]] const HookPool<void, HandleType>& GetConstructHooks() const {
 		return construct_hooks_;
 	}
 
-	[[nodiscard]] const ComponentHooks<Archiver>& GetDestructHooks() const {
+	[[nodiscard]] const HookPool<void, HandleType>& GetDestructHooks() const {
 		return destruct_hooks_;
 	}
 
-	[[nodiscard]] const ComponentHooks<Archiver>& GetUpdateHooks() const {
+	[[nodiscard]] const HookPool<void, HandleType>& GetUpdateHooks() const {
 		return update_hooks_;
 	}
 
-	[[nodiscard]] ComponentHooks<Archiver>& GetConstructHooks() {
+	[[nodiscard]] HookPool<void, HandleType>& GetConstructHooks() {
 		return construct_hooks_;
 	}
 
-	[[nodiscard]] ComponentHooks<Archiver>& GetDestructHooks() {
+	[[nodiscard]] HookPool<void, HandleType>& GetDestructHooks() {
 		return destruct_hooks_;
 	}
 
-	[[nodiscard]] ComponentHooks<Archiver>& GetUpdateHooks() {
+	[[nodiscard]] HookPool<void, HandleType>& GetUpdateHooks() {
 		return update_hooks_;
 	}
 
 private:
-	// @brief The vector storing components of type T.
-	std::vector<T> components_;
+	// @brief The vector storing components of type TComponent.
+	std::vector<TComponent> components_;
 
 	// @brief The dense vector indexing entities.
 	std::vector<Index> dense_;
@@ -813,11 +761,11 @@ private:
 	// @brief The sparse vector indexing components.
 	std::vector<Index> sparse_;
 
-	ComponentHooks<Archiver> construct_hooks_;
+	HookPool<void, HandleType> construct_hooks_;
 
-	ComponentHooks<Archiver> update_hooks_;
+	HookPool<void, HandleType> update_hooks_;
 
-	ComponentHooks<Archiver> destruct_hooks_;
+	HookPool<void, HandleType> destruct_hooks_;
 };
 
 /**
@@ -827,12 +775,12 @@ private:
  * This class allows for accessing multiple pools of components (of different types) in a type-safe
  * manner.
  */
-template <typename T, typename Archiver, bool is_const, typename... Ts>
+template <typename TManager, bool is_const, typename... Ts>
 class Pools {
 public:
 	template <typename TPool>
 	using PoolType =
-		std::conditional_t<is_const, const Pool<TPool, Archiver>*, Pool<TPool, Archiver>*>;
+		std::conditional_t<is_const, const Pool<TPool, TManager>*, Pool<TPool, TManager>*>;
 
 	/**
 	 * @brief Constructor that initializes the pools with the provided pool instances.
@@ -849,8 +797,8 @@ public:
 	 * @param from_id The source entity.
 	 * @param to_id The target entity.
 	 */
-	constexpr void Copy(const Manager<Archiver>& manager, Index from_id, Index to_id) {
-		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Copy(manager, from_id, to_id),
+	constexpr void Copy(const TManager& manager, Index from_id, Index to_id) {
+		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Copy(manager, from_id, to_id),
 		 ...);
 	}
 
@@ -862,7 +810,7 @@ public:
 	 */
 	[[nodiscard]] constexpr bool Has(Index entity) const {
 		return AllExist() &&
-			   (std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Has(entity) && ...);
+			   (std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Has(entity) && ...);
 	}
 
 	/**
@@ -874,7 +822,7 @@ public:
 	 */
 	[[nodiscard]] constexpr bool NotHas(Index entity) const {
 		return ((std::get<PoolType<Ts>>(pools_) == nullptr) || ...) ||
-			   (!std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Has(entity) && ...);
+			   (!std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Has(entity) && ...);
 	}
 
 	/**
@@ -884,9 +832,8 @@ public:
 	 * @param manager The manager for the entity.
 	 * @return A tuple of the requested components.
 	 */
-	[[nodiscard]] constexpr decltype(auto) GetWithEntity(
-		Index entity, const Manager<Archiver>* manager
-	) const;
+	[[nodiscard]] constexpr decltype(auto) GetWithEntity(Index entity, const TManager* manager)
+		const;
 
 	/**
 	 * @brief Retrieves the requested components along with the entity.
@@ -895,7 +842,7 @@ public:
 	 * @param manager The manager for the entity.
 	 * @return A tuple of the requested components.
 	 */
-	[[nodiscard]] constexpr decltype(auto) GetWithEntity(Index entity, Manager<Archiver>* manager);
+	[[nodiscard]] constexpr decltype(auto) GetWithEntity(Index entity, TManager* manager);
 
 	/**
 	 * @brief Retrieves the requested components for a given entity.
@@ -907,10 +854,10 @@ public:
 		ECS_ASSERT(AllExist(), "Manager does not have at least one of the requested components");
 		static_assert(sizeof...(Ts) > 0);
 		if constexpr (sizeof...(Ts) == 1) {
-			return (std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Get(entity), ...);
+			return (std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Get(entity), ...);
 		} else {
 			return std::forward_as_tuple<const Ts&...>(
-				(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Get(entity))...
+				(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Get(entity))...
 			);
 		}
 	}
@@ -925,10 +872,10 @@ public:
 		ECS_ASSERT(AllExist(), "Manager does not have at least one of the requested components");
 		static_assert(sizeof...(Ts) > 0);
 		if constexpr (sizeof...(Ts) == 1) {
-			return (std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Get(entity), ...);
+			return (std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Get(entity), ...);
 		} else {
 			return std::forward_as_tuple<Ts&...>(
-				(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Get(entity))...
+				(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Get(entity))...
 			);
 		}
 	}
@@ -1126,16 +1073,6 @@ private:
 	std::vector<std::uint8_t> data_;
 };
 
-} // namespace impl
-
-/**
- * @brief Alias for a signal hook.
- *
- * @tparam Archiver Type of the archiver used in the entity system.
- */
-template <typename Archiver>
-using Hook = typename impl::ComponentHooks<Archiver>::HookType;
-
 /**
  * @class Manager
  * @brief A class responsible for managing entities in the entity component system (ECS).
@@ -1147,11 +1084,22 @@ using Hook = typename impl::ComponentHooks<Archiver>::HookType;
  * an optional Archiver, allowing the state of the ECS to be saved or loaded.
  *
  * @tparam Archiver The type of archiver used for serializing and deserializing entity and component
- * data. By default, the archiver is set to `impl::VoidArchiver`, which disables serialization.
+ * data.
  */
-template <typename Archiver = impl::VoidArchiver>
+template <typename Archiver, template <typename> class EntityHandle>
 class Manager {
+private:
+	using ThisManager = Manager<Archiver, EntityHandle>;
+
+	template <typename TComponent>
+	using PoolType = Pool<TComponent, ThisManager>;
+
+	using AbstractPoolType = AbstractPool<ThisManager>;
+
 public:
+	using ArchiverType = Archiver;
+	using HandleType   = EntityHandle<ThisManager>;
+
 	/**
 	 * @brief Default constructor for the manager.
 	 */
@@ -1279,10 +1227,10 @@ public:
 	 * removal.
 	 */
 	template <typename T>
-	[[nodiscard]] Hook<Archiver>& OnConstruct() {
+	[[nodiscard]] Hook<void, HandleType>& OnConstruct() {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
-		return pool->template Pool<T, Archiver>::GetConstructHooks().AddHook();
+		return pool->PoolType<T>::GetConstructHooks().AddHook();
 	}
 
 	/**
@@ -1296,10 +1244,10 @@ public:
 	 * removal.
 	 */
 	template <typename T>
-	[[nodiscard]] Hook<Archiver>& OnDestruct() {
+	[[nodiscard]] Hook<void, HandleType>& OnDestruct() {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
-		return pool->template Pool<T, Archiver>::GetDestructHooks().AddHook();
+		return pool->PoolType<T>::GetDestructHooks().AddHook();
 	}
 
 	/**
@@ -1313,10 +1261,10 @@ public:
 	 * removal.
 	 */
 	template <typename T>
-	[[nodiscard]] Hook<Archiver>& OnUpdate() {
+	[[nodiscard]] Hook<void, HandleType>& OnUpdate() {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
-		return pool->template Pool<T, Archiver>::GetUpdateHooks().AddHook();
+		return pool->PoolType<T>::GetUpdateHooks().AddHook();
 	}
 
 	/**
@@ -1330,11 +1278,10 @@ public:
 	 * @return true if the hook is registered; false otherwise.
 	 */
 	template <typename T>
-	[[nodiscard]] bool HasOnConstruct(const Hook<Archiver>& hook) const {
+	[[nodiscard]] bool HasOnConstruct(const Hook<void, HandleType>& hook) const {
 		auto component{ GetId<T>() };
 		const auto pool{ GetPool<T>(component) };
-		return pool != nullptr &&
-			   pool->template Pool<T, Archiver>::GetConstructHooks().HasHook(hook);
+		return pool != nullptr && pool->PoolType<T>::GetConstructHooks().HasHook(hook);
 	}
 
 	/**
@@ -1348,11 +1295,10 @@ public:
 	 * @return true if the hook is registered; false otherwise.
 	 */
 	template <typename T>
-	[[nodiscard]] bool HasOnDestruct(const Hook<Archiver>& hook) const {
+	[[nodiscard]] bool HasOnDestruct(const Hook<void, HandleType>& hook) const {
 		auto component{ GetId<T>() };
 		const auto pool{ GetPool<T>(component) };
-		return pool != nullptr &&
-			   pool->template Pool<T, Archiver>::GetDestructHooks().HasHook(hook);
+		return pool != nullptr && pool->PoolType<T>::GetDestructHooks().HasHook(hook);
 	}
 
 	/**
@@ -1366,10 +1312,10 @@ public:
 	 * @return true if the hook is registered; false otherwise.
 	 */
 	template <typename T>
-	[[nodiscard]] bool HasOnUpdate(const Hook<Archiver>& hook) const {
+	[[nodiscard]] bool HasOnUpdate(const Hook<void, HandleType>& hook) const {
 		auto component{ GetId<T>() };
 		const auto pool{ GetPool<T>(component) };
-		return pool != nullptr && pool->template Pool<T, Archiver>::GetUpdateHooks().HasHook(hook);
+		return pool != nullptr && pool->PoolType<T>::GetUpdateHooks().HasHook(hook);
 	}
 
 	/**
@@ -1379,10 +1325,10 @@ public:
 	 * @param hook The hook instance to remove.
 	 */
 	template <typename T>
-	void RemoveOnConstruct(const Hook<Archiver>& hook) {
+	void RemoveOnConstruct(const Hook<void, HandleType>& hook) {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
-		pool->template Pool<T, Archiver>::GetConstructHooks().RemoveHook(hook);
+		pool->PoolType<T>::GetConstructHooks().RemoveHook(hook);
 	}
 
 	/**
@@ -1392,10 +1338,10 @@ public:
 	 * @param hook The hook instance to remove.
 	 */
 	template <typename T>
-	void RemoveOnDestruct(const Hook<Archiver>& hook) {
+	void RemoveOnDestruct(const Hook<void, HandleType>& hook) {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
-		pool->template Pool<T, Archiver>::GetDestructHooks().RemoveHook(hook);
+		pool->PoolType<T>::GetDestructHooks().RemoveHook(hook);
 	}
 
 	/**
@@ -1405,10 +1351,10 @@ public:
 	 * @param hook The hook instance to remove.
 	 */
 	template <typename T>
-	void RemoveOnUpdate(const Hook<Archiver>& hook) {
+	void RemoveOnUpdate(const Hook<void, HandleType>& hook) {
 		auto component{ GetId<T>() };
 		auto pool{ GetOrAddPool<T>(component) };
-		pool->template Pool<T, Archiver>::GetUpdateHooks().RemoveHook(hook);
+		pool->PoolType<T>::GetUpdateHooks().RemoveHook(hook);
 	}
 
 	/**
@@ -1437,9 +1383,9 @@ public:
 			next_entity_ <= entities_.Size(),
 			"Next available entity must not be out of bounds of entity vector"
 		);
-		impl::Index alive{ 0 };
-		impl::Index dead{ 0 };
-		for (impl::Index entity{ 0 }; entity < next_entity_; ++entity) {
+		Index alive{ 0 };
+		Index dead{ 0 };
+		for (Index entity{ 0 }; entity < next_entity_; ++entity) {
 			if (!refresh_[entity]) {
 				continue;
 			}
@@ -1479,7 +1425,7 @@ public:
 	 * @brief Creates a new entity. Call Refresh() after using this method.
 	 * @return The created Entity.
 	 */
-	Entity<Archiver> CreateEntity();
+	EntityHandle<Manager<Archiver, EntityHandle>> CreateEntity();
 
 	/**
 	 * @brief Copies an entity from one Manager to another.
@@ -1488,7 +1434,10 @@ public:
 	 * @param to The entity to copy to.
 	 */
 	template <typename... Ts>
-	void CopyEntity(const Entity<Archiver>& from, Entity<Archiver>& to);
+	void CopyEntity(
+		const EntityHandle<Manager<Archiver, EntityHandle>>& from,
+		EntityHandle<Manager<Archiver, EntityHandle>>& to
+	);
 
 	/**
 	 * @brief Copies an entity and returns the new entity. Call Refresh() after using this method.
@@ -1497,7 +1446,9 @@ public:
 	 * @return The copied entity.
 	 */
 	template <typename... Ts>
-	Entity<Archiver> CopyEntity(const Entity<Archiver>& from);
+	EntityHandle<Manager<Archiver, EntityHandle>> CopyEntity(
+		const EntityHandle<Manager<Archiver, EntityHandle>>& from
+	);
 
 	/**
 	 * @brief Retrieves all entities that have the specified components.
@@ -1505,7 +1456,8 @@ public:
 	 * @return A collection of entities that have the specified components.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] ecs::EntitiesWith<Archiver, true, Ts...> EntitiesWith() const;
+	[[nodiscard]] EntityContainer<ThisManager, true, LoopCriterion::WithComponents, Ts...>
+	EntitiesWith() const;
 
 	/**
 	 * @brief Retrieves all entities that have the specified components.
@@ -1513,7 +1465,8 @@ public:
 	 * @return A collection of entities that have the specified components.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] ecs::EntitiesWith<Archiver, false, Ts...> EntitiesWith();
+	[[nodiscard]] EntityContainer<ThisManager, false, LoopCriterion::WithComponents, Ts...>
+	EntitiesWith();
 
 	/**
 	 * @brief Retrieves all entities that do not have the specified components.
@@ -1521,7 +1474,8 @@ public:
 	 * @return A collection of entities that do not have the specified components.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] ecs::EntitiesWithout<Archiver, true, Ts...> EntitiesWithout() const;
+	[[nodiscard]] EntityContainer<ThisManager, true, LoopCriterion::WithoutComponents, Ts...>
+	EntitiesWithout() const;
 
 	/**
 	 * @brief Retrieves all entities that do not have the specified components.
@@ -1529,19 +1483,20 @@ public:
 	 * @return A collection of entities that do not have the specified components.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] ecs::EntitiesWithout<Archiver, false, Ts...> EntitiesWithout();
+	[[nodiscard]] EntityContainer<ThisManager, false, LoopCriterion::WithoutComponents, Ts...>
+	EntitiesWithout();
 
 	/**
 	 * @brief Retrieves all entities in the manager.
 	 * @return A collection of all entities in the manager.
 	 */
-	[[nodiscard]] ecs::Entities<Archiver, true> Entities() const;
+	[[nodiscard]] EntityContainer<ThisManager, true, LoopCriterion::None> Entities() const;
 
 	/**
 	 * @brief Retrieves all entities in the manager.
 	 * @return A collection of all entities in the manager.
 	 */
-	[[nodiscard]] ecs::Entities<Archiver, false> Entities();
+	[[nodiscard]] EntityContainer<ThisManager, false, LoopCriterion::None> Entities();
 
 	/**
 	 * @brief Gets the current number of entities in the manager.
@@ -1613,15 +1568,15 @@ public:
 	}
 
 protected:
-	friend struct std::hash<Entity<Archiver>>;
-	template <typename A>
+	friend struct std::hash<HandleType>;
+	template <typename M>
 	friend class Entity;
-	template <typename T, typename A, bool is_const, impl::LoopCriterion Criterion, typename... Ts>
+	template <typename M, bool is_const, LoopCriterion Criterion, typename... Ts>
 	friend class EntityContainer;
-	template <typename T, typename A, bool is_const, typename... Ts>
-	friend class impl::Pools;
-	template <typename T, typename A>
-	friend class impl::Pool;
+	template <typename M, bool is_const, typename... Ts>
+	friend class Pools;
+	template <typename T, typename M>
+	friend class Pool;
 
 	virtual void ClearEntities();
 
@@ -1639,9 +1594,7 @@ protected:
 	 * @param to_version The version of the entity to copy to.
 	 */
 	template <typename... Ts>
-	void CopyEntity(
-		impl::Index from_id, impl::Version from_version, impl::Index to_id, impl::Version to_version
-	) {
+	void CopyEntity(Index from_id, Version from_version, Index to_id, Version to_version) {
 		// Assertions to ensure the validity of the entity states before copying
 		ECS_ASSERT(
 			IsAlive(from_id, from_version),
@@ -1659,9 +1612,7 @@ protected:
 				std::conjunction_v<std::is_copy_constructible<Ts>...>,
 				"Cannot copy entity with a component that is not copy constructible"
 			);
-			impl::Pools<Entity<Archiver>, Archiver, false, Ts...> pools{
-				GetPool<Ts>(GetId<Ts>())...
-			};
+			Pools<Manager, false, Ts...> pools{ GetPool<Ts>(GetId<Ts>())... };
 			// Validate if the pools exist and contain the required components
 			ECS_ASSERT(
 				pools.AllExist(), "Cannot copy entity with a component that is not "
@@ -1691,7 +1642,7 @@ protected:
 	 * @param entity The generated entity index.
 	 * @param version The version assigned to the newly created entity.
 	 */
-	void GenerateEntity(impl::Index& entity, impl::Version& version) {
+	void GenerateEntity(Index& entity, Version& version) {
 		entity = 0;
 		// Pick entity from free list before trying to increment entity counter.
 		if (!free_entities_.empty()) {
@@ -1754,7 +1705,7 @@ protected:
 	 *
 	 * @param entity The entity whose components are to be cleared.
 	 */
-	void ClearEntity(impl::Index entity) const {
+	void ClearEntity(Index entity) const {
 		for (const auto& pool : pools_) {
 			if (pool != nullptr) {
 				pool->Remove(*this, entity);
@@ -1772,7 +1723,7 @@ protected:
 	 * @param version The version of the entity to check.
 	 * @return True if the entity is alive, otherwise false.
 	 */
-	[[nodiscard]] bool IsAlive(impl::Index entity, impl::Version version) const {
+	[[nodiscard]] bool IsAlive(Index entity, Version version) const {
 		return version != 0 && entity < versions_.size() && versions_[entity] == version &&
 			   entity < entities_.Size() &&
 			   // Entity considered currently alive or entity marked
@@ -1786,7 +1737,7 @@ protected:
 	 * @param entity The entity to check.
 	 * @return True if the entity is activated, otherwise false.
 	 */
-	[[nodiscard]] bool IsActivated(impl::Index entity) const {
+	[[nodiscard]] bool IsActivated(Index entity) const {
 		return entity < entities_.Size() && entities_[entity];
 	}
 
@@ -1796,7 +1747,7 @@ protected:
 	 * @param entity The entity whose version is to be retrieved.
 	 * @return The version of the entity.
 	 */
-	[[nodiscard]] impl::Version GetVersion(impl::Index entity) const {
+	[[nodiscard]] Version GetVersion(Index entity) const {
 		ECS_ASSERT(entity < versions_.size(), "Entity does not have a valid version");
 		return versions_[entity];
 	}
@@ -1811,7 +1762,7 @@ protected:
 	 * @param entity2 The second entity to check.
 	 * @return True if the entities match, otherwise false.
 	 */
-	[[nodiscard]] bool Match(impl::Index entity1, impl::Index entity2) const {
+	[[nodiscard]] bool Match(Index entity1, Index entity2) const {
 		for (const auto& pool : pools_) {
 			if (pool == nullptr) {
 				continue;
@@ -1833,7 +1784,7 @@ protected:
 	 * @param entity The entity to destroy.
 	 * @param version The version of the entity to destroy.
 	 */
-	void DestroyEntity(impl::Index entity, impl::Version version) {
+	void DestroyEntity(Index entity, Version version) {
 		ECS_ASSERT(entity < versions_.size(), "");
 		ECS_ASSERT(entity < refresh_.Size(), "");
 		if (versions_[entity] != version) {
@@ -1865,12 +1816,12 @@ protected:
 	 * @return The pool of the specified component type.
 	 */
 	template <typename T>
-	[[nodiscard]] const impl::Pool<T, Archiver>* GetPool(impl::Index component) const {
+	[[nodiscard]] const PoolType<T>* GetPool(Index component) const {
 		ECS_ASSERT(component == GetId<T>(), "GetPool mismatch with component id");
 		if (component < pools_.size()) {
 			const auto& pool{ pools_[component] };
 			// This is nullptr if the pool does not exist in the manager.
-			return static_cast<impl::Pool<T, Archiver>*>(pool.get());
+			return static_cast<PoolType<T>*>(pool.get());
 		}
 		return nullptr;
 	}
@@ -1883,10 +1834,8 @@ protected:
 	 * @return The pool of the specified component type.
 	 */
 	template <typename T>
-	[[nodiscard]] impl::Pool<T, Archiver>* GetPool(impl::Index component) {
-		return const_cast<impl::Pool<T, Archiver>*>(
-			std::as_const(*this).template GetPool<T>(component)
-		);
+	[[nodiscard]] PoolType<T>* GetPool(Index component) {
+		return const_cast<PoolType<T>*>(std::as_const(*this).template GetPool<T>(component));
 	}
 
 	/**
@@ -1897,10 +1846,10 @@ protected:
 	 * @param component The index of the component to remove.
 	 */
 	template <typename T>
-	void Remove(impl::Index entity, impl::Index component) {
+	void Remove(Index entity, Index component) {
 		auto pool{ GetPool<T>(component) };
 		if (pool != nullptr) {
-			pool->template Pool<T, Archiver>::Remove(*this, entity);
+			pool->PoolType<T>::Remove(*this, entity);
 		}
 	}
 
@@ -1915,8 +1864,8 @@ protected:
 	 * @return The components associated with the entity.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] decltype(auto) Get(impl::Index entity) const {
-		impl::Pools<Entity<Archiver>, Archiver, false, Ts...> p{ (GetPool<Ts>(GetId<Ts>()))... };
+	[[nodiscard]] decltype(auto) Get(Index entity) const {
+		Pools<Manager, false, Ts...> p{ (GetPool<Ts>(GetId<Ts>()))... };
 		return p.Get(entity);
 	}
 
@@ -1928,8 +1877,8 @@ protected:
 	 * @return The components associated with the entity.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] decltype(auto) Get(impl::Index entity) {
-		impl::Pools<Entity<Archiver>, Archiver, false, Ts...> p{ (GetPool<Ts>(GetId<Ts>()))... };
+	[[nodiscard]] decltype(auto) Get(Index entity) {
+		Pools<Manager, false, Ts...> p{ (GetPool<Ts>(GetId<Ts>()))... };
 		return p.Get(entity);
 	}
 
@@ -1942,7 +1891,7 @@ protected:
 	 * @return True if the entity has the component, otherwise false.
 	 */
 	template <typename T>
-	[[nodiscard]] bool Has(impl::Index entity, impl::Index component) const {
+	[[nodiscard]] bool Has(Index entity, Index component) const {
 		const auto pool{ GetPool<T>(component) };
 		return pool != nullptr && pool->Has(entity);
 	}
@@ -1952,7 +1901,7 @@ protected:
 	 * @tparam Ts The component types to update.
 	 */
 	template <typename T>
-	void Update(impl::Index entity, impl::Index component) const {
+	void Update(Index entity, Index component) const {
 		const auto pool{ GetPool<T>(component) };
 		if (pool != nullptr) {
 			pool->Update(*this, entity);
@@ -1960,13 +1909,13 @@ protected:
 	}
 
 	template <typename T>
-	impl::Pool<T, Archiver>* GetOrAddPool(impl::Index component) {
+	PoolType<T>* GetOrAddPool(Index component) {
 		if (component >= pools_.size()) {
 			pools_.resize(static_cast<std::size_t>(component) + 1);
 		}
 		auto pool{ GetPool<T>(component) };
 		if (pool == nullptr) {
-			auto new_pool{ std::make_unique<impl::Pool<T, Archiver>>() };
+			auto new_pool{ std::make_unique<PoolType<T>>() };
 			pool = new_pool.get();
 			ECS_ASSERT(component < pools_.size(), "Component index out of range");
 			pools_[component] = std::move(new_pool);
@@ -1989,7 +1938,7 @@ protected:
 	 * @return A reference to the newly added component.
 	 */
 	template <typename T, typename... Ts>
-	T& Add(impl::Index entity, impl::Index component, Ts&&... constructor_args) {
+	T& Add(Index entity, Index component, Ts&&... constructor_args) {
 		auto pool{ GetOrAddPool<T>(component) };
 		return pool->Add(*this, entity, std::forward<Ts>(constructor_args)...);
 	}
@@ -2003,10 +1952,10 @@ protected:
 	 * @return The ID associated with the component type.
 	 */
 	template <typename T>
-	[[nodiscard]] static impl::Index GetId() {
+	[[nodiscard]] static Index GetId() {
 		// Get the next available id save that id as static variable for the
 		// component type.
-		static impl::Index id{ ComponentCount()++ };
+		static Index id{ ComponentCount()++ };
 		return id;
 	}
 
@@ -2017,34 +1966,34 @@ protected:
 	 *
 	 * @return The current component count.
 	 */
-	[[nodiscard]] static impl::Index& ComponentCount() {
-		static impl::Index id{ 0 };
+	[[nodiscard]] static Index& ComponentCount() {
+		static Index id{ 0 };
 		return id;
 	}
 
 	// @brief Index of the next available entity.
-	impl::Index next_entity_{ 0 };
+	Index next_entity_{ 0 };
 
 	// @brief The total count of active entities.
-	impl::Index count_{ 0 };
+	Index count_{ 0 };
 
 	// @brief Flag indicating if a refresh is required.
 	bool refresh_required_{ false };
 
 	// @brief Dynamic bitset tracking the state of entities (alive or dead).
-	impl::DynamicBitset entities_;
+	DynamicBitset entities_;
 
 	// @brief Dynamic bitset used to track entities that need refreshing.
-	impl::DynamicBitset refresh_;
+	DynamicBitset refresh_;
 
 	// @brief Version vector for entities.
-	std::vector<impl::Version> versions_;
+	std::vector<Version> versions_;
 
 	// @brief Deque of free entity indices.
-	std::deque<impl::Index> free_entities_;
+	std::deque<Index> free_entities_;
 
 	// @brief Pools of component data for entities.
-	std::vector<std::unique_ptr<impl::AbstractPool<Archiver>>> pools_;
+	std::vector<std::unique_ptr<AbstractPoolType>> pools_;
 };
 
 /**
@@ -2055,7 +2004,7 @@ protected:
  * It provides functions for adding, removing, and checking components as well as copying,
  * destroying, and comparing entities.
  */
-template <typename Archiver = impl::VoidArchiver>
+template <typename TManager>
 class Entity {
 public:
 	/**
@@ -2311,7 +2260,7 @@ public:
 	 * @brief Gets the manager associated with the entity.
 	 * @return A reference to the entity's manager.
 	 */
-	[[nodiscard]] Manager<Archiver>& GetManager() {
+	[[nodiscard]] TManager& GetManager() {
 		ECS_ASSERT(manager_ != nullptr, "Cannot get manager of a null entity");
 		return *manager_;
 	}
@@ -2320,7 +2269,7 @@ public:
 	 * @brief Gets the manager associated with the entity.
 	 * @return A const reference to the entity's manager.
 	 */
-	[[nodiscard]] const Manager<Archiver>& GetManager() const {
+	[[nodiscard]] const TManager& GetManager() const {
 		ECS_ASSERT(manager_ != nullptr, "Cannot get manager of a null entity");
 		return *manager_;
 	}
@@ -2349,7 +2298,7 @@ public:
 	 *
 	 * @return The entity's index (ID).
 	 */
-	[[nodiscard]] impl::Index GetId() const {
+	[[nodiscard]] Index GetId() const {
 		return entity_;
 	}
 
@@ -2361,20 +2310,20 @@ public:
 	 *
 	 * @return The current version of the entity.
 	 */
-	[[nodiscard]] impl::Index GetVersion() const {
+	[[nodiscard]] Index GetVersion() const {
 		return version_;
 	}
 
 protected:
-	template <typename A>
+	template <typename A, template <typename> class EntityHandle>
 	friend class Manager;
 	friend struct std::hash<Entity>;
-	template <typename T, typename A, bool is_const, impl::LoopCriterion Criterion, typename... Ts>
+	template <typename M, bool is_const, LoopCriterion Criterion, typename... Ts>
 	friend class EntityContainer;
-	template <typename T, typename A>
-	friend class impl::Pool;
-	template <typename T, typename A, bool is_const, typename... Ts>
-	friend class impl::Pools;
+	template <typename TC, typename M>
+	friend class Pool;
+	template <typename M, bool is_const, typename... Ts>
+	friend class Pools;
 
 	/**
 	 * @brief Constructs an entity with a given ID, version, and associated manager.
@@ -2382,10 +2331,8 @@ protected:
 	 * @param version The entity's version.
 	 * @param manager The manager that owns the entity.
 	 */
-	Entity(impl::Index entity, impl::Version version, const Manager<Archiver>* manager) :
-		entity_{ entity },
-		version_{ version },
-		manager_{ const_cast<Manager<Archiver>*>(manager) } {}
+	Entity(Index entity, Version version, const TManager* manager) :
+		entity_{ entity }, version_{ version }, manager_{ const_cast<TManager*>(manager) } {}
 
 	/**
 	 * @brief Constructs an entity with a given ID, version, and associated manager.
@@ -2393,30 +2340,30 @@ protected:
 	 * @param version The entity's version.
 	 * @param manager The manager that owns the entity.
 	 */
-	Entity(impl::Index entity, impl::Version version, Manager<Archiver>* manager) :
+	Entity(Index entity, Version version, TManager* manager) :
 		entity_{ entity }, version_{ version }, manager_{ manager } {}
 
 	// @brief The entity's ID.
-	impl::Index entity_{ 0 };
+	Index entity_{ 0 };
 
 	// @brief The entity's version.
-	impl::Version version_{ 0 };
+	Version version_{ 0 };
 
 	// @brief The manager that owns the entity.
-	Manager<Archiver>* manager_{ nullptr };
+	TManager* manager_{ nullptr };
 };
 
-template <typename Archiver>
-inline Entity<Archiver>::operator bool() const {
-	return *this != Entity<Archiver>{};
+template <typename TManager>
+inline Entity<TManager>::operator bool() const {
+	return *this != Entity{};
 }
 
-template <impl::LoopCriterion Criterion, typename TContainer, typename... Ts>
+template <LoopCriterion Criterion, typename TContainer, typename... Ts>
 class EntityContainerIterator {
 public:
 	using iterator_category = std::forward_iterator_tag;
 	using difference_type	= std::ptrdiff_t;
-	using pointer			= impl::Index;
+	using pointer			= Index;
 	// using value_type		= std::tuple<Entity, Ts...> || Entity;
 	// using reference			= std::tuple<Entity, Ts&...>|| Entity;
 
@@ -2564,7 +2511,7 @@ private:
 	 * @param entity The entity index to initialize the iterator with.
 	 * @param entity_container The container associated with the iterator.
 	 */
-	EntityContainerIterator(impl::Index entity, TContainer entity_container) :
+	EntityContainerIterator(Index entity, TContainer entity_container) :
 		entity_(entity), entity_container_{ entity_container } {
 		if (ShouldIncrement()) {
 			this->operator++();
@@ -2579,11 +2526,11 @@ private:
 	}
 
 private:
-	template <typename T, typename A, bool is_const, impl::LoopCriterion C, typename... S>
+	template <typename M, bool is_const, LoopCriterion C, typename... S>
 	friend class EntityContainer;
 
 	// @brief The current entity index.
-	impl::Index entity_{ 0 };
+	Index entity_{ 0 };
 
 	// @brief The container associated with the iterator.
 	TContainer entity_container_;
@@ -2598,11 +2545,11 @@ private:
  * @tparam Criterion Filtering criteria for included entities.
  * @tparam Ts Types of the components accessed through this container.
  */
-template <
-	typename T, typename Archiver, bool is_const, impl::LoopCriterion Criterion, typename... Ts>
+template <typename TManager, bool is_const, LoopCriterion Criterion, typename... Ts>
 class EntityContainer {
 public:
-	using ManagerType = std::conditional_t<is_const, const Manager<Archiver>*, Manager<Archiver>*>;
+	using ManagerType  = std::conditional_t<is_const, const TManager*, TManager*>;
+	using EntityHandle = typename TManager::HandleType;
 
 	/** @brief Default constructor */
 	EntityContainer() = default;
@@ -2616,16 +2563,15 @@ public:
 	 * @param pools Pools containing component data.
 	 */
 	EntityContainer(
-		ManagerType manager, impl::Index max_entity,
-		const impl::Pools<T, Archiver, is_const, Ts...>& pools
+		ManagerType manager, Index max_entity, const Pools<TManager, is_const, Ts...>& pools
 	) :
 		manager_{ manager }, max_entity_{ max_entity }, pools_{ pools } {}
 
 	using iterator = EntityContainerIterator<
-		Criterion, EntityContainer<T, Archiver, is_const, Criterion, Ts...>&, Ts...>;
+		Criterion, EntityContainer<TManager, is_const, Criterion, Ts...>&, Ts...>;
 
 	using const_iterator = EntityContainerIterator<
-		Criterion, const EntityContainer<T, Archiver, is_const, Criterion, Ts...>&, Ts...>;
+		Criterion, const EntityContainer<TManager, is_const, Criterion, Ts...>&, Ts...>;
 
 	/** @brief Returns iterator to beginning */
 	iterator begin() {
@@ -2663,7 +2609,7 @@ public:
 	 * @param func Function to apply to each entity and its components.
 	 */
 	template <bool IS_CONST = is_const, std::enable_if_t<IS_CONST, int> = 0>
-	void operator()(const std::function<void(T, const Ts&...)>& func) const {
+	void operator()(const std::function<void(EntityHandle, const Ts&...)>& func) const {
 		for (auto it{ begin() }; it != end(); it++) {
 			std::apply(func, GetComponentTuple(it.GetEntityId()));
 		}
@@ -2675,7 +2621,7 @@ public:
 	 * @param func Function to apply to each entity and its components.
 	 */
 	template <bool IS_CONST = is_const, std::enable_if_t<!IS_CONST, int> = 0>
-	void operator()(const std::function<void(T, Ts&...)>& func) {
+	void operator()(const std::function<void(EntityHandle, Ts&...)>& func) {
 		for (auto it{ begin() }; it != end(); it++) {
 			std::apply(func, GetComponentTuple(it.GetEntityId()));
 		}
@@ -2685,7 +2631,7 @@ public:
 	 * @brief Applies a function to each matching entity.
 	 * @param func Function to apply to each entity.
 	 */
-	void ForEach(const std::function<void(T)>& func) const {
+	void ForEach(const std::function<void(EntityHandle)>& func) const {
 		for (auto it{ begin() }; it != end(); it++) {
 			std::invoke(func, GetEntity(it.GetEntityId()));
 		}
@@ -2695,8 +2641,8 @@ public:
 	 * @brief Returns a vector of all matching entities.
 	 * @return A vector containing all entities matching the filtering criteria.
 	 */
-	[[nodiscard]] std::vector<T> GetVector() const {
-		std::vector<T> v;
+	[[nodiscard]] std::vector<EntityHandle> GetVector() const {
+		std::vector<EntityHandle> v;
 		v.reserve(max_entity_);
 		ForEach([&](auto e) { v.push_back(e); });
 		v.shrink_to_fit();
@@ -2714,44 +2660,44 @@ public:
 	}
 
 private:
-	template <typename A>
+	template <typename A, template <typename> class EH>
 	friend class Manager;
-	template <impl::LoopCriterion U, typename TContainer, typename... S>
+	template <LoopCriterion U, typename TContainer, typename... S>
 	friend class EntityContainerIterator;
 
 	/** @brief Retrieves an entity object given its index. */
-	T GetEntity(impl::Index entity) const {
+	EntityHandle GetEntity(Index entity) const {
 		ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
-		return T{ entity, manager_->GetVersion(entity), manager_ };
+		return { entity, manager_->GetVersion(entity), manager_ };
 	}
 
 	/** @brief Determines whether the entity meets the loop criterion. */
-	[[nodiscard]] bool EntityMeetsCriteria(impl::Index entity) const {
+	[[nodiscard]] bool EntityMeetsCriteria(Index entity) const {
 		bool activated{ manager_->IsActivated(entity) };
 		if (!activated) {
 			return false;
 		}
-		if constexpr (Criterion == impl::LoopCriterion::None) {
+		if constexpr (Criterion == LoopCriterion::None) {
 			return true;
 		} else {
-			if constexpr (Criterion == impl::LoopCriterion::WithComponents) {
+			if constexpr (Criterion == LoopCriterion::WithComponents) {
 				return pools_.Has(entity);
 			}
-			if constexpr (Criterion == impl::LoopCriterion::WithoutComponents) {
+			if constexpr (Criterion == LoopCriterion::WithoutComponents) {
 				return pools_.NotHas(entity);
 			}
 		}
 	}
 
 	/** @brief Checks if the entity index equals the maximum. */
-	[[nodiscard]] bool IsMaxEntity(impl::Index entity) const {
+	[[nodiscard]] bool IsMaxEntity(Index entity) const {
 		return entity == max_entity_;
 	}
 
 	/** @brief Checks if the entity index is within valid range. */
-	[[nodiscard]] bool EntityWithinLimit(impl::Index entity) const {
+	[[nodiscard]] bool EntityWithinLimit(Index entity) const {
 		return entity < max_entity_;
 	}
 
@@ -2761,17 +2707,17 @@ private:
 	 * @return A tuple containing the entity and its components.
 	 */
 	template <bool IS_CONST = is_const, std::enable_if_t<IS_CONST, int> = 0>
-	[[nodiscard]] decltype(auto) GetComponentTuple(impl::Index entity) const {
+	[[nodiscard]] decltype(auto) GetComponentTuple(Index entity) const {
 		ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
-		if constexpr (Criterion == impl::LoopCriterion::WithComponents) {
-			impl::Pools<T, Archiver, true, Ts...> pools{
+		if constexpr (Criterion == LoopCriterion::WithComponents) {
+			Pools<TManager, true, Ts...> pools{
 				manager_->template GetPool<Ts>(manager_->template GetId<Ts>())...
 			};
 			return pools.GetWithEntity(entity, manager_);
 		} else {
-			return T{ entity, manager_->GetVersion(entity), manager_ };
+			return EntityHandle{ entity, manager_->GetVersion(entity), manager_ };
 		}
 	}
 
@@ -2781,17 +2727,17 @@ private:
 	 * @return A tuple containing the entity and its mutable components.
 	 */
 	template <bool IS_CONST = is_const, std::enable_if_t<!IS_CONST, int> = 0>
-	[[nodiscard]] decltype(auto) GetComponentTuple(impl::Index entity) {
+	[[nodiscard]] decltype(auto) GetComponentTuple(Index entity) {
 		ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
-		if constexpr (Criterion == impl::LoopCriterion::WithComponents) {
-			impl::Pools<T, Archiver, false, Ts...> pools{
+		if constexpr (Criterion == LoopCriterion::WithComponents) {
+			Pools<TManager, false, Ts...> pools{
 				manager_->template GetPool<Ts>(manager_->template GetId<Ts>())...
 			};
 			return pools.GetWithEntity(entity, manager_);
 		} else {
-			return T{ entity, manager_->GetVersion(entity), manager_ };
+			return EntityHandle{ entity, manager_->GetVersion(entity), manager_ };
 		}
 	}
 
@@ -2799,25 +2745,25 @@ private:
 	ManagerType manager_{ nullptr };
 
 	// @brief Maximum valid entity index.
-	impl::Index max_entity_{ 0 };
+	Index max_entity_{ 0 };
 
 	// @brief Pools of components managed by this container.
-	impl::Pools<T, Archiver, is_const, Ts...> pools_;
+	Pools<TManager, is_const, Ts...> pools_;
 };
 
-namespace impl {
-
-template <typename T, typename Archiver>
-void Pool<T, Archiver>::InvokeDestructHooks(const Manager<Archiver>& manager) {
+template <typename TComponent, typename TManager>
+void Pool<TComponent, TManager>::InvokeDestructHooks(const TManager& manager) {
+	using Handle = typename TManager::HandleType;
 	for (auto entity : dense_) {
-		destruct_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+		destruct_hooks_.Invoke(Handle{ entity, manager.GetVersion(entity), &manager });
 	}
 }
 
-template <typename T, typename Archiver>
-void Pool<T, Archiver>::Copy(const Manager<Archiver>& manager, Index from_entity, Index to_entity) {
+template <typename TComponent, typename TManager>
+void Pool<TComponent, TManager>::Copy(const TManager& manager, Index from_entity, Index to_entity) {
 	// Same reason as given in Clone() for why no static_assert.
-	if constexpr (std::is_copy_constructible_v<T>) {
+	using Handle = typename TManager::HandleType;
+	if constexpr (std::is_copy_constructible_v<TComponent>) {
 		ECS_ASSERT(
 			Has(from_entity), "Cannot copy from an entity which does not exist in the manager"
 		);
@@ -2827,33 +2773,35 @@ void Pool<T, Archiver>::Copy(const Manager<Archiver>& manager, Index from_entity
 			components_.emplace(
 				components_.begin() + sparse_[to_entity], components_[sparse_[from_entity]]
 			);
-			update_hooks_.Invoke(Entity{ to_entity, manager.GetVersion(to_entity), &manager });
+			update_hooks_.Invoke(Handle{ to_entity, manager.GetVersion(to_entity), &manager });
 		}
 	} else {
 		ECS_ASSERT(false, "Cannot copy an entity with a non copy constructible component");
 	}
 }
 
-template <typename T, typename Archiver>
-void Pool<T, Archiver>::Clear(const Manager<Archiver>& manager) {
+template <typename TComponent, typename TManager>
+void Pool<TComponent, TManager>::Clear(const TManager& manager) {
 	InvokeDestructHooks(manager);
 	components_.clear();
 	dense_.clear();
 	sparse_.clear();
 }
 
-template <typename T, typename Archiver>
-void Pool<T, Archiver>::Update(const Manager<Archiver>& manager, Index entity) const {
+template <typename TComponent, typename TManager>
+void Pool<TComponent, TManager>::Update(const TManager& manager, Index entity) const {
 	ECS_ASSERT(Has(entity), "Cannot update a component which the entity does not have");
-	update_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+	using Handle = typename TManager::HandleType;
+	update_hooks_.Invoke(Handle{ entity, manager.GetVersion(entity), &manager });
 }
 
-template <typename T, typename Archiver>
-bool Pool<T, Archiver>::Remove(const Manager<Archiver>& manager, Index entity) {
+template <typename TComponent, typename TManager>
+bool Pool<TComponent, TManager>::Remove(const TManager& manager, Index entity) {
 	if (!Has(entity)) {
 		return false;
 	}
-	destruct_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+	using Handle = typename TManager::HandleType;
+	destruct_hooks_.Invoke(Handle{ entity, manager.GetVersion(entity), &manager });
 
 	// See https://skypjack.github.io/2020-08-02-ecs-baf-part-9/ for
 	// in-depth explanation. In short, swap with back and pop back,
@@ -2868,13 +2816,14 @@ bool Pool<T, Archiver>::Remove(const Manager<Archiver>& manager, Index entity) {
 	return true;
 }
 
-template <typename T, typename Archiver>
+template <typename TComponent, typename TManager>
 template <typename... Ts>
-T& Pool<T, Archiver>::Add(
-	const Manager<Archiver>& manager, Index entity, Ts&&... constructor_args
+TComponent& Pool<TComponent, TManager>::Add(
+	const TManager& manager, Index entity, Ts&&... constructor_args
 ) {
 	static_assert(
-		std::is_constructible_v<T, Ts...> || tt::is_aggregate_initializable_v<T, Ts...>,
+		std::is_constructible_v<TComponent, Ts...> ||
+			tt::is_aggregate_initializable_v<TComponent, Ts...>,
 		"Cannot add component which is not constructible from given arguments"
 	);
 	if (entity < sparse_.size()) {
@@ -2882,13 +2831,13 @@ T& Pool<T, Archiver>::Add(
 		if (sparse_[entity] < dense_.size() && dense_[sparse_[entity]] == entity) {
 			// Entity currently has the component.
 			// Replace the current component with a new component.
-			T& component{ components_[sparse_[entity]] };
-			component.~T();
+			TComponent& component{ components_[sparse_[entity]] };
+			component.~TComponent();
 			// This approach prevents the creation of a temporary component object.
-			if constexpr (std::is_aggregate_v<T>) {
-				new (&component) T{ std::forward<Ts>(constructor_args)... };
+			if constexpr (std::is_aggregate_v<TComponent>) {
+				new (&component) TComponent{ std::forward<Ts>(constructor_args)... };
 			} else {
-				new (&component) T(std::forward<Ts>(constructor_args)...);
+				new (&component) TComponent(std::forward<Ts>(constructor_args)...);
 			}
 			update_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
 			return component;
@@ -2902,112 +2851,129 @@ T& Pool<T, Archiver>::Add(
 	// Add new component to the entity.
 	dense_.push_back(entity);
 
-	T* component{ nullptr };
+	TComponent* component{ nullptr };
 
-	if constexpr (std::is_aggregate_v<T>) {
+	if constexpr (std::is_aggregate_v<TComponent>) {
 		component =
-			&components_.emplace_back(std::move(T{ std::forward<Ts>(constructor_args)... }));
+			&components_.emplace_back(std::move(TComponent{ std::forward<Ts>(constructor_args)... })
+			);
 	} else {
 		component = &components_.emplace_back(std::forward<Ts>(constructor_args)...);
 	}
-
-	construct_hooks_.Invoke(Entity{ entity, manager.GetVersion(entity), &manager });
+	using Handle = typename TManager::HandleType;
+	construct_hooks_.Invoke(Handle{ entity, manager.GetVersion(entity), &manager });
 	return *component;
 }
 
-template <typename T, typename Archiver, bool is_const, typename... Ts>
-[[nodiscard]] constexpr decltype(auto) Pools<T, Archiver, is_const, Ts...>::GetWithEntity(
-	Index entity, const Manager<Archiver>* manager
+template <typename TManager, bool is_const, typename... Ts>
+[[nodiscard]] constexpr decltype(auto) Pools<TManager, is_const, Ts...>::GetWithEntity(
+	Index entity, const TManager* manager
 ) const {
 	ECS_ASSERT(AllExist(), "Component pools cannot be destroyed while looping through entities");
 	static_assert(sizeof...(Ts) > 0);
-	return std::tuple<T, const Ts&...>(
-		T{ entity, manager->GetVersion(entity), manager },
-		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Get(entity))...
+	using Handle = typename TManager::HandleType;
+	return std::tuple<Handle, const Ts&...>(
+		Handle{ entity, manager->GetVersion(entity), manager },
+		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Get(entity))...
 	);
 }
 
-template <typename T, typename Archiver, bool is_const, typename... Ts>
-[[nodiscard]] constexpr decltype(auto) Pools<T, Archiver, is_const, Ts...>::GetWithEntity(
-	Index entity, Manager<Archiver>* manager
+template <typename TManager, bool is_const, typename... Ts>
+[[nodiscard]] constexpr decltype(auto) Pools<TManager, is_const, Ts...>::GetWithEntity(
+	Index entity, TManager* manager
 ) {
 	ECS_ASSERT(AllExist(), "Component pools cannot be destroyed while looping through entities");
 	static_assert(sizeof...(Ts) > 0);
-	return std::tuple<T, Ts&...>(
-		T{ entity, manager->GetVersion(entity), manager },
-		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, Archiver>::Get(entity))...
+	using Handle = typename TManager::HandleType;
+	return std::tuple<Handle, Ts&...>(
+		Handle{ entity, manager->GetVersion(entity), manager },
+		(std::get<PoolType<Ts>>(pools_)->template Pool<Ts, TManager>::Get(entity))...
 	);
 }
 
-} // namespace impl
-
-template <typename Archiver>
-inline Entity<Archiver> Manager<Archiver>::CreateEntity() {
-	impl::Index entity{ 0 };
-	impl::Version version{ 0 };
+template <typename Archiver, template <typename> class EntityHandle>
+inline EntityHandle<Manager<Archiver, EntityHandle>> Manager<Archiver, EntityHandle>::CreateEntity(
+) {
+	Index entity{ 0 };
+	Version version{ 0 };
 	GenerateEntity(entity, version);
 	ECS_ASSERT(version != 0, "Failed to create new entity in manager");
-	return Entity{ entity, version, this };
+	return HandleType{ entity, version, this };
 }
 
-template <typename Archiver>
+template <typename Archiver, template <typename> class EntityHandle>
 template <typename... Ts>
-inline void Manager<Archiver>::CopyEntity(const Entity<Archiver>& from, Entity<Archiver>& to) {
+inline void Manager<Archiver, EntityHandle>::CopyEntity(
+	const EntityHandle<Manager<Archiver, EntityHandle>>& from,
+	EntityHandle<Manager<Archiver, EntityHandle>>& to
+) {
 	CopyEntity<Ts...>(from.entity_, from.version_, to.entity_, to.version_);
 }
 
-template <typename Archiver>
+template <typename Archiver, template <typename> class EntityHandle>
 template <typename... Ts>
-inline Entity<Archiver> Manager<Archiver>::CopyEntity(const Entity<Archiver>& from) {
-	Entity<Archiver> to{ CreateEntity() };
+inline EntityHandle<Manager<Archiver, EntityHandle>> Manager<Archiver, EntityHandle>::CopyEntity(
+	const EntityHandle<Manager<Archiver, EntityHandle>>& from
+) {
+	auto to{ CreateEntity() };
 	CopyEntity<Ts...>(from, to);
 	return to;
 }
 
-template <typename Archiver>
+template <typename Archiver, template <typename> class EntityHandle>
 template <typename... Ts>
-inline ecs::EntitiesWith<Archiver, true, Ts...> Manager<Archiver>::EntitiesWith() const {
-	return { this, next_entity_,
-			 impl::Pools<Entity<Archiver>, Archiver, true, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
+inline EntityContainer<Manager<Archiver, EntityHandle>, true, LoopCriterion::WithComponents, Ts...>
+Manager<Archiver, EntityHandle>::EntitiesWith() const {
+	return { this, next_entity_, Pools<ThisManager, true, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
 }
 
-template <typename Archiver>
+template <typename Archiver, template <typename> class EntityHandle>
 template <typename... Ts>
-inline ecs::EntitiesWith<Archiver, false, Ts...> Manager<Archiver>::EntitiesWith() {
-	return { this, next_entity_,
-			 impl::Pools<Entity<Archiver>, Archiver, false, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
+inline EntityContainer<Manager<Archiver, EntityHandle>, false, LoopCriterion::WithComponents, Ts...>
+Manager<Archiver, EntityHandle>::EntitiesWith() {
+	return { this, next_entity_, Pools<ThisManager, false, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
 }
 
-template <typename Archiver>
+template <typename Archiver, template <typename> class EntityHandle>
 template <typename... Ts>
-inline ecs::EntitiesWithout<Archiver, true, Ts...> Manager<Archiver>::EntitiesWithout() const {
-	return { this, next_entity_,
-			 impl::Pools<Entity<Archiver>, Archiver, true, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
+inline EntityContainer<
+	Manager<Archiver, EntityHandle>, true, LoopCriterion::WithoutComponents, Ts...>
+Manager<Archiver, EntityHandle>::EntitiesWithout() const {
+	return { this, next_entity_, Pools<ThisManager, true, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
 }
 
-template <typename Archiver>
+template <typename Archiver, template <typename> class EntityHandle>
 template <typename... Ts>
-inline ecs::EntitiesWithout<Archiver, false, Ts...> Manager<Archiver>::EntitiesWithout() {
-	return { this, next_entity_,
-			 impl::Pools<Entity<Archiver>, Archiver, false, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
+inline EntityContainer<
+	Manager<Archiver, EntityHandle>, false, LoopCriterion::WithoutComponents, Ts...>
+Manager<Archiver, EntityHandle>::EntitiesWithout() {
+	return { this, next_entity_, Pools<ThisManager, false, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
 }
 
-template <typename Archiver>
-inline ecs::Entities<Archiver, true> Manager<Archiver>::Entities() const {
-	return { this, next_entity_, impl::Pools<Entity<Archiver>, Archiver, true>{} };
+template <typename Archiver, template <typename> class EntityHandle>
+inline EntityContainer<Manager<Archiver, EntityHandle>, true, LoopCriterion::None>
+Manager<Archiver, EntityHandle>::Entities() const {
+	return { this, next_entity_, Pools<ThisManager, true>{} };
 }
 
-template <typename Archiver>
-inline ecs::Entities<Archiver, false> Manager<Archiver>::Entities() {
-	return { this, next_entity_, impl::Pools<Entity<Archiver>, Archiver, false>{} };
+template <typename Archiver, template <typename> class EntityHandle>
+inline EntityContainer<Manager<Archiver, EntityHandle>, false, LoopCriterion::None>
+Manager<Archiver, EntityHandle>::Entities() {
+	return { this, next_entity_, Pools<ThisManager, false>{} };
 }
 
-template <typename Archiver>
-inline void Manager<Archiver>::ClearEntities() {
+template <typename Archiver, template <typename> class EntityHandle>
+inline void Manager<Archiver, EntityHandle>::ClearEntities() {
 	for (auto entity : Entities()) {
 		entity.Destroy();
 	}
 }
+
+} // namespace impl
+
+using Manager = impl::Manager<impl::VoidArchiver, impl::Entity>;
+
+using Entity = Manager::HandleType;
 
 } // namespace ecs
 
@@ -3023,8 +2989,8 @@ namespace std {
  *
  * @tparam ecs::Entity The type for which the hash is being specialized.
  */
-template <typename Archiver>
-struct hash<ecs::Entity<Archiver>> {
+template <typename TManager>
+struct hash<ecs::impl::Entity<TManager>> {
 	/**
 	 * @brief Computes the hash value for an ecs::Entity object.
 	 *
@@ -3034,11 +3000,10 @@ struct hash<ecs::Entity<Archiver>> {
 	 * @param e The `ecs::Entity` object for which the hash value is being calculated.
 	 * @return The computed hash value for the given `ecs::Entity`.
 	 */
-	size_t operator()(const ecs::Entity<Archiver>& e) const {
+	size_t operator()(const ecs::impl::Entity<TManager>& e) const {
 		// Source: https://stackoverflow.com/a/17017281
 		size_t h{ 17 };
-		h = h * 31 + hash<ecs::Manager<Archiver>*>()(
-						 e.manager_
+		h = h * 31 + hash<ecs::Manager<Archiver, ecs::impl::Entity<TManager>>*>()(e.manager_
 					 );								/**< Hash for the associated manager pointer. */
 		h = h * 31 +
 			hash<ecs::impl::Index>()(e.entity_);	/**< Hash for the entity's unique index. */
