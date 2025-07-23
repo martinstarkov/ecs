@@ -240,12 +240,15 @@ public:
 	 * @return true if either function or instance differ.
 	 */
 	friend bool operator!=(const Hook& a, const Hook& b) {
-		return !operator==(other);
+		return !operator==(a, b);
 	}
 
 private:
-	FunctionType fn_{ nullptr }; ///< Function pointer with void* for object binding.
-	void* instance_{ nullptr };	 ///< Pointer to the object instance for member functions.
+	// @brief Function pointer with void* for object binding.
+	FunctionType fn_{ nullptr };
+
+	// @brief Pointer to the object instance for member functions.
+	void* instance_{ nullptr };
 };
 
 namespace impl {
@@ -519,7 +522,8 @@ private:
 		hooks_.emplace_back(hook);
 	}
 
-	std::vector<HookType> hooks_; ///< Internal storage of hook instances.
+	// @brief Internal storage of hook instances.
+	std::vector<HookType> hooks_;
 };
 
 /**
