@@ -575,7 +575,7 @@ public:
 	Pool& operator=(const Pool&) = default;
 
 	/** @brief Destructor for the Pool class. */
-	~Pool() final = default;
+	~Pool() override = default;
 
 	/**
 	 * @brief Serializes the component data in the pool using the provided archiver.
@@ -625,9 +625,8 @@ public:
 	 * @param manager The manager that the entity belongs to.
 	 * @param entity The index of the entity for which the component data should be deserialized.
 	 */
-	void Deserialize(
-		const Archiver& archiver, const Manager<Archiver>& manager, Index entity
-	) override {
+	void Deserialize(const Archiver& archiver, const Manager<Archiver>& manager, Index entity)
+		override {
 		if constexpr (!std::is_same_v<Archiver, VoidArchiver> &&
 					  std::is_default_constructible_v<T>) {
 			if (!archiver.template HasComponent<T>()) {
@@ -646,7 +645,7 @@ public:
 	 *
 	 * @return True if the components are copy constructible, otherwise false.
 	 */
-	[[nodiscard]] bool IsCloneable() const final {
+	[[nodiscard]] bool IsCloneable() const override {
 		return std::is_copy_constructible_v<T>;
 	}
 
@@ -655,7 +654,7 @@ public:
 	 *
 	 * @return A unique pointer to a new pool instance with the same components.
 	 */
-	[[nodiscard]] std::unique_ptr<AbstractPool<Archiver>> Clone() const final {
+	[[nodiscard]] std::unique_ptr<AbstractPool<Archiver>> Clone() const override {
 		// The reason this is not statically asserted is because it would disallow move-only
 		// component pools.
 		if constexpr (std::is_copy_constructible_v<T>) {
@@ -680,7 +679,7 @@ public:
 	 *
 	 * @param manager The manager which owns the pool.
 	 */
-	void InvokeDestructHooks(const Manager<Archiver>& manager) final;
+	void InvokeDestructHooks(const Manager<Archiver>& manager) override;
 
 	/**
 	 * @brief Copies a component from one entity to another.
@@ -689,7 +688,7 @@ public:
 	 * @param from_entity The source entity from which to copy the component.
 	 * @param to_entity The target entity to which the component will be copied.
 	 */
-	void Copy(const Manager<Archiver>& manager, Index from_entity, Index to_entity) final;
+	void Copy(const Manager<Archiver>& manager, Index from_entity, Index to_entity) override;
 
 	/**
 	 * @brief Clears the pool, removing all components.
@@ -698,14 +697,14 @@ public:
 	 *
 	 * @param manager The manager to which the component pool belongs.
 	 */
-	void Clear(const Manager<Archiver>& manager) final;
+	void Clear(const Manager<Archiver>& manager) override;
 
 	/**
 	 * @brief Resets the pool by clearing all components and shrinking memory usage.
 	 *
 	 * @param manager The manager to which the component pool belongs.
 	 */
-	void Reset(const Manager<Archiver>& manager) final {
+	void Reset(const Manager<Archiver>& manager) override {
 		Clear(manager);
 
 		components_.shrink_to_fit();
@@ -720,7 +719,7 @@ public:
 	 * @param entity The entity from which to remove the component.
 	 * @return True if the component was successfully removed, otherwise false.
 	 */
-	bool Remove(const Manager<Archiver>& manager, Index entity) final;
+	bool Remove(const Manager<Archiver>& manager, Index entity) override;
 
 	/**
 	 * @brief Checks if the pool contains a component for the specified entity.
@@ -728,7 +727,7 @@ public:
 	 * @param entity The entity to check.
 	 * @return True if the entity has a component in the pool, otherwise false.
 	 */
-	[[nodiscard]] bool Has(Index entity) const final {
+	[[nodiscard]] bool Has(Index entity) const override {
 		if (entity >= sparse_.size()) {
 			return false;
 		}
@@ -745,7 +744,7 @@ public:
 	 * @param manager The manager to which the entity belongs.
 	 * @param entity The entity to update.
 	 */
-	virtual void Update(const Manager<Archiver>& manager, Index entity) const final;
+	virtual void Update(const Manager<Archiver>& manager, Index entity) const override;
 
 	/**
 	 * @brief Retrieves a constant reference to the component associated with the specified entity.
@@ -3024,8 +3023,7 @@ struct hash<ecs::impl::Entity<Archiver>> {
 	size_t operator()(const ecs::impl::Entity<Archiver>& e) const {
 		// Source: https://stackoverflow.com/a/17017281
 		size_t h{ 17 };
-		h = h * 31 + hash<ecs::impl::Manager<Archiver>*>()(
-						 e.manager_
+		h = h * 31 + hash<ecs::impl::Manager<Archiver>*>()(e.manager_
 					 );								/**< Hash for the associated manager pointer. */
 		h = h * 31 +
 			hash<ecs::impl::Index>()(e.entity_);	/**< Hash for the entity's unique index. */
