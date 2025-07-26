@@ -172,7 +172,7 @@ public:
 	 * @tparam Function A free function pointer of type Ret(Args...).
 	 * @return *this.
 	 */
-	template <Ret (*Function)(Args...)>
+	template <auto Function>
 	Hook& Connect() noexcept {
 		fn_ = [](void*, Args... args) -> Ret {
 			return std::invoke(Function, std::forward<Args>(args)...);
@@ -206,7 +206,7 @@ public:
 	 * @param obj Pointer to the instance of the object.
 	 * @return *this.
 	 */
-	template <typename Type, Ret (Type::*Member)(Args...)>
+	template <typename Type, auto Member>
 	Hook& Connect(Type* obj) noexcept {
 		fn_ = [](void* instance, Args... args) -> Ret {
 			return (static_cast<Type*>(instance)->*Member)(std::forward<Args>(args)...);
@@ -221,8 +221,9 @@ public:
 	 * @param args Arguments to pass to the function.
 	 * @return Result of the function call.
 	 */
-	Ret operator()(Args... args) const {
-		return std::invoke(fn_, instance_, std::forward<Args>(args)...);
+	template <typename... TArgs>
+	Ret operator()(TArgs... args) const {
+		return std::invoke(fn_, instance_, std::forward<TArgs>(args)...);
 	}
 
 	/**
