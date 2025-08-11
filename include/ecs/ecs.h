@@ -1946,12 +1946,15 @@ protected:
 		}
 	}
 
+	// Note: For now making this const and pools_ mutable so that creating an entity container with
+	// components which have not been added to the manager yet enables them to be added while
+	// iterating through the entities.
 	template <typename T>
-	Pool<T, Archiver>* GetOrAddPool(Index component) {
+	Pool<T, Archiver>* GetOrAddPool(Index component) const {
 		if (component >= pools_.size()) {
 			pools_.resize(static_cast<std::size_t>(component) + 1);
 		}
-		auto pool{ GetPool<T>(component) };
+		auto pool{ const_cast<Manager&>(*this).GetPool<T>(component) };
 		if (pool == nullptr) {
 			auto new_pool{ std::make_unique<Pool<T, Archiver>>() };
 			pool = new_pool.get();
@@ -2031,7 +2034,9 @@ protected:
 	std::deque<Index> free_entities_;
 
 	// @brief Pools of component data for entities.
-	std::vector<std::unique_ptr<AbstractPool<Archiver>>> pools_;
+	// mutable because EntitiesWith may expand this with empty component pools while remaining
+	// const.
+	mutable std::vector<std::unique_ptr<AbstractPool<Archiver>>> pools_;
 };
 
 /**
@@ -2949,28 +2954,28 @@ template <typename Archiver>
 template <typename... Ts>
 inline ecs::EntitiesWith<Archiver, true, Ts...> Manager<Archiver>::EntitiesWith() const {
 	return { this, next_entity_,
-			 Pools<Entity<Archiver>, Archiver, true, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
+			 Pools<Entity<Archiver>, Archiver, true, Ts...>{ GetOrAddPool<Ts>(GetId<Ts>())... } };
 }
 
 template <typename Archiver>
 template <typename... Ts>
 inline ecs::EntitiesWith<Archiver, false, Ts...> Manager<Archiver>::EntitiesWith() {
 	return { this, next_entity_,
-			 Pools<Entity<Archiver>, Archiver, false, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
+			 Pools<Entity<Archiver>, Archiver, false, Ts...>{ GetOrAddPool<Ts>(GetId<Ts>())... } };
 }
 
 template <typename Archiver>
 template <typename... Ts>
 inline ecs::EntitiesWithout<Archiver, true, Ts...> Manager<Archiver>::EntitiesWithout() const {
 	return { this, next_entity_,
-			 Pools<Entity<Archiver>, Archiver, true, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
+			 Pools<Entity<Archiver>, Archiver, true, Ts...>{ GetOrAddPool<Ts>(GetId<Ts>())... } };
 }
 
 template <typename Archiver>
 template <typename... Ts>
 inline ecs::EntitiesWithout<Archiver, false, Ts...> Manager<Archiver>::EntitiesWithout() {
 	return { this, next_entity_,
-			 Pools<Entity<Archiver>, Archiver, false, Ts...>{ GetPool<Ts>(GetId<Ts>())... } };
+			 Pools<Entity<Archiver>, Archiver, false, Ts...>{ GetOrAddPool<Ts>(GetId<Ts>())... } };
 }
 
 template <typename Archiver>
