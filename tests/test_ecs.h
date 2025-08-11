@@ -49,6 +49,100 @@ struct FoodComponent {
 	int hunger{};
 };
 
+void TestEntityContainers() {
+	ecs::Manager m;
+	std::size_t counter{ 0 };
+	m.CreateEntity();
+	for (auto e : m.Entities()) {
+		counter++;
+	}
+	ECS_ASSERT(!counter, "Refresh should be triggered for entities to be updated");
+	m.CreateEntity();
+	for (auto e : m.Entities()) {
+		counter++;
+	}
+	ECS_ASSERT(!counter, "Refresh should be triggered for entities to be updated");
+	m.Refresh();
+	for (auto e : m.Entities()) {
+		counter++;
+	}
+	ECS_ASSERT(counter == 2, "Refresh failed");
+	counter = 0;
+	for (auto [e, f] : m.EntitiesWith<FoodComponent>()) {
+		counter++;
+	}
+	ECS_ASSERT(!counter, "EntitiesWith failed");
+	for (auto e : m.EntitiesWithout<FoodComponent>()) {
+		counter++;
+	}
+	ECS_ASSERT(counter == 2, "EntitiesWithout failed");
+	counter = 0;
+	for (auto e : m.Entities()) {
+		counter++;
+		e.Destroy();
+	}
+	ECS_ASSERT(counter == 2, "Entity destroy exited early");
+	counter = 0;
+	for (auto e : m.Entities()) {
+		counter++;
+	}
+	ECS_ASSERT(counter == 2, "Entity destroy should not work until refresh has been called");
+	counter = 0;
+	m.Refresh();
+	for (auto e : m.Entities()) {
+		counter++;
+	}
+	ECS_ASSERT(!counter, "Refresh failed");
+	auto e1 = m.CreateEntity();
+	auto e2 = m.CreateEntity();
+	for (auto e : m.Entities()) {
+		counter++;
+	}
+	ECS_ASSERT(!counter, "Entities should not be added until refresh is called");
+	m.Refresh();
+	for (auto e : m.Entities()) {
+		counter++;
+	}
+	ECS_ASSERT(counter == 2, "Refresh failed");
+	counter = 0;
+	for (auto e : m.EntitiesWithout<FoodComponent>()) {
+		if (!counter) {
+			e1.Add<FoodComponent>(31);
+			e2.Add<FoodComponent>(32);
+		}
+		counter++;
+	}
+	ECS_ASSERT(
+		counter == 1, "Adding components to entities which have not been cycled through yet will "
+					  "cause them to fail the criterion check"
+	);
+	counter = 0;
+	ECS_ASSERT(e1.Has<FoodComponent>(), "Component addition inside loop failed");
+	ECS_ASSERT(e2.Has<FoodComponent>(), "Component addition inside loop failed");
+	ECS_ASSERT(e1.Get<FoodComponent>().hunger = 31, "Component addition inside loop failed");
+	ECS_ASSERT(e2.Get<FoodComponent>().hunger = 32, "Component addition inside loop failed");
+	for (auto e : m.EntitiesWithout<FoodComponent>()) {
+		counter++;
+	}
+	ECS_ASSERT(!counter, "EntitiesWithout failed after addition of components");
+	for (auto [e, f] : m.EntitiesWith<FoodComponent>()) {
+		if (counter == 0) {
+			e1.Remove<FoodComponent>();
+			e2.Remove<FoodComponent>();
+		}
+		counter++;
+	}
+	ECS_ASSERT(
+		counter == 1,
+		"Removing components from entities which have not been cycled through yet will "
+		"cause them to fail the criterion check"
+	);
+	ECS_ASSERT(!e1.Has<FoodComponent>(), "Component removal inside loop failed");
+	ECS_ASSERT(!e2.Has<FoodComponent>(), "Component removal inside loop failed");
+
+	std::cout << "ECS entity container tests passed!" << std::endl;
+}
+
 void TestManagerFunction(ecs::Manager e) {
 	(void)0;
 }
@@ -328,6 +422,8 @@ bool TestECS() {
 	assert(manager.Size() == 3);
 
 	TestHooks();
+
+	TestEntityContainers();
 
 	std::cout << "All ECS tests passed!" << std::endl;
 
