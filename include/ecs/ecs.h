@@ -1239,6 +1239,10 @@ public:
 				pool->InvokeDestructHooks(*this);
 			}
 		}
+		for (auto entity : Entities()) {
+			entity.Destroy();
+		}
+		Refresh();
 	}
 
 	/**
