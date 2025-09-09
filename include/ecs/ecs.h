@@ -333,7 +333,6 @@ public:
 template <typename Archiver = VoidArchiver>
 class AbstractPool {
 public:
-	/** @brief Virtual destructor to allow proper cleanup of derived classes. */
 	virtual ~AbstractPool() = default;
 
 	/**
@@ -559,23 +558,12 @@ class Pool : public AbstractPool<Archiver> {
 	);
 
 public:
-	/** @brief Default constructor for the Pool class. */
-	Pool() = default;
-
-	/** @brief Move constructor for the Pool class. */
-	Pool(Pool&&) noexcept = default;
-
-	/** @brief Move assignment operator for the Pool class. */
+	Pool()							 = default;
+	Pool(Pool&&) noexcept			 = default;
 	Pool& operator=(Pool&&) noexcept = default;
-
-	/** @brief Copy constructor for the Pool class. */
-	Pool(const Pool&) = default;
-
-	/** @brief Copy assignment operator for the Pool class. */
-	Pool& operator=(const Pool&) = default;
-
-	/** @brief Destructor for the Pool class. */
-	~Pool() override = default;
+	Pool(const Pool&)				 = default;
+	Pool& operator=(const Pool&)	 = default;
+	~Pool() override				 = default;
 
 	/**
 	 * @brief Serializes the component data in the pool using the provided archiver.
@@ -1145,14 +1133,8 @@ private:
 template <typename Archiver>
 class Manager {
 public:
-	/**
-	 * @brief Default constructor for the manager.
-	 */
 	Manager() = default;
 
-	/**
-	 * @brief Deleted copy constructor to prevent copying of Manager objects.
-	 */
 	Manager(const Manager& other) :
 		next_entity_{ other.next_entity_ },
 		count_{ other.count_ },
@@ -1172,12 +1154,9 @@ public:
 		}
 	}
 
-	/**
-	 * @brief Deleted copy assignment operator to prevent assignment of Manager objects.
-	 * @return This object, unchanged.
-	 */
 	Manager& operator=(const Manager& other) {
 		if (this != &other) {
+			Reset();
 			next_entity_	  = other.next_entity_;
 			count_			  = other.count_;
 			refresh_required_ = other.refresh_required_;
@@ -1197,10 +1176,6 @@ public:
 		return *this;
 	}
 
-	/**
-	 * @brief Move constructor for the manager.
-	 * @param other The Manager to move from.
-	 */
 	Manager(Manager&& other) noexcept :
 		next_entity_{ std::exchange(other.next_entity_, 0) },
 		count_{ std::exchange(other.count_, 0) },
@@ -1211,13 +1186,9 @@ public:
 		free_entities_{ std::exchange(other.free_entities_, {}) },
 		pools_{ std::exchange(other.pools_, {}) } {}
 
-	/**
-	 * @brief Move assignment operator for the manager.
-	 * @param other The Manager to move from.
-	 * @return A reference to this object.
-	 */
 	Manager& operator=(Manager&& other) noexcept {
 		if (this != &other) {
+			Reset();
 			next_entity_	  = std::exchange(other.next_entity_, 0);
 			count_			  = std::exchange(other.count_, 0);
 			refresh_required_ = std::exchange(other.refresh_required_, false);
@@ -1230,19 +1201,8 @@ public:
 		return *this;
 	}
 
-	/**
-	 * @brief Destructor for the manager.
-	 */
 	virtual ~Manager() {
-		for (auto& pool : pools_) {
-			if (pool) {
-				pool->InvokeDestructHooks(*this);
-			}
-		}
-		for (auto entity : Entities()) {
-			entity.Destroy();
-		}
-		Refresh();
+		Reset();
 	}
 
 	/**
@@ -1568,13 +1528,19 @@ public:
 	 * @brief Clears all entities and resets the manager state.
 	 */
 	void Clear() {
-		for (const auto& pool : pools_) {
-			if (pool != nullptr) {
-				pool->Clear(*this);
+		for (auto& pool : pools_) {
+			if (pool) {
+				pool->InvokeDestructHooks(*this);
 			}
 		}
 
 		ClearEntities();
+
+		for (auto& pool : pools_) {
+			if (pool) {
+				pool->Clear(*this);
+			}
+		}
 
 		count_			  = 0;
 		next_entity_	  = 0;
@@ -1591,6 +1557,14 @@ public:
 	 *        Shrinks the capacity of the storage.
 	 */
 	void Reset() {
+		for (auto& pool : pools_) {
+			if (pool) {
+				pool->InvokeDestructHooks(*this);
+			}
+		}
+
+		ClearEntities();
+
 		for (auto& pool : pools_) {
 			if (pool) {
 				pool->Reset(*this);
@@ -2054,38 +2028,17 @@ protected:
 template <typename Archiver>
 class Entity {
 public:
-	/**
-	 * @brief Default constructor for the Entity.
-	 */
 	Entity() = default;
 
-	/**
-	 * @brief Copy constructor for the Entity.
-	 * @param other The other entity to copy.
-	 */
 	Entity(const Entity&) = default;
 
-	/**
-	 * @brief Copy assignment operator for the Entity.
-	 * @param other The other entity to assign.
-	 * @return A reference to this entity.
-	 */
 	Entity& operator=(const Entity&) = default;
 
-	/**
-	 * @brief Move constructor for the Entity.
-	 * @param other The other entity to move.
-	 */
 	Entity(Entity&& other) noexcept :
 		entity_{ std::exchange(other.entity_, 0) },
 		version_{ std::exchange(other.version_, 0) },
 		manager_{ std::exchange(other.manager_, nullptr) } {}
 
-	/**
-	 * @brief Move assignment operator for the Entity.
-	 * @param other The other entity to assign.
-	 * @return A reference to this entity.
-	 */
 	Entity& operator=(Entity&& other) noexcept {
 		if (this != &other) {
 			entity_	 = std::exchange(other.entity_, 0);
@@ -2095,9 +2048,6 @@ public:
 		return *this;
 	}
 
-	/**
-	 * @brief Destructor for the Entity.
-	 */
 	~Entity() = default;
 
 	/**
