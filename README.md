@@ -1,4 +1,4 @@
-# C++ Entity Component System Library
+# C++17 Entity Component System Library
 
 ## Table of Contents
 
