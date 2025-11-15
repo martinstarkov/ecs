@@ -144,40 +144,42 @@ void ProfileSparseDense(std::size_t count) {
 
 	PrintTimeCompact("Creating", Time([&] {
 						 for (std::size_t i = 0; i < count; i++) {
-							 sd.add(i, ProfileTestComponent{});
+							 sd.Add(i, ProfileTestComponent{});
 						 }
 					 }));
 
 	PrintTimeCompact("Adding components", Time([&] {
 						 for (std::size_t i = 0; i < count; i++) {
-							 sd.add(i, ProfileTestComponent{ 3, 3 });
+							 sd.Add(i, ProfileTestComponent{ 3, 3 });
 						 }
 					 }));
 
 	PrintTimeCompact("Incrementing components", Time([&] {
-						 for (auto& c : sd.data) {
-							 c.x += 1;
+						 for (std::size_t i = 0; i < count; i++) {
+							 if (sd.Contains(i)) {
+								 sd.Get(i)->x += 1;
+							 }
 						 }
 					 }));
 
 	PrintTimeCompact("Removing components", Time([&] {
 						 for (std::size_t i = 0; i < count; i++) {
-							 sd.remove(i);
+							 sd.Remove(i);
 						 }
 					 }));
 
 	PrintTimeCompact("Re-add components 2x", Time([&] {
 						 for (std::size_t i = 0; i < count; i++) {
-							 sd.add(i, ProfileTestComponent{ 4, 4 });
+							 sd.Add(i, ProfileTestComponent{ 4, 4 });
 						 }
 						 for (std::size_t i = 0; i < count; i++) {
-							 sd.add(i, ProfileTestComponent{ 5, 5 });
+							 sd.Add(i, ProfileTestComponent{ 5, 5 });
 						 }
 					 }));
 
 	PrintTimeCompact("Erasing", Time([&] {
 						 for (std::size_t i = 0; i < count; i++) {
-							 sd.remove(i);
+							 sd.Remove(i);
 						 }
 					 }));
 }

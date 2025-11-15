@@ -10,7 +10,7 @@ struct SparseDense {
 
 	SparseDense(std::size_t max = 0) : sparse(max, SIZE_MAX) {}
 
-	void add(std::size_t id, T&& c) {
+	void Add(std::size_t id, T&& c) {
 		if (id >= sparse.size()) {
 			sparse.resize(id + 1, SIZE_MAX);
 		}
@@ -24,7 +24,7 @@ struct SparseDense {
 		}
 	}
 
-	void remove(std::size_t id) {
+	void Remove(std::size_t id) {
 		if (id >= sparse.size() || sparse[id] == SIZE_MAX) {
 			return;
 		}
@@ -40,5 +40,19 @@ struct SparseDense {
 
 		dense.pop_back();
 		data.pop_back();
+	}
+
+	// Returns true if the id exists in the set
+	bool Contains(std::size_t id) const {
+		return id < sparse.size() && sparse[id] != SIZE_MAX;
+	}
+
+	// Safe retrieval: returns pointer or nullptr
+	const T* Get(std::size_t id) const {
+		return Contains(id) ? &data[sparse[id]] : nullptr;
+	}
+
+	T* Get(std::size_t id) {
+		return Contains(id) ? &data[sparse[id]] : nullptr;
 	}
 };
