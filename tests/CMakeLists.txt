@@ -1,10 +1,22 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ecs_tests)
+project(ecs_tests LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(ecs_tests "${CMAKE_SOURCE_DIR}/main.cpp" "${CMAKE_SOURCE_DIR}/test_ecs.h" "${CMAKE_SOURCE_DIR}/../include/ecs/ecs.h")
+set(SOURCES
+    main.cpp
+    test.h
+    hooks.h
+    profile.h
+    views.h
+    common.h
+    sparse_dense.h
+    ../include/ecs/ecs.h)
 
-target_include_directories(ecs_tests PRIVATE "${CMAKE_SOURCE_DIR}/../include")
+add_executable(ecs_tests ${SOURCES})
+
+target_include_directories(ecs_tests
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
