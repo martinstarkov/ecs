@@ -108,42 +108,41 @@ enum class LoopCriterion {
 };
 
 template <typename T, typename Archiver, bool is_const, LoopCriterion Criterion, typename... Ts>
-class EntityContainer;
+class View;
 
-template <LoopCriterion Criterion, typename TContainer, typename... Ts>
-class EntityContainerIterator;
+template <LoopCriterion Criterion, typename TView, typename... Ts>
+class ViewIterator;
 
 } // namespace impl
 
 /**
- * @brief Alias for an entity container with no components for const and non-const entities.
+ * @brief Alias for an entity view with no components for const and non-const entities.
  *
- * @tparam is_const A boolean indicating whether the container is for const entities.
+ * @tparam is_const A boolean indicating whether the view is for const entities.
  */
 template <typename Archiver, bool is_const>
-using Entities =
-	impl::EntityContainer<impl::Entity<Archiver>, Archiver, is_const, impl::LoopCriterion::None>;
+using View = impl::View<impl::Entity<Archiver>, Archiver, is_const, impl::LoopCriterion::None>;
 
 /**
- * @brief Alias for an entity container with specific components for const and non-const entities.
+ * @brief Alias for an entity view with specific components for const and non-const entities.
  *
- * @tparam is_const A boolean indicating whether the container is for const entities.
+ * @tparam is_const A boolean indicating whether the view is for const entities.
  * @tparam TComponents The component types that entities must have.
  */
 template <typename Archiver, bool is_const, typename... TComponents>
-using EntitiesWith = impl::EntityContainer<
+using ViewWith = impl::View<
 	impl::Entity<Archiver>, Archiver, is_const, impl::LoopCriterion::WithComponents,
 	TComponents...>;
 
 /**
- * @brief Alias for an entity container lacking specific components for const and non-const
+ * @brief Alias for an entity view lacking specific components for const and non-const
  * entities.
  *
- * @tparam is_const A boolean indicating whether the container is for const entities.
+ * @tparam is_const A boolean indicating whether the view is for const entities.
  * @tparam TComponents The component types that entities must lack.
  */
 template <typename Archiver, bool is_const, typename... TComponents>
-using EntitiesWithout = impl::EntityContainer<
+using ViewWithout = impl::View<
 	impl::Entity<Archiver>, Archiver, is_const, impl::LoopCriterion::WithoutComponents,
 	TComponents...>;
 
@@ -164,7 +163,7 @@ public:
 	/**
 	 * @brief Default constructor.
 	 */
-	Hook() noexcept = default;
+	Hook() = default;
 
 	/**
 	 * @brief Connects a free (non-member) function to this hook.
@@ -459,7 +458,7 @@ public:
 };
 
 /**
- * @brief A container for storing and managing multiple hooks.
+ * @brief A view for storing and managing multiple hooks.
  *
  * @tparam Ret Return type for all hooks in the pool.
  * @tparam Args Argument types for all hooks in the pool.
@@ -563,7 +562,7 @@ public:
 	Pool& operator=(Pool&&) noexcept = default;
 	Pool(const Pool&)				 = default;
 	Pool& operator=(const Pool&)	 = default;
-	~Pool() override				 = default;
+	~Pool() noexcept override		 = default;
 
 	/**
 	 * @brief Serializes the component data in the pool using the provided archiver.
@@ -760,6 +759,13 @@ public:
 	}
 
 	/**
+	 * @return Number of components in the pool.
+	 */
+	[[nodiscard]] std::size_t Size() const noexcept {
+		return components_.size();
+	}
+
+	/**
 	 * @brief Adds a component to the pool for the specified entity.
 	 *
 	 * @param manager The manager to which the entity belongs.
@@ -931,6 +937,19 @@ public:
 	 */
 	[[nodiscard]] constexpr bool AllExist() const {
 		return ((std::get<PoolType<Ts>>(pools_) != nullptr) && ...);
+	}
+
+	// @brief hHlper to get the size of a specific component pool.
+	template <typename TPool>
+	std::size_t SizeOf() const noexcept {
+		auto* pool = std::get<PoolType<TPool>>(pools_);
+		return pool ? pool->Size() : 0;
+	}
+
+	// @brief Iterate all pools with a lambda.
+	template <typename F>
+	void ForEachPool(F&& f) const {
+		(f(std::get<PoolType<Ts>>(pools_)), ...);
 	}
 
 private:
@@ -1462,7 +1481,7 @@ public:
 	 * @return A collection of entities that have the specified components.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] ecs::EntitiesWith<Archiver, true, Ts...> EntitiesWith() const;
+	[[nodiscard]] ecs::ViewWith<Archiver, true, Ts...> EntitiesWith() const;
 
 	/**
 	 * @brief Retrieves all entities that have the specified components.
@@ -1470,7 +1489,7 @@ public:
 	 * @return A collection of entities that have the specified components.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] ecs::EntitiesWith<Archiver, false, Ts...> EntitiesWith();
+	[[nodiscard]] ecs::ViewWith<Archiver, false, Ts...> EntitiesWith();
 
 	/**
 	 * @brief Retrieves all entities that do not have the specified components.
@@ -1478,7 +1497,7 @@ public:
 	 * @return A collection of entities that do not have the specified components.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] ecs::EntitiesWithout<Archiver, true, Ts...> EntitiesWithout() const;
+	[[nodiscard]] ecs::ViewWithout<Archiver, true, Ts...> EntitiesWithout() const;
 
 	/**
 	 * @brief Retrieves all entities that do not have the specified components.
@@ -1486,19 +1505,19 @@ public:
 	 * @return A collection of entities that do not have the specified components.
 	 */
 	template <typename... Ts>
-	[[nodiscard]] ecs::EntitiesWithout<Archiver, false, Ts...> EntitiesWithout();
+	[[nodiscard]] ecs::ViewWithout<Archiver, false, Ts...> EntitiesWithout();
 
 	/**
 	 * @brief Retrieves all entities in the manager.
 	 * @return A collection of all entities in the manager.
 	 */
-	[[nodiscard]] ecs::Entities<Archiver, true> Entities() const;
+	[[nodiscard]] ecs::View<Archiver, true> Entities() const;
 
 	/**
 	 * @brief Retrieves all entities in the manager.
 	 * @return A collection of all entities in the manager.
 	 */
-	[[nodiscard]] ecs::Entities<Archiver, false> Entities();
+	[[nodiscard]] ecs::View<Archiver, false> Entities();
 
 	/**
 	 * @brief Gets the current number of entities in the manager.
@@ -1588,7 +1607,7 @@ protected:
 	template <typename A>
 	friend class Entity;
 	template <typename T, typename A, bool is_const, LoopCriterion Criterion, typename... Ts>
-	friend class EntityContainer;
+	friend class View;
 	template <typename T, typename A, bool is_const, typename... Ts>
 	friend class Pools;
 	template <typename T, typename A>
@@ -1924,7 +1943,7 @@ protected:
 		}
 	}
 
-	// Note: For now making this const and pools_ mutable so that creating an entity container with
+	// Note: For now making this const and pools_ mutable so that creating an entity view with
 	// components which have not been added to the manager yet enables them to be added while
 	// iterating through the entities.
 	template <typename T>
@@ -2048,7 +2067,7 @@ public:
 		return *this;
 	}
 
-	~Entity() = default;
+	~Entity() noexcept = default;
 
 	/**
 	 * @brief Converts the Entity to a boolean, returning true if the entity is valid (exists).
@@ -2316,7 +2335,7 @@ protected:
 	friend class Manager;
 	friend struct std::hash<Entity>;
 	template <typename T, typename A, bool is_const, LoopCriterion Criterion, typename... Ts>
-	friend class EntityContainer;
+	friend class View;
 	template <typename T, typename A>
 	friend class Pool;
 	template <typename T, typename A, bool is_const, typename... Ts>
@@ -2357,8 +2376,8 @@ inline Entity<Archiver>::operator bool() const {
 	return *this != Entity<Archiver>{};
 }
 
-template <LoopCriterion Criterion, typename TContainer, typename... Ts>
-class EntityContainerIterator {
+template <LoopCriterion Criterion, typename TView, typename... Ts>
+class ViewIterator {
 public:
 	using iterator_category = std::forward_iterator_tag;
 	using difference_type	= std::ptrdiff_t;
@@ -2369,14 +2388,14 @@ public:
 	/**
 	 * @brief Default constructor for the iterator.
 	 */
-	EntityContainerIterator() = default;
+	ViewIterator() = default;
 
 	/**
 	 * @brief Assignment operator for setting the entity index.
 	 * @param entity The entity index to assign to the iterator.
 	 * @return A reference to the current iterator.
 	 */
-	EntityContainerIterator& operator=(pointer entity) {
+	ViewIterator& operator=(pointer entity) {
 		entity_ = entity;
 		return *this;
 	}
@@ -2387,7 +2406,7 @@ public:
 	 * @param b The second iterator.
 	 * @return True if the iterators point to the same entity, false otherwise.
 	 */
-	friend bool operator==(const EntityContainerIterator& a, const EntityContainerIterator& b) {
+	friend bool operator==(const ViewIterator& a, const ViewIterator& b) {
 		return a.entity_ == b.entity_;
 	}
 
@@ -2397,7 +2416,7 @@ public:
 	 * @param b The second iterator.
 	 * @return True if the iterators point to different entities, false otherwise.
 	 */
-	friend bool operator!=(const EntityContainerIterator& a, const EntityContainerIterator& b) {
+	friend bool operator!=(const ViewIterator& a, const ViewIterator& b) {
 		return !(a == b);
 	}
 
@@ -2406,7 +2425,7 @@ public:
 	 * @param movement The number of steps to move the iterator.
 	 * @return A reference to the current iterator after moving.
 	 */
-	EntityContainerIterator& operator+=(const difference_type& movement) {
+	ViewIterator& operator+=(const difference_type& movement) {
 		entity_ += movement;
 		return *this;
 	}
@@ -2416,7 +2435,7 @@ public:
 	 * @param movement The number of steps to move the iterator.
 	 * @return A reference to the current iterator after moving.
 	 */
-	EntityContainerIterator& operator-=(const difference_type& movement) {
+	ViewIterator& operator-=(const difference_type& movement) {
 		entity_ -= movement;
 		return *this;
 	}
@@ -2425,7 +2444,7 @@ public:
 	 * @brief Pre-increment operator for the iterator.
 	 * @return A reference to the incremented iterator.
 	 */
-	EntityContainerIterator& operator++() {
+	ViewIterator& operator++() {
 		do {
 			entity_++;
 		} while (ShouldIncrement());
@@ -2436,7 +2455,7 @@ public:
 	 * @brief Post-increment operator for the iterator.
 	 * @return A temporary copy of the iterator before incrementing.
 	 */
-	EntityContainerIterator operator++(int) {
+	ViewIterator operator++(int) {
 		auto temp(*this);
 		++(*this);
 		return temp;
@@ -2447,7 +2466,7 @@ public:
 	 * @param movement The number of steps to move the iterator.
 	 * @return A new iterator advanced by the given steps.
 	 */
-	EntityContainerIterator operator+(const difference_type& movement) {
+	ViewIterator operator+(const difference_type& movement) {
 		auto old  = entity_;
 		entity_	 += movement;
 		auto temp(*this);
@@ -2460,7 +2479,7 @@ public:
 	 * @return The component tuple of the current entity.
 	 */
 	decltype(auto) operator*() const {
-		return entity_container_.GetComponentTuple(entity_);
+		return view_.GetComponentTuple(entity_);
 	}
 
 	/**
@@ -2468,14 +2487,9 @@ public:
 	 * @return The entity index.
 	 */
 	pointer operator->() const {
-		ECS_ASSERT(
-			entity_container_.EntityMeetsCriteria(entity_), "No entity with given components"
-		);
-		ECS_ASSERT(entity_container_.EntityWithinLimit(entity_), "Out-of-range entity index");
-		ECS_ASSERT(
-			!entity_container_.IsMaxEntity(entity_),
-			"Cannot dereference entity container iterator end"
-		);
+		ECS_ASSERT(view_.EntityMeetsCriteria(entity_), "No entity with given components");
+		ECS_ASSERT(view_.EntityWithinLimit(entity_), "Out-of-range entity index");
+		ECS_ASSERT(!view_.IsMaxEntity(entity_), "Cannot dereference entity view iterator end");
 		return entity_;
 	}
 
@@ -2484,14 +2498,9 @@ public:
 	 * @return The entity index.
 	 */
 	pointer GetEntityId() const {
-		ECS_ASSERT(
-			entity_container_.EntityMeetsCriteria(entity_), "No entity with given components"
-		);
-		ECS_ASSERT(entity_container_.EntityWithinLimit(entity_), "Out-of-range entity index");
-		ECS_ASSERT(
-			!entity_container_.IsMaxEntity(entity_),
-			"Cannot dereference entity container iterator end"
-		);
+		ECS_ASSERT(view_.EntityMeetsCriteria(entity_), "No entity with given components");
+		ECS_ASSERT(view_.EntityWithinLimit(entity_), "Out-of-range entity index");
+		ECS_ASSERT(!view_.IsMaxEntity(entity_), "Cannot dereference entity view iterator end");
 		return entity_;
 	}
 
@@ -2501,24 +2510,22 @@ private:
 	 * @return True if the iterator should be incremented, false otherwise.
 	 */
 	[[nodiscard]] bool ShouldIncrement() const {
-		return entity_container_.EntityWithinLimit(entity_) &&
-			   !entity_container_.EntityMeetsCriteria(entity_);
+		return view_.EntityWithinLimit(entity_) && !view_.EntityMeetsCriteria(entity_);
 	}
 
 	/**
-	 * @brief Constructor that initializes the iterator with the given entity index and container.
+	 * @brief Constructor that initializes the iterator with the given entity index and view.
 	 * @param entity The entity index to initialize the iterator with.
-	 * @param entity_container The container associated with the iterator.
+	 * @param view The view associated with the iterator.
 	 */
-	EntityContainerIterator(Index entity, TContainer entity_container) :
-		entity_(entity), entity_container_{ entity_container } {
+	ViewIterator(Index entity, TView view) : entity_(entity), view_{ view } {
 		if (ShouldIncrement()) {
 			this->operator++();
 		}
-		if (!entity_container_.IsMaxEntity(entity_)) {
+		if (!view_.IsMaxEntity(entity_)) {
 			ECS_ASSERT(
-				entity_container_.EntityWithinLimit(entity_),
-				"Cannot create entity container iterator with out-of-range entity "
+				view_.EntityWithinLimit(entity_),
+				"Cannot create entity view iterator with out-of-range entity "
 				"index"
 			);
 		}
@@ -2526,50 +2533,47 @@ private:
 
 private:
 	template <typename T, typename A, bool is_const, LoopCriterion C, typename... S>
-	friend class EntityContainer;
+	friend class View;
 
 	// @brief The current entity index.
 	Index entity_{ 0 };
 
-	// @brief The container associated with the iterator.
-	TContainer entity_container_;
+	// @brief The view associated with the iterator.
+	TView view_;
 };
 
 /**
- * @brief EntityContainer provides iteration and access utilities for ECS entities
+ * @brief View provides iteration and access utilities for ECS entities
  * with optional filtering criteria and component access.
  *
  * @tparam T The entity handle type.
- * @tparam is_const Whether this container provides const access.
+ * @tparam is_const Whether this view provides const access.
  * @tparam Criterion Filtering criteria for included entities.
- * @tparam Ts Types of the components accessed through this container.
+ * @tparam Ts Types of the components accessed through this view.
  */
 template <typename T, typename Archiver, bool is_const, LoopCriterion Criterion, typename... Ts>
-class EntityContainer {
+class View {
 public:
 	using ManagerType = std::conditional_t<is_const, const Manager<Archiver>*, Manager<Archiver>*>;
 
 	/** @brief Default constructor */
-	EntityContainer() = default;
+	View() = default;
 
 	/**
-	 * @brief Constructs an EntityContainer with the given manager, max entity index, and component
+	 * @brief Constructs an View with the given manager, max entity index, and component
 	 * pools.
 	 *
 	 * @param manager Pointer to the entity manager.
 	 * @param max_entity The maximum entity index.
 	 * @param pools Pools containing component data.
 	 */
-	EntityContainer(
-		ManagerType manager, Index max_entity, const Pools<T, Archiver, is_const, Ts...>& pools
-	) :
+	View(ManagerType manager, Index max_entity, const Pools<T, Archiver, is_const, Ts...>& pools) :
 		manager_{ manager }, max_entity_{ max_entity }, pools_{ pools } {}
 
-	using iterator = EntityContainerIterator<
-		Criterion, EntityContainer<T, Archiver, is_const, Criterion, Ts...>&, Ts...>;
+	using iterator = ViewIterator<Criterion, View<T, Archiver, is_const, Criterion, Ts...>&, Ts...>;
 
-	using const_iterator = EntityContainerIterator<
-		Criterion, const EntityContainer<T, Archiver, is_const, Criterion, Ts...>&, Ts...>;
+	using const_iterator =
+		ViewIterator<Criterion, const View<T, Archiver, is_const, Criterion, Ts...>&, Ts...>;
 
 	/** @brief Returns iterator to beginning */
 	iterator begin() {
@@ -2603,7 +2607,7 @@ public:
 
 	/**
 	 * @brief Invokes a function on each matching entity and its read-only components.
-	 * @tparam IS_CONST Always true; ensures this is only instantiated for const containers.
+	 * @tparam IS_CONST Always true; ensures this is only instantiated for const views.
 	 * @param func Function to apply to each entity and its components.
 	 */
 	template <bool IS_CONST = is_const, std::enable_if_t<IS_CONST, int> = 0>
@@ -2615,7 +2619,7 @@ public:
 
 	/**
 	 * @brief Invokes a function on each matching entity and its mutable components.
-	 * @tparam IS_CONST Always false; ensures this is only instantiated for mutable containers.
+	 * @tparam IS_CONST Always false; ensures this is only instantiated for mutable views.
 	 * @param func Function to apply to each entity and its components.
 	 */
 	template <bool IS_CONST = is_const, std::enable_if_t<!IS_CONST, int> = 0>
@@ -2660,13 +2664,13 @@ public:
 private:
 	template <typename A>
 	friend class Manager;
-	template <LoopCriterion U, typename TContainer, typename... S>
-	friend class EntityContainerIterator;
+	template <LoopCriterion U, typename TView, typename... S>
+	friend class ViewIterator;
 
 	/** @brief Retrieves an entity object given its index. */
 	T GetEntity(Index entity) const {
 		ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
-		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
+		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity view iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		return T{ entity, manager_->GetVersion(entity), manager_ };
 	}
@@ -2707,7 +2711,7 @@ private:
 	template <bool IS_CONST = is_const, std::enable_if_t<IS_CONST, int> = 0>
 	[[nodiscard]] decltype(auto) GetComponentTuple(Index entity) const {
 		ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
-		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
+		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity view iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		if constexpr (Criterion == LoopCriterion::WithComponents) {
 			Pools<T, Archiver, true, Ts...> pools{
@@ -2727,7 +2731,7 @@ private:
 	template <bool IS_CONST = is_const, std::enable_if_t<!IS_CONST, int> = 0>
 	[[nodiscard]] decltype(auto) GetComponentTuple(Index entity) {
 		ECS_ASSERT(EntityWithinLimit(entity), "Out-of-range entity index");
-		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity container iterator end");
+		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity view iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		if constexpr (Criterion == LoopCriterion::WithComponents) {
 			Pools<T, Archiver, false, Ts...> pools{
@@ -2745,7 +2749,7 @@ private:
 	// @brief Maximum valid entity index.
 	Index max_entity_{ 0 };
 
-	// @brief Pools of components managed by this container.
+	// @brief Pools of components managed by this view.
 	Pools<T, Archiver, is_const, Ts...> pools_;
 };
 
@@ -2906,39 +2910,39 @@ inline Entity<Archiver> Manager<Archiver>::CopyEntity(const Entity<Archiver>& fr
 
 template <typename Archiver>
 template <typename... Ts>
-inline ecs::EntitiesWith<Archiver, true, Ts...> Manager<Archiver>::EntitiesWith() const {
+inline ecs::ViewWith<Archiver, true, Ts...> Manager<Archiver>::EntitiesWith() const {
 	return { this, next_entity_,
 			 Pools<Entity<Archiver>, Archiver, true, Ts...>{ GetOrAddPool<Ts>(GetId<Ts>())... } };
 }
 
 template <typename Archiver>
 template <typename... Ts>
-inline ecs::EntitiesWith<Archiver, false, Ts...> Manager<Archiver>::EntitiesWith() {
+inline ecs::ViewWith<Archiver, false, Ts...> Manager<Archiver>::EntitiesWith() {
 	return { this, next_entity_,
 			 Pools<Entity<Archiver>, Archiver, false, Ts...>{ GetOrAddPool<Ts>(GetId<Ts>())... } };
 }
 
 template <typename Archiver>
 template <typename... Ts>
-inline ecs::EntitiesWithout<Archiver, true, Ts...> Manager<Archiver>::EntitiesWithout() const {
+inline ecs::ViewWithout<Archiver, true, Ts...> Manager<Archiver>::EntitiesWithout() const {
 	return { this, next_entity_,
 			 Pools<Entity<Archiver>, Archiver, true, Ts...>{ GetOrAddPool<Ts>(GetId<Ts>())... } };
 }
 
 template <typename Archiver>
 template <typename... Ts>
-inline ecs::EntitiesWithout<Archiver, false, Ts...> Manager<Archiver>::EntitiesWithout() {
+inline ecs::ViewWithout<Archiver, false, Ts...> Manager<Archiver>::EntitiesWithout() {
 	return { this, next_entity_,
 			 Pools<Entity<Archiver>, Archiver, false, Ts...>{ GetOrAddPool<Ts>(GetId<Ts>())... } };
 }
 
 template <typename Archiver>
-inline ecs::Entities<Archiver, true> Manager<Archiver>::Entities() const {
+inline ecs::View<Archiver, true> Manager<Archiver>::Entities() const {
 	return { this, next_entity_, Pools<Entity<Archiver>, Archiver, true>{} };
 }
 
 template <typename Archiver>
-inline ecs::Entities<Archiver, false> Manager<Archiver>::Entities() {
+inline ecs::View<Archiver, false> Manager<Archiver>::Entities() {
 	return { this, next_entity_, Pools<Entity<Archiver>, Archiver, false>{} };
 }
 
@@ -2963,7 +2967,7 @@ namespace std {
  *
  * This specialization provides a custom hash function for the `ecs::Entity` type.
  * It combines the hashes of the associated manager, entity index, and version into a single hash
- * value. This is used when an `ecs::Entity` is used as a key in hash-based containers such as
+ * value. This is used when an `ecs::Entity` is used as a key in hash-based views such as
  * `std::unordered_map`.
  *
  * @tparam ecs::Entity The type for which the hash is being specialized.
