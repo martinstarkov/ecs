@@ -776,8 +776,10 @@ public:
 
 	// @return True if the entity exists in all pools, otherwise false.
 	[[nodiscard]] constexpr bool Has(Id entity) const {
-		return AllExist() &&
-			   (GetPool<TComponents>()->template Pool<TComponents, TArchiver>::Has(entity) && ...);
+		ECS_ASSERT(
+			AllExist(), "Component pools cannot be destroyed while stored in a Pools object"
+		);
+		return (GetPool<TComponents>()->template Pool<TComponents, TArchiver>::Has(entity) && ...);
 	}
 
 	// @return True if the entity is missing at least one of the requested components, otherwise
@@ -2571,10 +2573,7 @@ private:
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity view iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		if constexpr (Criterion == LoopCriterion::WithComponents) {
-			Pools<TEntityHandle, TArchiver, true, TComponents...> pools{
-				manager_->template GetPool<TComponents>(manager_->template GetId<TComponents>())...
-			};
-			return pools.GetWithEntity(entity, manager_);
+			return pools_.GetWithEntity(entity, manager_);
 		} else {
 			return TEntityHandle{ entity, manager_->GetVersion(entity), manager_ };
 		}
@@ -2591,10 +2590,7 @@ private:
 		ECS_ASSERT(!IsMaxEntity(entity), "Cannot dereference entity view iterator end");
 		ECS_ASSERT(EntityMeetsCriteria(entity), "No entity with given components");
 		if constexpr (Criterion == LoopCriterion::WithComponents) {
-			Pools<TEntityHandle, TArchiver, false, TComponents...> pools{
-				manager_->template GetPool<TComponents>(manager_->template GetId<TComponents>())...
-			};
-			return pools.GetWithEntity(entity, manager_);
+			return pools_.GetWithEntity(entity, manager_);
 		} else {
 			return TEntityHandle{ entity, manager_->GetVersion(entity), manager_ };
 		}
