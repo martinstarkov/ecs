@@ -298,13 +298,23 @@ public:
 	template <typename TComponent>
 	void WriteComponents(const std::vector<TComponent>& value);
 
+	// The type exists for this function so unserializable components can be skipped.
+	template <typename TComponent>
 	void SetDenseSet(const std::vector<Id>& dense_set);
+
+	// The type exists for this function so unserializable components can be skipped.
+	template <typename TComponent>
 	void SetSparseSet(const std::vector<Id>& sparse_set);
 
 	template <typename TComponent>
 	[[nodiscard]] std::vector<TComponent> ReadComponents() const;
 
+	// The type exists for this function so undeserializable components can be skipped.
+	template <typename TComponent>
 	[[nodiscard]] std::vector<Id> GetDenseSet() const;
+
+	// The type exists for this function so undeserializable components can be skipped.
+	template <typename TComponent>
 	[[nodiscard]] std::vector<Id> GetSparseSet() const;
 };
 
@@ -523,8 +533,8 @@ public:
 	void Serialize(TArchiver& archiver) const override {
 		if constexpr (!std::is_same_v<TArchiver, VoidArchiver>) {
 			archiver.template WriteComponents<TComponent>(components);
-			archiver.SetDenseSet(dense);
-			archiver.SetSparseSet(sparse);
+			archiver.template SetDenseSet<TComponent>(dense);
+			archiver.template SetSparseSet<TComponent>(sparse);
 		}
 	}
 
@@ -551,8 +561,8 @@ public:
 		if constexpr (!std::is_same_v<TArchiver, VoidArchiver> &&
 					  std::is_default_constructible_v<TComponent>) {
 			components = archiver.template ReadComponents<TComponent>();
-			dense	   = archiver.GetDenseSet();
-			sparse	   = archiver.GetSparseSet();
+			dense	   = archiver.template GetDenseSet<TComponent>();
+			sparse	   = archiver.template GetSparseSet<TComponent>();
 		}
 	}
 
