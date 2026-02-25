@@ -104,7 +104,7 @@ auto entity = manager.CreateEntity();
 
 ### Entity Lifecycle and Manager Refresh
 
-When you create an entity, you can add components to it, but the entity won't be considered "alive" by the manager until you call **`manager.Refresh()`**. This means the entity won't show up in entity iteration functions like `manager.Entities()` or `manager.EntitiesWith<T>()`. This behavior prevents iterator invalidation if entities are created or destroyed while looping through them—such as when destroying entities with an expired lifetime component.
+When you create an entity, you can add components to it, but the entity won't be considered "alive" by the manager until you call **`manager.Refresh()`**. This means the entity won't show up in entity iteration functions like `manager.Entities()` or `manager.EntitiesWith<T>()`. This behavior prevents iterator invalidation if entities are created or destroyed while looping through them, such as when destroying entities with an expired lifetime component.
 
 ### Example
 
