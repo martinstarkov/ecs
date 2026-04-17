@@ -42,9 +42,9 @@ SOFTWARE.
 
 #ifdef ECS_ENABLE_ASSERTS
 
+#include <cstdio>
 #include <cstdlib>
-#include <filesystem>
-#include <iostream>
+#include <cstring>
 
 /**
  * @brief Macro to trigger a debug break for debugging purposes.
@@ -69,15 +69,15 @@ SOFTWARE.
  * @param condition The condition to test for.
  * @param message The error message to display on failure.
  */
-#define ECS_ASSERT(condition, message)                                                          \
-	{                                                                                           \
-		if (!(condition)) {                                                                     \
-			std::cout << "ECS ASSERTION FAILED: "                                               \
-					  << std::filesystem::path(__FILE__).filename().string() << ":" << __LINE__ \
-					  << ": " << message << "\n";                                               \
-			ECS_DEBUGBREAK();                                                                   \
-			std::abort();                                                                       \
-		}                                                                                       \
+#define ECS_ASSERT(condition, message)                                                     \
+	{                                                                                      \
+		if (!(condition)) {                                                                \
+			std::fprintf(                                                                  \
+				stderr, "ECS ASSERTION FAILED: %s:%d: %s\n", __FILE__, __LINE__, (message) \
+			);                                                                             \
+			ECS_DEBUGBREAK();                                                              \
+			std::abort();                                                                  \
+		}                                                                                  \
 	}
 
 #else
