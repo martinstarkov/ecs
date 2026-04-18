@@ -108,6 +108,8 @@ bool TestViewUtility() {
 		(vec[0] == e1 || vec[1] == e1) && (vec[0] == e2 || vec[1] == e2),
 		"View GetVector returned wrong entities"
 	);
+
+	return true;
 }
 
 bool TestViews() {
