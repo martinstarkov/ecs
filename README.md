@@ -9,8 +9,10 @@
 - [Manager](#manager)
 - [Entities](#entities)
 - [Components](#components)
-- [Systems](#systems)
+- [Views](#views)
+- [Hooks](#hooks)
 - [Manager Utility Functions](#manager-utility-functions)
+- [Serialization (Advanced)](#serialization-advanced)
 - [Acknowledgements](#acknowledgements)
 
 ---
@@ -110,44 +112,46 @@ When you create an entity, you can add components to it, but the entity won't be
 
 ```cpp
 auto entity = manager.CreateEntity();
-entity.Add<LifetimeComponent>(5.0f);  // Add a component to the entity
+entity.Add<LifetimeComponent>(5.0f);  // add a component to the entity
 
-// Entity is not yet considered "alive" for iteration
+// entity is not yet considered "alive" for iteration
 for (auto e : manager.Entities()) {
-    // This loop will not include the newly created entity yet
+    // this loop will not include the newly created entity yet
 }
 
-// Now call Refresh to update the manager's internal state
-manager.Refresh();  // The entity is now considered "alive" and will be included
+// now call Refresh to update the manager's internal state
+manager.Refresh();  // the entity is now considered "alive" and will be included
 
-// Destroy the entity
+// destroy the entity
 entity.Destroy();
 
-// The entity is still considered alive until we call Refresh
+// the entity is still considered alive until we call Refresh
 for (auto e : manager.Entities()) {
-    // The entity will still be part of the iteration, because it hasn't been refreshed yet
+    // the entity will still be part of the iteration, because it hasn't been refreshed yet
 }
 
-// Call Refresh again to update the state, removing destroyed entities
+// call Refresh again to update the state, removing destroyed entities
 manager.Refresh();
 
-// Now the entity is excluded from future entity loops
+// now the entity is excluded from future entity loops
 ```
 
 In this example, the entity is only considered "alive" in the manager and part of the iteration after calling `manager.Refresh()`. Similarly, destroyed entities won't be removed from the loop until `Refresh()` is called again, ensuring there is no iterator invalidation while modifying the entity list.
 
-### Invalid Entities
+### Null Entities
 
-To represent an invalid entity, you can use a default-constructed `ecs::Entity{}`.
+To represent a null entity, you can use a default-constructed `ecs::Entity{}`.
+
 
 ```cpp
-ecs::Entity invalid_entity{}; // Using default-constructed entity
+ecs::Entity null_entity{}; // using default-constructed entity
 ```
 
 ### Entity Comparisons & Identity
 
 - Use `==` and `!=` to compare entity handles.
 - Use `entity.IsIdenticalTo(other)` to compare entity components (not just handles).
+- `Entity::operator bool()` returns true only if the entity is **alive**.
 
 Entity handles are hashable and usable in `std::unordered_map`.
 
@@ -186,11 +190,18 @@ Adding a component replaces the existing one if it already exists.
 
 > ⚠️ **Warning**: Adding a component to an entity may invalidate previously saved references to other entity components of the same type. This is because adding a new component to the contiguous container may cause it to expand or be relocated in memory.
 
+```cpp
+auto& pos = entity.TryAdd<Position>(0.f, 0.f);
+```
+
+Try add only adds a component if the entity does not already have it. It returns a reference to the new / existing component.
+
 ### Checking for Components
 
 ```cpp
 bool is_human = entity.Has<HumanComponent>();
 bool is_cyborg = entity.Has<HumanComponent, RobotComponent>();
+bool is_either = entity.HasAny<HumanComponent, RobotComponent>();
 ```
 
 ### Retrieving Components
@@ -200,7 +211,15 @@ auto& human = entity.Get<HumanComponent>();
 auto [robot, alien] = entity.Get<RobotComponent, AlienComponent>();
 ```
 
-> ⚠️ Accessing a missing component triggers a debug assertion. Advisable to check with `Has<T>()` first.
+> ⚠️ Accessing a missing component through `Get<T>()` triggers a debug assertion. Advisable to check with `Has<T>()` first or use `TryGet<T>()`.
+
+```cpp
+if (auto* pos = entity.TryGet<Position>()) {
+    pos->x += 1.f;
+}
+```
+
+Returns a component pointer or `nullptr` if the component does not exist.
 
 ### Removing Components
 
@@ -213,36 +232,193 @@ No-op if the component doesn't exist.
 
 ---
 
-## Systems
+## Views
 
-Systems are lambdas or loops that act on entities with specific component combinations.
-
-### All Entities
+Views provide filtered access to entities and optionally their components.
 
 ```cpp
 for (auto entity : manager.Entities()) {
-    entity.Add<ZombieComponent>();
+    // all alive entities
+}
+
+for (auto [entity, pos, vel] : manager.EntitiesWith<Position, Velocity>()) {
+    // entities that have Position and Velocity
+}
+
+for (auto entity : manager.EntitiesWithout<Sleeping>()) {
+    // entities missing Sleeping
 }
 ```
 
-### Entities With Components
+`Entities()` yields entity handles.
+`EntitiesWith<T...>()` yields `entity, component...`.
+`EntitiesWithout<T...>()` yields entity handles.
+
+Modifying components during iteration may affect which entities are yielded later in the loop.
+This is safe, but order-dependent (based on entity ID iteration).
+
+### View Utility Functions
+
+Views also provide a few utility helpers in addition to range-based iteration.
 
 ```cpp
-for (auto [entity, zombie, food] : manager.EntitiesWith<ZombieComponent, FoodComponent>()) {
-    if (food.amount < 10) {
-        // feed the zombie
-    }
-}
+// save the view
+auto view = manager.EntitiesWith<Position, Velocity>();
 ```
 
-### Entities Without Components
+#### Count and Collection
 
 ```cpp
-for (auto entity : manager.EntitiesWithout<FoodComponent, HungerShieldComponent>()) {
-    entity.Destroy();
-}
-manager.Refresh();
+std::size_t count = view.Count();
+auto entities = view.GetVector();
 ```
+
+### Accessing Elements
+
+```cpp
+// order follows internal entity iteration order
+auto entities = view.GetVector();
+
+// these are null entities if the view is empty
+auto first = view.Front();
+auto last  = view.Back();
+
+```
+
+#### Membership
+
+```cpp
+bool contains = view.Contains(entity);
+```
+
+#### Range functions
+
+Predicates to range functions can take in either just the entity or the entity together with the view components.
+
+```cpp
+bool any_fast = view.AnyOf([](auto entity, const auto& pos, const auto& vel) {
+    return vel.dx != 0.0f || vel.dy != 0.0f;
+});
+
+bool all_valid = view.AllOf([](auto entity) {
+    return entity.IsAlive();
+});
+
+std::size_t moving = view.CountIf([](auto entity, const auto& pos, const auto& vel) {
+    return vel.dx != 0.0f || vel.dy != 0.0f;
+});
+
+// returns null entity if nothing matches
+auto found = view.FindIf([](auto entity, const auto& pos) {
+    return pos.x > 100.f;
+});
+```
+
+#### ForEach
+
+```cpp
+view.ForEach([](auto entity, auto& pos, auto& vel) {
+    pos.x += vel.dx;
+    pos.y += vel.dy;
+});
+```
+
+#### Transform
+
+`Transform` projects the view into a `std::vector` of values.
+
+```cpp
+auto ids = view.Transform([](auto entity) {
+    return entity.GetId();
+});
+
+// std::vector<result>, result is deduced from the function return type
+auto speeds = view.Transform([](auto entity, const auto& pos, const auto& vel) {
+    return vel.dx * vel.dx + vel.dy * vel.dy;
+});
+```
+
+---
+
+## Hooks
+
+Hooks allow you to react to component lifecycle events.
+
+### Registering Hooks
+
+```cpp
+auto& hook = manager.OnConstruct<Position>();
+hook.Connect<&OnPositionCreated>();
+```
+
+You can register hooks for:
+
+* `OnConstruct<T>()`
+* `OnDestruct<T>()`
+* `OnUpdate<T>()`
+
+---
+
+### Hook Types
+
+#### Free function
+
+```cpp
+void OnPositionCreated(ecs::Entity e) {}
+
+manager.OnConstruct<Position>().Connect<&OnPositionCreated>();
+```
+
+#### Member function
+
+```cpp
+struct System {
+    void OnUpdate(ecs::Entity e) {}
+};
+
+System sys;
+manager.OnUpdate<Position>().Connect<System, &System::OnUpdate>(&sys);
+```
+
+#### Lambda (non-capturing only)
+
+```cpp
+manager.OnDestruct<Position>().Connect([](ecs::Entity e) {
+    // your cleanup logic
+});
+```
+
+---
+
+### Removing Hooks
+
+```cpp
+manager.RemoveOnConstruct<Position>(hook);
+```
+
+You must keep the returned hook instance if you wish to remove it later.
+
+---
+
+### Checking Hooks
+
+```cpp
+if (manager.HasOnUpdate<Position>(hook)) {
+    // hook is registered
+}
+```
+
+---
+
+### When Hooks Fire
+
+| Event     | Trigger                                             |
+| --------- | --------------------------------------------------- |
+| Construct | `Add<T>()` (new component)                          |
+| Update    | `Add<T>()` (replace existing) or manual `entity.Update<T>()`        |
+| Destruct  | `Remove<T>()`, entity destruction, or manager reset |
+
+> ⚠️ The update hook does not fire if the user changes a component directly through a reference. One solution is to provide set/get functions and manually trigger the hook via `entity.Update<T>()`.
 
 ---
 
@@ -252,9 +428,9 @@ manager.Refresh();
 
 ```cpp
 auto new_entity = entity.Copy();
-// Or:
+// or:
 auto new_entity = manager.CopyEntity(entity);
-// Or copy to existing:
+// or copy to existing:
 manager.CopyEntity(source_entity, destination_entity);
 ```
 
@@ -264,11 +440,12 @@ You can also copy specific components:
 auto new_entity = manager.CopyEntity<FoodComponent, HealthComponent>(entity);
 ```
 
-### Cloning Managers
+### Copying and Comparing Managers
 
 ```cpp
-auto new_manager = manager.Clone();
-assert(new_manager == manager); // Deep comparison
+auto new_manager = manager; // copy constructs a new manager (expensive)
+// Note: operator== compares identity (same instance), not deep equality
+assert(new_manager != manager);
 ```
 
 ### Introspection
@@ -282,10 +459,32 @@ std::size_t capacity = manager.Capacity();
 ### Capacity Management
 
 ```cpp
-manager.Reserve(100); // Preallocate for 100 entities
-manager.Clear();      // Remove all entities, keep capacity
-manager.Reset();      // Remove all entities and free memory
+manager.Reserve(100); // preallocate for 100 entities
+manager.Clear();      // remove all entities, keep capacity
+manager.Reset();      // remove all entities and free memory
 ```
+
+---
+
+## Serialization (Advanced)
+
+The ECS supports passing in custom archivers via `BaseManager<TArchiver>`.
+
+An archiver must implement methods like:
+
+* `WriteComponent<T>()`
+* `HasComponent<T>()`
+* `ReadComponent<T>()`
+* `WriteComponents<T>()`
+* `SetDenseSet<T>()`
+* `SetSparseSet<T>()`
+* `ReadComponents<T>()`
+* `GetDenseSet<T>()`
+* `GetSparseSet<T>()`
+
+The default `VoidArchiver` disables serialization.
+
+> ⚠️ Components must be default-constructible to support deserialization.
 
 ---
 
