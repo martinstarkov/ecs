@@ -30,11 +30,7 @@ bool TestViewUtility() {
 	// Contains
 	ECS_ASSERT(with_view.Contains(e1), "View Contains failed");
 	ECS_ASSERT(with_view.Contains(e2), "View Contains failed");
-
-	auto dead = e1.Copy();
-	dead.Destroy();
-	dead = {};
-	ECS_ASSERT(!with_view.Contains(dead), "View Contains should fail for null entity");
+	ECS_ASSERT(!with_view.Contains({}), "View Contains should fail for null entity");
 
 	// AnyOf
 	ECS_ASSERT(
