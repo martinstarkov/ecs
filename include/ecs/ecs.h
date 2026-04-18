@@ -209,6 +209,55 @@ struct aggregate_initializable<S> : std::false_type {};
 template <typename Struct, typename... Ts>
 constexpr bool is_aggregate_initializable_v = aggregate_initializable<Struct, Ts...>::value;
 
+template <typename T>
+struct is_tuple : std::false_type {};
+
+template <typename... Ts>
+struct is_tuple<std::tuple<Ts...>> : std::true_type {};
+
+template <typename T>
+static constexpr bool is_tuple_v = is_tuple<std::remove_cv_t<std::remove_reference_t<T>>>::value;
+
+template <typename F, typename Tuple, std::size_t... Is>
+static constexpr bool expand_tuple_v(std::index_sequence<Is...>) {
+	return std::is_invocable_v<F, std::tuple_element_t<Is, std::remove_reference_t<Tuple>>...>;
+}
+
+template <typename F, typename Tuple>
+static constexpr bool is_expanded_tuple_v = expand_tuple_v<F, Tuple>(
+	std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{}
+);
+
+template <typename F, typename Arg>
+decltype(auto) InvokePredicate(F&& func, Arg&& arg) {
+	using ArgType = decltype(arg);
+
+	if constexpr (is_tuple_v<ArgType>) {
+		if constexpr (std::is_invocable_v<F, ArgType>) {
+			// Predicate takes the tuple as a single argument
+			return std::invoke(std::forward<F>(func), std::forward<Arg>(arg));
+		} else if constexpr (is_expanded_tuple_v<F, ArgType>) {
+			// Predicate takes (entity, components...,)
+			return std::apply(
+				[&func](auto&&... xs) -> decltype(auto) {
+					return std::invoke(std::forward<F>(func), std::forward<decltype(xs)>(xs)...);
+				},
+				std::forward<Arg>(arg)
+			);
+		} else {
+			static_assert(
+				std::is_invocable_v<F, ArgType> || is_expanded_tuple_v<F, ArgType>,
+				"Predicate must be invocable with either the tuple itself or its expanded contents"
+			);
+		}
+	} else {
+		static_assert(
+			std::is_invocable_v<F, ArgType>, "Predicate must be invocable with the entity"
+		);
+		return std::invoke(std::forward<F>(func), std::forward<Arg>(arg));
+	}
+}
+
 } // namespace tt
 
 /// @brief No-op archiver. Provides empty (de)serialization methods as a placeholder when not
@@ -1955,7 +2004,7 @@ public:
 
 		Iterator() = default;
 
-		Iterator(Id entity, TView* view) : entity_(entity), view_(view) {
+		Iterator(Id entity, TView* view) : entity_{ entity }, view_{ view } {
 			SkipInvalid();
 			if (!view_->IsMaxEntity(entity_)) {
 				ECS_ASSERT(view_->EntityWithinLimit(entity_), "Out-of-range entity index");
@@ -2004,11 +2053,13 @@ public:
 		}
 
 		void ValidateDeref() const {
-			ECS_ASSERT(view_->Contains(entity), "No entity with given components in the view");
+			ECS_ASSERT(
+				view_->ContainsEntity(entity_), "No entity with given components in the view"
+			);
 		}
 
 		Id entity_{ 0 };
-		View* view_{ nullptr };
+		TView* view_{ nullptr };
 	};
 
 	using iterator		 = Iterator<View>;
@@ -2038,6 +2089,27 @@ public:
 		return const_iterator{ max_entity_, this };
 	}
 
+	[[nodiscard]] bool IsEmpty() const {
+		return begin() == end();
+	}
+
+	/// @return The front entity of the view. Null entity if the view is empty.
+	[[nodiscard]] EntityType Front() const {
+		if (IsEmpty()) {
+			return {};
+		}
+		return GetEntity(begin().GetEntityId());
+	}
+
+	[[nodiscard]] EntityType Back() const {
+		if (IsEmpty()) {
+			return {};
+		}
+		auto it{ end() };
+		--it;
+		return GetEntity(it.GetEntityId());
+	}
+
 	template <typename F>
 	void operator()(F&& func) {
 		for (auto it = begin(); it != end(); ++it) {
@@ -2052,36 +2124,116 @@ public:
 		}
 	}
 
+	/// @return True if any entity in the view satisfies the predicate.
+	template <typename F>
+	[[nodiscard]] bool AnyOf(F&& pred) const {
+		for (auto it{ begin() }; it != end(); ++it) {
+			if (tt::InvokePredicate(std::forward<F>(pred), GetComponentTuple(it.GetEntityId()))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/// @return True if all entities in the view satisfy the predicate, false if any entity does
+	/// not.
+	template <typename F>
+	[[nodiscard]] bool AllOf(F&& pred) const {
+		for (auto it{ begin() }; it != end(); ++it) {
+			if (!tt::InvokePredicate(std::forward<F>(pred), GetComponentTuple(it.GetEntityId()))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/// @return The count of entities in the view that satisfy the predicate.
+	template <typename F>
+	[[nodiscard]] std::size_t CountIf(F&& pred) const {
+		std::size_t count{ 0 };
+		for (auto it{ begin() }; it != end(); ++it) {
+			if (tt::InvokePredicate(std::forward<F>(pred), GetComponentTuple(it.GetEntityId()))) {
+				++count;
+			}
+		}
+		return count;
+	}
+
+	/// @return Null entity if no entity satisfies the predicate.
+	template <typename F>
+	[[nodiscard]] EntityType FindIf(F&& pred) const {
+		for (auto it{ begin() }; it != end(); ++it) {
+			auto value{ GetComponentTuple(it.GetEntityId()) };
+			if (tt::InvokePredicate(std::forward<F>(pred), value)) {
+				if constexpr (tt::is_tuple_v<decltype(value)>) {
+					return std::get<0>(value);
+				} else {
+					return value;
+				}
+			}
+		}
+		return {};
+	}
+
+	/// @brief Invokes the given function for each entity in the view.
 	template <typename F>
 	void ForEach(F&& func) const {
 		for (auto it = begin(); it != end(); ++it) {
-			std::invoke(std::forward<F>(func), GetEntity(it.GetEntityId()));
+			tt::InvokePredicate(std::forward<F>(func), GetComponentTuple(it.GetEntityId()));
 		}
 	}
 
+	/// @return A vector built by projecting each matching entity.
+	template <typename F>
+	[[nodiscard]] auto Transform(F&& func) const {
+		using Result = std::decay_t<decltype(tt::InvokePredicate(
+			std::forward<F>(func), GetComponentTuple(std::declval<Id>())
+		))>;
+
+		std::vector<Result> v;
+		for (auto it{ begin() }; it != end(); ++it) {
+			v.emplace_back(
+				tt::InvokePredicate(std::forward<F>(func), GetComponentTuple(it.GetEntityId()))
+			);
+		}
+		return v;
+	}
+
+	/// @return A vector of the entities in the view.
 	[[nodiscard]] std::vector<EntityType> GetVector() const {
 		std::vector<EntityType> v;
 		v.reserve(max_entity_);
-		ForEach([&](auto e) { v.push_back(e); });
+		for (auto it = begin(); it != end(); ++it) {
+			v.emplace_back(GetEntity(it.GetEntityId()));
+		}
 		v.shrink_to_fit();
 		return v;
 	}
 
+	/// @return The count of entities in the view.
 	[[nodiscard]] std::size_t Count() const {
 		std::size_t count{ 0 };
-		ForEach([&]([[maybe_unused]] auto) { ++count; });
+		for (auto it = begin(); it != end(); ++it) {
+			count++;
+		}
 		return count;
+	}
+
+	/// @return True if the view contains the given entity, false otherwise.
+	[[nodiscard]] bool Contains(const EntityType& entity) const {
+		return ContainsEntity(entity.GetId()) &&
+			   manager_->GetVersion(entity.GetId()) == entity.GetVersion();
 	}
 
 private:
 	friend class BaseManager<ArchiverType>;
 
-	[[nodiscard]] bool Contains(Id entity) const {
+	[[nodiscard]] bool ContainsEntity(Id entity) const {
 		return EntityWithinLimit(entity) && !IsMaxEntity(entity) && EntityMeetsCriteria(entity);
 	}
 
 	EntityType GetEntity(Id entity) const {
-		ECS_ASSERT(Contains(entity), "No entity with given components in the view");
+		ECS_ASSERT(ContainsEntity(entity), "No entity with given components in the view");
 		return EntityType{ entity, manager_->GetVersion(entity), manager_ };
 	}
 
@@ -2108,7 +2260,7 @@ private:
 	}
 
 	[[nodiscard]] decltype(auto) GetComponentTuple(Id entity) {
-		ECS_ASSERT(Contains(entity), "No entity with given components in the view");
+		ECS_ASSERT(ContainsEntity(entity), "No entity with given components in the view");
 		if constexpr (Criterion == LoopCriterion::WithComponents) {
 			return pools_.GetWithEntity(entity, manager_);
 		} else {
@@ -2117,7 +2269,7 @@ private:
 	}
 
 	[[nodiscard]] decltype(auto) GetComponentTuple(Id entity) const {
-		ECS_ASSERT(Contains(entity), "No entity with given components in the view");
+		ECS_ASSERT(ContainsEntity(entity), "No entity with given components in the view");
 		if constexpr (Criterion == LoopCriterion::WithComponents) {
 			return pools_.GetWithEntity(entity, manager_);
 		} else {
