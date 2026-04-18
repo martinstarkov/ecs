@@ -273,7 +273,7 @@ std::size_t count = view.Count();
 auto entities = view.GetVector();
 ```
 
-### Accessing Elements
+#### Accessing Elements
 
 ```cpp
 // order follows internal entity iteration order
