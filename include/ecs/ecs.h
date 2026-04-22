@@ -888,7 +888,7 @@ private:
 template <typename TArchiver>
 class BaseManager {
 public:
-	using ArchiverType = typename TArchiver;
+	using ArchiverType = TArchiver;
 
 	using EntityType = BaseEntity<TArchiver>;
 
